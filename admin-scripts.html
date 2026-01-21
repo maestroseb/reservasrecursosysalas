@@ -1,0 +1,3410 @@
+<script>
+  /* ========================================
+   ADMIN PANEL - JAVASCRIPT ORGANIZADO
+   
+   📋 MÓDULOS ORDENADOS POR FRECUENCIA DE USO:
+   1. Reservas (uso frecuente)
+   2. Recursos (uso moderado)
+   3. Disponibilidad (uso moderado)
+   4. Usuarios (uso ocasional)
+   5. Cursos (configuración anual)
+   6. Tramos (configuración anual)
+   7. Config (configuración inicial)
+   
+   💡 RAZÓN: Optimizado para debugging diario
+   ======================================== */
+
+/* ==========================================
+   1️⃣ ESTADO GLOBAL Y CONFIGURACIÓN
+   ========================================== */
+
+const AdminState = {
+  recursos: [],
+  tramos: [],
+  disponibilidad: [],
+  cursos: [],
+  usuarios: [],
+  reservas: [],
+  modoVisualizacionCursos: 'botones',
+  currentRecurso: null,
+  isEditMode: false,
+  tipoFiltroActivo: '', // '' = Todas, 'Sala', 'Dispositivo', 'Agrupado'
+  cambiosPendientes: false, // Indica si hay cambios sin guardar
+  ordenOriginal: {} // Guarda el orden original para detectar cambios
+};
+
+let adminHaCambiadoDatos = false; // Flag para saber si hay que recargar al volver
+
+/* ==========================================
+   2️⃣ UTILIDADES COMPARTIDAS
+   ========================================== */
+
+// Función segura para evitar inyecciones de código y errores visuales
+window.escaparHTML = (str) => {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+};
+
+/* LÓGICA DE CONFIRMACIÓN (MODAL INTELIGENTE) */
+let accionConfirmadaCallback = null;
+
+function mostrarConfirmacion(titulo, mensaje, callbackAccion) {
+  const modal = document.getElementById('modalConfirmacion');
+  
+  // 🛑 FIX: ESCAPE DE PRISIÓN (La magia está aquí)
+  // Si el modal está atrapado dentro de una pestaña, lo movemos al body
+  // para que se centre correctamente en medio de la ventana visible.
+  if (modal && modal.parentNode !== document.body) {
+    document.body.appendChild(modal);
+  }
+  
+  // 1. Configurar Textos
+  document.getElementById('confirmTitle').innerText = titulo;
+  document.getElementById('confirmMessage').innerHTML = mensaje;
+  
+  // 2. Guardar acción
+  accionConfirmadaCallback = callbackAccion;
+  
+  // 3. Configurar Botón Confirmar (Clonamos para limpiar eventos viejos)
+  const btn = document.getElementById('btnConfirmarAccion');
+  const newBtn = btn.cloneNode(true);
+  btn.parentNode.replaceChild(newBtn, btn);
+  
+  newBtn.addEventListener('click', function() {
+    if (accionConfirmadaCallback) accionConfirmadaCallback();
+    cerrarConfirmacion();
+  });
+
+  // 4. Mostrar
+  modal.classList.remove('hidden');
+}
+
+function cerrarConfirmacion() {
+  const modal = document.getElementById('modalConfirmacion');
+  if (modal) modal.classList.add('hidden');
+  accionConfirmadaCallback = null;
+}
+
+/* ==========================================================================
+   3️⃣ SISTEMA CORE UI: SISTEMA CENTRAL DE GUARDADO (FINAL 💎)
+   ========================================================================== */
+
+// --- 1. GESTOR DE BARRA DE GUARDADO (FIX MÓVIL + COLCHÓN DE AIRE ☁️) ---
+const SaveBarManager = {
+  show: function(subtitle, onSave, onDiscard) {
+    const bar = document.getElementById('globalSaveBar');
+    if(!bar) return;
+
+    // Fix Sticky: Mover al body si está atrapado
+    if (bar.parentNode !== document.body) {
+      document.body.appendChild(bar);
+    }
+
+    const btnSave = document.getElementById('btnGlobalSave');
+    const btnDiscard = document.getElementById('btnGlobalDiscard');
+    const subLabel = document.getElementById('saveBarSubtitle');
+
+    // 1. TEXTO (Solo si cambia)
+    if (subLabel && subLabel.textContent !== subtitle) {
+        subLabel.textContent = subtitle;
+    }
+
+    // 2. ACCIONES (Sin recrear botones para evitar parpadeo)
+    if(btnSave) btnSave.onclick = (e) => { e.preventDefault(); onSave(); };
+    if(btnDiscard) btnDiscard.onclick = (e) => { e.preventDefault(); onDiscard(); };
+
+    // 3. MOSTRAR + COLCHÓN
+    if (!bar.classList.contains('translate-y-0')) {
+        bar.classList.remove('translate-y-32', 'opacity-0', 'pointer-events-none');
+        bar.classList.add('translate-y-0', 'opacity-100', 'pointer-events-auto');
+        
+        // 🔥 Padding extra al body para que la barra no tape el final de la tabla en móvil
+        document.body.classList.add('pb-32'); 
+    }
+  },
+
+  hide: function() {
+    const bar = document.getElementById('globalSaveBar');
+    if(bar) {
+      if (bar.classList.contains('translate-y-0')) {
+          bar.classList.remove('translate-y-0', 'opacity-100', 'pointer-events-auto');
+          bar.classList.add('translate-y-32', 'opacity-0', 'pointer-events-none');
+          
+          // 🔥 Quitamos el padding extra
+          document.body.classList.remove('pb-32');
+
+          const btnSave = document.getElementById('btnGlobalSave');
+          const btnDiscard = document.getElementById('btnGlobalDiscard');
+          if(btnSave) btnSave.onclick = null;
+          if(btnDiscard) btnDiscard.onclick = null;
+      }
+    }
+  }
+};
+
+// Exponer globalmente
+window.showToast = showToast;
+window.hideToast = hideToast;
+window.SaveBarManager = SaveBarManager;
+
+
+// ========================================
+// 4️⃣ DATOS ESTÁTICOS: BASE DE DATOS DE ICONOS ICONIFY
+// ========================================
+
+const ICONIFY_ICONS = {
+  tecnologia: [
+    { icon: 'mdi:laptop', name: 'Portátil' },
+    { icon: 'mdi:desktop-tower', name: 'Ordenador' },
+    { icon: 'mdi:keyboard', name: 'Teclado' },
+    { icon: 'mdi:mouse', name: 'Ratón' },
+    { icon: 'mdi:printer', name: 'Impresora' },
+    { icon: 'mdi:printer-3d', name: 'Impresora 3D' },
+    { icon: 'mdi:cellphone', name: 'Móvil' },
+    { icon: 'mdi:tablet', name: 'Tablet' },
+    { icon: 'simple-icons:arduino', name: 'Arduino' },
+    { icon: 'simple-icons:raspberrypi', name: 'Raspberry Pi' },
+    { icon: 'simple-icons:microbit', name: 'Micro:bit' },
+    { icon: 'mdi:robot', name: 'Robot' },
+    { icon: 'carbon:3d-print-mesh', name: 'Impresión 3D' },
+    { icon: 'mdi:router-wireless', name: 'Router' },
+    { icon: 'mdi:projector', name: 'Proyector' }
+  ],
+  
+  ciencias: [
+    { icon: 'mdi:microscope', name: 'Microscopio' },
+    { icon: 'mdi:telescope', name: 'Telescopio' },
+    { icon: 'carbon:chemistry', name: 'Química' },
+    { icon: 'mdi:flask', name: 'Matraz' },
+    { icon: 'mdi:test-tube', name: 'Tubo ensayo' },
+    { icon: 'mdi:dna', name: 'ADN' },
+    { icon: 'carbon:chemistry-reference', name: 'Lab. Química' },
+    { icon: 'mdi:atom', name: 'Átomo' },
+    { icon: 'carbon:earth', name: 'Tierra' },
+    { icon: 'mdi:molecule', name: 'Molécula' },
+    { icon: 'carbon:microscope', name: 'Lab. Biología' },
+    { icon: 'mdi:bacteria', name: 'Bacteria' }
+  ],
+  
+  deportes: [
+    { icon: 'mdi:soccer', name: 'Fútbol' },
+    { icon: 'mdi:basketball', name: 'Baloncesto' },
+    { icon: 'mdi:volleyball', name: 'Voleibol' },
+    { icon: 'mdi:tennis', name: 'Tenis' },
+    { icon: 'mdi:table-tennis', name: 'Ping pong' },
+    { icon: 'mdi:badminton', name: 'Bádminton' },
+    { icon: 'mdi:dumbbell', name: 'Gimnasio' },
+    { icon: 'mdi:weight-lifter', name: 'Pesas' },
+    { icon: 'mdi:run', name: 'Atletismo' },
+    { icon: 'mdi:swim', name: 'Natación' },
+    { icon: 'mdi:yoga', name: 'Yoga' },
+    { icon: 'carbon:basketball', name: 'Cancha' }
+  ],
+  
+  arte: [
+    { icon: 'mdi:palette', name: 'Paleta' },
+    { icon: 'mdi:brush', name: 'Pincel' },
+    { icon: 'mdi:draw', name: 'Dibujo' },
+    { icon: 'mdi:music', name: 'Música' },
+    { icon: 'mdi:piano', name: 'Piano' },
+    { icon: 'mdi:guitar-acoustic', name: 'Guitarra' },
+    { icon: 'mdi:microphone', name: 'Micrófono' },
+    { icon: 'mdi:violin', name: 'Violín' },
+    { icon: 'mdi:drama-masks', name: 'Teatro' },
+    { icon: 'mdi:camera', name: 'Fotografía' },
+    { icon: 'mdi:video', name: 'Vídeo' },
+    { icon: 'carbon:music', name: 'Sala música' }
+  ],
+  
+  biblioteca: [
+    { icon: 'mdi:book-open-page-variant', name: 'Libro abierto' },
+    { icon: 'mdi:book-multiple', name: 'Libros' },
+    { icon: 'mdi:bookshelf', name: 'Estantería' },
+    { icon: 'mdi:library', name: 'Biblioteca' },
+    { icon: 'mdi:book-education', name: 'Educación' },
+    { icon: 'mdi:notebook', name: 'Cuaderno' },
+    { icon: 'carbon:book', name: 'Libro' },
+    { icon: 'mdi:magazine', name: 'Revista' }
+  ],
+  
+  idiomas: [
+    { icon: 'mdi:translate', name: 'Traducción' },
+    { icon: 'mdi:earth', name: 'Mundo' },
+    { icon: 'carbon:globe', name: 'Global' },
+    { icon: 'mdi:comment-text', name: 'Conversación' },
+    { icon: 'mdi:alphabet-latin', name: 'Alfabeto' },
+    { icon: 'carbon:language', name: 'Idiomas' }
+  ],
+  
+  naturaleza: [
+    { icon: 'mdi:flower', name: 'Flor' },
+    { icon: 'mdi:tree', name: 'Árbol' },
+    { icon: 'mdi:leaf', name: 'Hoja' },
+    { icon: 'carbon:tree', name: 'Bosque' },
+    { icon: 'mdi:recycle', name: 'Reciclaje' },
+    { icon: 'mdi:sprout', name: 'Brote' },
+    { icon: 'carbon:plant', name: 'Planta' },
+    { icon: 'mdi:water', name: 'Agua' }
+  ],
+  
+  espacios: [
+    { icon: 'mdi:school', name: 'Escuela' },
+    { icon: 'mdi:office-building', name: 'Edificio' },
+    { icon: 'mdi:door', name: 'Sala' },
+    { icon: 'mdi:sofa', name: 'Sala estar' },
+    { icon: 'carbon:cafe', name: 'Cafetería' },
+    { icon: 'mdi:table-chair', name: 'Comedor' },
+    { icon: 'carbon:building', name: 'Instalación' },
+    { icon: 'mdi:home', name: 'Casa' },
+    { icon: 'mdi:map-marker', name: 'Ubicación' },
+    { icon: 'carbon:education', name: 'Aula' }
+  ],
+  
+  ocio: [
+    { icon: 'mdi:gamepad-variant', name: 'Videojuegos' },
+    { icon: 'mdi:chess-king', name: 'Ajedrez' },
+    { icon: 'mdi:puzzle', name: 'Puzzle' },
+    { icon: 'mdi:cards', name: 'Cartas' },
+    { icon: 'mdi:dice-multiple', name: 'Juegos mesa' },
+    { icon: 'carbon:game-console', name: 'Consola' },
+    { icon: 'mdi:toy-brick', name: 'Construcción' },
+    { icon: 'mdi:cog', name: 'Taller' }
+  ]
+};
+
+
+/* ==========================================
+   5️⃣ INICIALIZACIÓN DE LISTENERS (MASTER MIX 🎧)
+   ========================================== */
+
+function setupAdminListeners() {
+
+  // 1. RECUPERAMOS TUS FIXES VISUALES ANTIGUOS
+  if (typeof fixMenusFlotantes === 'function') fixMenusFlotantes();
+  
+  // 2. INICIALIZAR COMPONENTES EXTERNOS (Iconify, etc.)
+  if (typeof setupIconifySelector === 'function') setupIconifySelector(); // Si usas la versión antigua
+  // Si usas mi versión nueva de iconos, no hace falta llamar a nada aquí, va solo.
+
+  // 3. GESTIÓN DE TABS (PESTAÑAS)
+  const tabs = document.querySelectorAll('.admin-subtab');
+  
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      // --- A. GESTIÓN VISUAL ---
+      // 1. Quitar active a todos los botones
+      tabs.forEach(t => t.classList.remove('active'));
+      // 2. Ocultar todas las secciones
+      document.querySelectorAll('.admin-section').forEach(sec => {
+        sec.classList.add('hidden');
+        sec.classList.remove('active'); // Por si acaso usabas esta clase
+      });
+      
+      // 3. Activar botón actual
+      tab.classList.add('active');
+      
+      // 4. Mostrar sección actual
+      const sectionName = tab.getAttribute('data-section');
+      const targetSection = document.getElementById(`admin-section-${sectionName}`);
+      
+      if (targetSection) {
+        targetSection.classList.remove('hidden');
+        targetSection.classList.add('active');
+      } else {
+        console.error(`❌ No existe la sección: admin-section-${sectionName}`);
+        return;
+      }
+
+      // --- B. RENDERIZADO DE DATOS (Carga lo que toca) ---
+      
+      try {
+        if (sectionName === 'recursos') renderTablaRecursos();
+        
+        if (sectionName === 'tramos') renderTablaTramos();
+        
+        if (sectionName === 'disponibilidad') {
+            if(typeof DispState !== 'undefined' && DispState.recursoId) {
+                cargarMatrizDisponibilidad(DispState.recursoId);
+            } else {
+                // Si es la primera vez, renderizamos el selector vacío o inicial
+                if(typeof renderSelectRecursos === 'function') renderSelectRecursos();
+            }
+        }
+        
+        if (sectionName === 'cursos') {
+             if (typeof inicializarCursos === 'function') inicializarCursos();
+             else renderTablaCursos();
+        }
+        
+        if (sectionName === 'usuarios') renderTablaUsuarios();
+        
+        if (sectionName === 'reservas') {
+             if(typeof renderTablaReservas === 'function') renderTablaReservas();
+        }
+        
+        if (sectionName === 'config') renderConfiguracion();
+        
+      } catch (err) {
+        console.error(`❌ Error pintando ${sectionName}:`, err);
+      }
+    });
+  });
+
+  // 4. BUSCADORES
+  const searchCursos = document.getElementById('buscadorCursos');
+  if (searchCursos) {
+    searchCursos.addEventListener('input', (e) => {
+       if(typeof filtrarCursos === 'function') filtrarCursos(e.target.value);
+    });
+  }
+}
+
+/* ==========================================
+   6️⃣ MÓDULOS DE GESTIÓN
+   ========================================== */
+
+/* ==========================================
+   6.1. GESTIÓN DE RESERVAS (OPTIMIZADO V3 - FINAL 🎯)
+   ========================================== */
+
+// --- 1. HELPERS SEGUROS (Locales para evitar conflictos) ---
+
+// Limpiador de HTML para evitar inyecciones (XSS)
+const safeHtmlRes = (str) => {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+};
+
+// Extractor de número de tramo (Usa el global si existe, sino usa este local)
+const getTramoNum = (idTramo) => {
+  if (typeof window.extraerNumeroTramo === 'function') {
+    return window.extraerNumeroTramo(idTramo);
+  }
+  // Fallback local por si acaso
+  const match = String(idTramo || '').match(/\d+/);
+  return match ? parseInt(match[0], 10) : 999;
+};
+
+// --- 2. INICIALIZACIÓN ---
+function inicializarReservas() {
+  // Validación robusta
+  if (!AdminState || !AdminState.reservas) return;
+  
+  console.log('📚 Inicializando Reservas...');
+  
+  // Renderizar la tabla por primera vez
+  renderTablaReservas();
+}
+
+// --- 3. RENDERIZADO PRINCIPAL ---
+function renderTablaReservas() {
+  const tbody = document.getElementById('tablaReservasBody');
+  if (!tbody) return;
+
+  // Si no hay datos, mostrar mensaje vacío
+  if (!AdminState.reservas || AdminState.reservas.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-12 text-gray-400 italic">No hay reservas registradas</td></tr>`;
+    document.getElementById('totalReservasCount').innerText = '0';
+    return;
+  }
+
+  // 🔥 TRUCO PRO: Guardar la posición del scroll antes de borrar la tabla
+  // Buscamos el contenedor padre que tiene el scroll (habitualmente el div que envuelve la tabla)
+  const scrollContainer = tbody.closest('.overflow-auto') || tbody.parentElement;
+  const prevScrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
+
+  // Limpiar tabla
+  tbody.innerHTML = '';
+  
+  // Obtener filtro
+  const filtro = document.getElementById('buscadorReservas')?.value.toLowerCase() || '';
+
+  // --- A. PREPARACIÓN DE MAPAS (Optimización O(1)) ---
+  const usuariosMap = {};
+  (AdminState.usuarios || []).forEach(u => {
+    const email = String(u.Email || u.Email_Usuario || '').toLowerCase();
+    if (email) usuariosMap[email] = u.Nombre || u.Nombre_Completo || u.Email_Usuario;
+  });
+
+  const recursosMap = {};
+  (AdminState.recursos || []).forEach(r => {
+    const id = String(r.id_recurso || r.ID_Recurso || '').toLowerCase();
+    if (id) recursosMap[id] = r.nombre_recurso || r.Nombre || r.nombre || r.ID_Recurso;
+  });
+
+  // --- B. PROCESADO Y FILTRADO ---
+  const hoyStr = new Date().toISOString().split('T')[0];
+
+  const lista = AdminState.reservas
+    .map(reserva => {
+      const emailKey = String(reserva.Email_Usuario || '').toLowerCase();
+      const recursoKey = String(reserva.ID_Recurso || '').toLowerCase();
+
+      return {
+        ...reserva,
+        // Usamos los mapas para obtener nombres bonitos
+        nombreUsuario: usuariosMap[emailKey] || reserva.Email_Usuario || 'Desconocido',
+        nombreRecurso: recursosMap[recursoKey] || reserva.ID_Recurso || 'Recurso eliminado'
+      };
+    })
+    .filter(r => {
+      if (!filtro) return true;
+      // Búsqueda en todos los campos relevantes
+      return (
+        String(r.nombreUsuario).toLowerCase().includes(filtro) ||
+        String(r.Email_Usuario).toLowerCase().includes(filtro) ||
+        String(r.nombreRecurso).toLowerCase().includes(filtro) ||
+        String(r.Fecha).toLowerCase().includes(filtro) ||
+        String(r.Estado).toLowerCase().includes(filtro)
+      );
+    });
+
+  // --- C. ORDENACIÓN MULTINIVEL ---
+  lista.sort((a, b) => {
+    const aFecha = a.Fecha || '';
+    const bFecha = b.Fecha || '';
+    const aEstado = (a.Estado || 'Confirmada').toLowerCase();
+    const bEstado = (b.Estado || 'Confirmada').toLowerCase();
+    
+    const aEsPasado = aFecha < hoyStr;
+    const bEsPasado = bFecha < hoyStr;
+    const aEsCancelada = aEstado === 'cancelada';
+    const bEsCancelada = bEstado === 'cancelada';
+    
+    // 1. Prioridad por Estado (Activas > Canceladas > Pasadas)
+    const aCat = aEsPasado ? 2 : (aEsCancelada ? 1 : 0);
+    const bCat = bEsPasado ? 2 : (bEsCancelada ? 1 : 0);
+    if (aCat !== bCat) return aCat - bCat;
+    
+    // 2. Fecha (Más reciente primero)
+    if (bFecha !== aFecha) return bFecha > aFecha ? 1 : -1;
+    
+    // 3. Recurso (Alfabético)
+    const aRecurso = (a.nombreRecurso || '').toLowerCase();
+    const bRecurso = (b.nombreRecurso || '').toLowerCase();
+    if (aRecurso !== bRecurso) return aRecurso.localeCompare(bRecurso);
+    
+    // 4. Tramo (Numérico usando el helper seguro)
+    return getTramoNum(a.ID_Tramo) - getTramoNum(b.ID_Tramo);
+  });
+
+  // Actualizar contador visual
+  const countSpan = document.getElementById('totalReservasCount');
+  if(countSpan) countSpan.innerText = lista.length;
+
+  if (lista.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-12 text-gray-400 bg-gray-50/50 italic">No hay coincidencias con la búsqueda</td></tr>`;
+    return;
+  }
+
+  // --- D. RENDERIZADO DOM (DocumentFragment) ---
+  const fragment = document.createDocumentFragment();
+
+  lista.forEach(reserva => {
+    const tr = document.createElement('tr');
+    const esPasado = (reserva.Fecha || '') < hoyStr;
+    const estado = reserva.Estado || 'Confirmada';
+    
+    // Clases dinámicas
+    tr.className = `group hover:bg-blue-50/30 transition-all border-b border-gray-100 ${esPasado ? 'opacity-60 grayscale-[0.8]' : ''}`;
+
+    // Fecha formateada (YYYY-MM-DD -> DD/MM/YYYY)
+    const fechaEsp = (reserva.Fecha && reserva.Fecha.includes('-')) 
+      ? reserva.Fecha.split('-').reverse().join('/') 
+      : reserva.Fecha;
+
+    // Badges de Estado
+    let badgeClass = 'bg-emerald-100 text-emerald-700 border-emerald-200';
+    let iconState = 'mdi:check-circle-outline';
+    
+    if(estado === 'Cancelada') { 
+        badgeClass = 'bg-red-50 text-red-600 border-red-100'; 
+        iconState = 'mdi:close-circle-outline'; 
+    } else if(estado === 'Pendiente') { 
+        badgeClass = 'bg-amber-50 text-amber-700 border-amber-100'; 
+        iconState = 'mdi:clock-outline'; 
+    }
+
+    // Datos sanitizados para HTML
+    const idReservaSafe = safeHtmlRes(reserva.ID_Reserva);
+    const nombreRecursoSafe = safeHtmlRes(reserva.nombreRecurso);
+    const nombreUsuarioSafe = safeHtmlRes(reserva.nombreUsuario);
+    const emailSafe = safeHtmlRes(reserva.Email_Usuario);
+    const cursoSafe = safeHtmlRes(reserva.Curso);
+    const tramoSafe = safeHtmlRes(reserva.ID_Tramo);
+
+    // Template HTML
+    tr.innerHTML = `
+      <td class="px-6 py-4 whitespace-nowrap">
+         <div class="flex flex-col">
+            <span class="text-sm font-bold text-gray-800 flex items-center gap-2">
+               <iconify-icon icon="mdi:calendar-month" class="text-gray-400"></iconify-icon> ${fechaEsp}
+            </span>
+            <span class="text-xs text-gray-500 ml-6 font-mono bg-gray-100 px-1.5 py-0.5 rounded w-fit">
+               ${tramoSafe}
+            </span>
+         </div>
+      </td>
+
+      <td class="px-6 py-4">
+         <div class="flex items-center gap-3">
+            <div class="h-9 w-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 shadow-sm border border-blue-100">
+               <iconify-icon icon="mdi:cube-outline" width="18"></iconify-icon>
+            </div>
+            <div class="flex flex-col min-w-0">
+               <span class="text-sm font-semibold text-gray-700 truncate max-w-[150px]" title="${nombreRecursoSafe}">${nombreRecursoSafe}</span>
+               <span class="text-[10px] text-gray-400 uppercase tracking-wider">${safeHtmlRes(reserva.ID_Recurso)}</span>
+            </div>
+         </div>
+      </td>
+
+      <td class="px-6 py-4">
+         <div class="flex flex-col min-w-0">
+            <span class="text-sm font-medium text-gray-900 truncate max-w-[180px]" title="${nombreUsuarioSafe}">${nombreUsuarioSafe}</span>
+            <span class="text-xs text-gray-500 truncate">${emailSafe}</span>
+            ${reserva.Curso ? `<span class="text-[10px] font-bold text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded w-fit mt-1">${cursoSafe}</span>` : ''}
+         </div>
+      </td>
+      
+      <td class="px-4 py-4 whitespace-nowrap text-center">
+         <span class="font-mono text-sm font-bold bg-gray-50 text-gray-600 px-2 py-1 rounded border border-gray-200">
+            ${parseInt(reserva.Cantidad) || 1}
+         </span>
+      </td>
+
+      <td class="px-6 py-4 whitespace-nowrap text-center">
+        <span class="px-2.5 py-1 rounded-full text-xs font-semibold border inline-flex items-center gap-1.5 ${badgeClass}">
+          <iconify-icon icon="${iconState}"></iconify-icon>
+          ${safeHtmlRes(estado)}
+        </span>
+      </td>
+
+      <td class="px-6 py-4 whitespace-nowrap text-right">
+        ${!esPasado && estado !== 'Cancelada' ? `
+          <button onclick="cancelarReserva('${idReservaSafe}')" 
+                  class="group/btn relative overflow-hidden bg-white text-red-500 hover:text-red-600 hover:bg-red-50 border border-red-200 hover:border-red-300 rounded-lg px-3 py-1.5 transition-all shadow-sm active:scale-95 flex items-center gap-1.5 ml-auto text-xs font-bold">
+            <iconify-icon icon="mdi:delete-outline" width="16"></iconify-icon>
+            <span>Cancelar</span>
+          </button>
+        ` : ''}
+      </td>
+    `;
+    fragment.appendChild(tr);
+  });
+  
+  tbody.appendChild(fragment);
+
+  // 🔥 RESTAURAR SCROLL: Devolver al usuario a donde estaba
+  if (scrollContainer) {
+    scrollContainer.scrollTop = prevScrollTop;
+  }
+}
+
+// --- 4. ACCIÓN: CANCELAR RESERVA ---
+function cancelarReserva(idReserva) {
+  mostrarConfirmacion(
+    '¿Cancelar esta reserva?', 
+    'Esta acción liberará el recurso y notificará al usuario.',
+    function() {
+      showLoading();
+      
+      google.script.run
+        .withSuccessHandler(res => {
+          hideLoading();
+          
+          if (res.success) {
+            // --- ACTUALIZACIÓN OPTIMISTA ---
+            const index = AdminState.reservas.findIndex(r => String(r.ID_Reserva) === String(idReserva));
+            
+            if (index !== -1) {
+                // Actualizamos el dato localmente
+                AdminState.reservas[index].Estado = 'Cancelada';
+                
+                // Repintamos la tabla (que ahora mantendrá el scroll)
+                renderTablaReservas();
+                
+                showToast('success', 'Reserva cancelada correctamente');
+            } else {
+                // Si no se encuentra (raro), recargamos todo
+                if (typeof loadAdminData === 'function') loadAdminData();
+            }
+
+          } else {
+            showToast('error', res.error || 'Error al cancelar');
+          }
+        })
+        .withFailureHandler(err => {
+          hideLoading();
+          showToast('error', 'Error de conexión: ' + err);
+        })
+        .adminCancelarReserva(idReserva);
+    }
+  );
+}
+
+// EXPORTS GLOBALES
+window.inicializarReservas = inicializarReservas;
+window.renderTablaReservas = renderTablaReservas;
+window.cancelarReserva = cancelarReserva;
+
+
+/* =========================================================
+   6.2. GESTIÓN DE RECURSOS (V4 - CIRUGÍA FINA & NO-RERENDER 🩺)
+   ========================================================= */
+
+// --- 1. CONSTANTES Y CONFIGURACIÓN ---
+
+const TIPO_OPTIONS = {
+  'Sala':        { label: 'Sala',        icon: 'mdi:door-open',    color: 'text-indigo-600', bg: 'bg-indigo-50' },
+  'Dispositivo': { label: 'Dispositivo', icon: 'mdi:laptop',       color: 'text-purple-600', bg: 'bg-purple-50' },
+  'Agrupado':    { label: 'Agrupado',    icon: 'mdi:group',        color: 'text-orange-600', bg: 'bg-orange-50' }
+};
+
+const ESTADO_OPTIONS = {
+  'Activo':        { label: 'Activo',        color: 'text-green-700',  bg: 'bg-green-100', border: 'border-green-200', hover: 'hover:bg-green-50' },
+  'Inactivo':      { label: 'Inactivo',      color: 'text-gray-500',   bg: 'bg-gray-100',  border: 'border-gray-200',  hover: 'hover:bg-gray-50' },
+  'Mantenimiento': { label: 'Mantenimiento', color: 'text-yellow-700', bg: 'bg-yellow-100', border: 'border-yellow-200', hover: 'hover:bg-yellow-50' }
+};
+
+// Generador de ID y Limpiador HTML
+const generateId = () => 'REC-' + Math.random().toString(36).slice(2, 7).toUpperCase();
+const safeHtmlRec = (str) => String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// --- 2. INICIALIZACIÓN ---
+function inicializarRecursos() {
+  if (!AdminState.recursos) return;
+  
+  // Clonamos los datos para tener la referencia "limpia"
+  // Importante: Esto define el punto cero para saber si hay cambios
+  AdminState.recursosOriginales = JSON.parse(JSON.stringify(AdminState.recursos));
+  AdminState.cambiosPendientes = false;
+  
+  renderTablaRecursos();
+}
+
+// --- 3. RENDERIZADO PRINCIPAL ---
+function renderTablaRecursos() {
+  const tbody = document.getElementById('tablaRecursosBody');
+  if (!tbody) return;
+  
+  // Preservar scroll
+  const scrollContainer = tbody.closest('.overflow-auto') || tbody.parentElement;
+  const prevScrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
+
+  tbody.innerHTML = '';
+
+  if (!AdminState.recursos || AdminState.recursos.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center py-12 text-gray-500 bg-gray-50/50 italic border-2 border-dashed border-gray-100 rounded-lg m-4">✨ No hay recursos. Crea el primero arriba.</td></tr>`;
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  const tiposKeys = Object.keys(TIPO_OPTIONS);
+  const estadosKeys = Object.keys(ESTADO_OPTIONS);
+
+  AdminState.recursos.forEach((recurso, index) => {
+    const tr = document.createElement('tr');
+    tr.className = 'hover:bg-gray-50 transition-colors border-b border-gray-100 group bg-white draggable-row';
+    tr.setAttribute('draggable', 'true');
+    tr.dataset.index = index;
+
+    // Datos actuales
+    const tipo = recurso.tipo || 'Dispositivo';
+    const estado = recurso.estado || 'Activo';
+    const tipoInfo = TIPO_OPTIONS[tipo] || TIPO_OPTIONS['Dispositivo'];
+    const estadoInfo = ESTADO_OPTIONS[estado] || ESTADO_OPTIONS['Activo'];
+    
+    // Validación visual
+    const nombreClass = recurso.nombre 
+        ? "border-transparent hover:border-gray-300 focus:border-blue-500" 
+        : "border-red-300 bg-red-50 focus:border-red-500 placeholder-red-400";
+
+    // --- HTML DROPDOWNS ---
+    const dropdownTipoHTML = tiposKeys.map(key => {
+      const opt = TIPO_OPTIONS[key];
+      return `<div onclick="event.stopPropagation(); actualizarDropdownRecurso(${index}, 'tipo', '${key}')" 
+                   class="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-0 group/opt">
+        <iconify-icon icon="${opt.icon}" class="${opt.color} group-hover/opt:scale-110 transition-transform"></iconify-icon>
+        <span class="text-xs text-gray-600">${opt.label}</span>
+      </div>`;
+    }).join('');
+
+    const dropdownEstadoHTML = estadosKeys.map(key => {
+      const opt = ESTADO_OPTIONS[key];
+      return `<div onclick="event.stopPropagation(); actualizarDropdownRecurso(${index}, 'estado', '${key}')" 
+                   class="px-4 py-2.5 cursor-pointer border-b border-gray-50 last:border-0 text-xs font-bold flex items-center gap-2 transition-colors ${opt.hover}">
+        <span class="${opt.color} whitespace-nowrap">${opt.label}</span>
+      </div>`;
+    }).join('');
+
+    tr.innerHTML = `
+      <td class="px-2 pt-2 pb-4 text-center cursor-grab text-gray-300 hover:text-blue-600 active:cursor-grabbing handle w-10 min-w-[40px] align-center">
+         <div class="flex items-center justify-center min-h-[40px] pt-2">
+            <iconify-icon icon="mdi:drag-horizontal-variant" width="24"></iconify-icon>
+         </div>
+      </td>
+
+      <td class="px-2 py-4 text-center w-16 min-w-[50px] align-center">
+         <div class="flex items-center justify-center min-h-[40px]">
+            <button onclick="abrirSelectorIconos(${index})"
+                    class="h-10 w-10 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 flex items-center justify-center transition-all border border-transparent hover:border-indigo-200 shadow-sm group-hover:scale-105">
+               <iconify-icon icon="${recurso.icono || 'mdi:cube-outline'}" class="text-2xl"></iconify-icon>
+            </button>
+         </div>
+      </td>
+
+      <td class="px-2 py-4 align-center w-24 min-w-[120px]">
+         <div class="flex items-center min-h-[40px]">
+            <input type="text" value="${safeHtmlRec(recurso.id_recurso)}" 
+                   class="font-mono text-xs text-blue-600 font-medium bg-gray-50 border border-gray-200 rounded-md px-2 py-1.5 w-full outline-none focus:border-blue-500 focus:bg-white transition-colors text-center"
+                   placeholder="ID"
+                   oninput="editarRecursoInput(this, ${index}, 'id_recurso')">
+         </div>
+      </td>
+
+      <td class="px-4 py-2 align-center min-w-[260px]">
+         <div class="flex flex-col gap-1"> 
+            <input type="text" value="${safeHtmlRec(recurso.nombre)}" placeholder="Nombre del recurso *"
+                   class="font-bold text-gray-800 text-sm w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none transition-colors ${nombreClass}"
+                   oninput="editarRecursoInput(this, ${index}, 'nombre')">
+            
+            <div class="relative flex items-center">
+               <iconify-icon icon="mdi:map-marker-outline" class="absolute left-0 text-gray-400 text-xs pointer-events-none"></iconify-icon>
+               <input type="text" value="${safeHtmlRec(recurso.ubicacion)}" placeholder="Ubicación"
+                      class="text-xs text-gray-500 w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none pl-4 pb-0.5"
+                      oninput="editarRecursoInput(this, ${index}, 'ubicacion')">
+            </div>
+         </div>
+      </td>
+
+      <td class="px-2 py-4 w-48 min-w-[150px] align-center relative">
+         <div id="container-tipo-${index}" class="relative w-full transition-all"> 
+            <button onclick="toggleDropdownRecurso(${index}, 'tipo', event)" 
+                    class="w-full flex items-center gap-2 px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-medium hover:border-blue-400 transition-colors shadow-sm text-left">
+                
+                <div id="preview-tipo-bg-${index}" class="p-1 rounded ${tipoInfo.bg} ${tipoInfo.color} leading-none">
+                    <iconify-icon id="preview-tipo-icon-${index}" icon="${tipoInfo.icon}"></iconify-icon>
+                </div>
+                
+                <span id="preview-tipo-text-${index}" class="flex-1 text-gray-700 truncate">${tipoInfo.label}</span>
+                <iconify-icon icon="mdi:chevron-down" class="text-gray-400 ml-auto"></iconify-icon>
+            </button>
+            
+            <div id="dropdown-tipo-${index}" class="hidden absolute top-full left-0 mt-1 w-full bg-white border border-gray-100 rounded-lg shadow-xl overflow-hidden animate-fade-in-up z-[60]">
+                ${dropdownTipoHTML}
+            </div>
+         </div>
+      </td>
+
+      <td class="px-4 py-4 text-center w-20 min-w-[80px] align-center">
+         <input type="number" value="${recurso.capacidad || 1}" min="1"
+                class="w-16 text-center text-sm font-medium bg-gray-50 border border-gray-200 rounded-lg py-1.5 focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none shadow-sm transition-all"
+                oninput="editarRecursoInput(this, ${index}, 'capacidad')">
+      </td>
+
+      <td class="px-4 py-4 text-center w-40 min-w-[140px] align-center relative">
+         <div id="container-estado-${index}" class="relative w-full transition-all">
+            <button id="btn-estado-main-${index}" 
+                    onclick="toggleDropdownRecurso(${index}, 'estado', event)"
+                    class="w-full text-xs font-bold px-3 py-1.5 rounded-full border shadow-sm transition-all flex items-center justify-center gap-1 whitespace-nowrap ${estadoInfo.bg} ${estadoInfo.color} ${estadoInfo.border} hover:opacity-90 active:scale-95">
+                <span id="preview-estado-text-${index}">${estadoInfo.label}</span>
+                <iconify-icon icon="mdi:chevron-down" class="opacity-50"></iconify-icon>
+            </button>
+            
+            <div id="dropdown-estado-${index}" class="hidden absolute top-full left-0 right-0 mt-1 bg-white border border-gray-100 rounded-xl shadow-xl overflow-hidden animate-fade-in-up min-w-[140px] z-[60]">
+                ${dropdownEstadoHTML}
+            </div>
+         </div>
+      </td>
+
+      <td class="px-4 py-4 text-right w-16 min-w-[64px] align-center">
+         <button onclick="eliminarRecursoFila(${index})" 
+                 class="text-gray-300 hover:text-red-600 p-2 rounded-xl hover:bg-red-50 transition-all opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                 title="Eliminar">
+            <iconify-icon icon="mdi:trash-can-outline" width="20"></iconify-icon>
+         </button>
+      </td>
+    `;
+    fragment.appendChild(tr);
+  });
+  
+  tbody.appendChild(fragment);
+
+  // Restaurar scroll
+  if (scrollContainer) scrollContainer.scrollTop = prevScrollTop;
+
+  // Drag & Drop
+  if (typeof enableGenericDragAndDrop === 'function' && AdminState.recursos.length > 0) {
+    enableGenericDragAndDrop('tablaRecursosBody', (oldIndex, newIndex) => {
+      // ✅ Usar arrayMove como en Tramos y Cursos
+      if (typeof arrayMove === 'function') {
+        arrayMove(AdminState.recursos, oldIndex, newIndex);
+      } else {
+        const item = AdminState.recursos.splice(oldIndex, 1)[0];
+        AdminState.recursos.splice(newIndex, 0, item);
+      }
+      renderTablaRecursos();
+      checkRecursosChanges();
+    });
+  }
+
+  checkRecursosChanges();
+}
+
+// --- 4. ACCIONES (Lógica Blindada) ---
+
+// A. Mostrar/Ocultar Dropdown (Z-Index Fix)
+function toggleDropdownRecurso(index, tipo, event) {
+  if (event) { event.stopPropagation(); event.preventDefault(); }
+
+  const dropdown = document.getElementById(`dropdown-${tipo}-${index}`);
+  const container = document.getElementById(`container-${tipo}-${index}`);
+  
+  const estabaAbierto = dropdown && !dropdown.classList.contains('hidden');
+
+  // Cerrar todos
+  document.querySelectorAll('[id^="dropdown-"]').forEach(d => d.classList.add('hidden'));
+  document.querySelectorAll('[id^="container-"]').forEach(c => c.classList.remove('z-50'));
+
+  if (!estabaAbierto && dropdown && container) {
+    dropdown.classList.remove('hidden');
+    container.classList.add('z-50'); // Elevar sobre lo demás
+    
+    // Auto-cierre
+    const closeListener = () => {
+        dropdown.classList.add('hidden');
+        container.classList.remove('z-50');
+        document.removeEventListener('click', closeListener);
+    };
+    setTimeout(() => document.addEventListener('click', closeListener), 0);
+  }
+}
+
+// B. ACTUALIZACIÓN QUIRÚRGICA (Aquí está la magia 🪄)
+// En lugar de renderizar toda la tabla, tocamos solo los elementos DOM necesarios
+function actualizarDropdownRecurso(index, campo, valor) {
+  // 1. Actualizar Dato en Memoria
+  AdminState.recursos[index][campo] = valor;
+
+  // 2. Actualizar Visualmente solo lo que cambió
+  if (campo === 'tipo') {
+      const info = TIPO_OPTIONS[valor];
+      const bgEl = document.getElementById(`preview-tipo-bg-${index}`);
+      const iconEl = document.getElementById(`preview-tipo-icon-${index}`);
+      const textEl = document.getElementById(`preview-tipo-text-${index}`);
+
+      if (bgEl && iconEl && textEl) {
+          // Limpiar clases antiguas
+          bgEl.className = `p-1 rounded ${info.bg} ${info.color}`;
+          iconEl.setAttribute('icon', info.icon);
+          textEl.innerText = info.label;
+      }
+  } 
+  else if (campo === 'estado') {
+      const info = ESTADO_OPTIONS[valor];
+      const btnEl = document.getElementById(`btn-estado-main-${index}`);
+      const textEl = document.getElementById(`preview-estado-text-${index}`);
+
+      if (btnEl && textEl) {
+          // Reemplazar clases base
+          btnEl.className = `w-full text-xs font-bold px-3 py-1.5 rounded-full border shadow-sm transition-all flex items-center justify-center gap-1 whitespace-nowrap ${info.bg} ${info.color} ${info.border} hover:opacity-90 active:scale-95`;
+          textEl.innerText = info.label;
+      }
+  }
+
+  // 3. Cerrar Dropdown
+  const dropdown = document.getElementById(`dropdown-${campo}-${index}`);
+  const container = document.getElementById(`container-${campo}-${index}`);
+  if (dropdown) dropdown.classList.add('hidden');
+  if (container) container.classList.remove('z-50');
+
+  // 4. Verificar Cambios
+  checkRecursosChanges();
+}
+
+// C. Edición de Inputs (Texto y Números)
+function editarRecursoInput(inputEl, index, campo) {
+  let valor = inputEl.value;
+  
+  // Forzar tipo numérico si es capacidad
+  if (campo === 'capacidad') {
+      valor = parseInt(valor, 10);
+      if (isNaN(valor)) valor = 1; // Fallback
+  }
+  
+  AdminState.recursos[index][campo] = valor;
+  
+  // Legacy support
+  if(campo === 'nombre') AdminState.recursos[index].nombre_recurso = valor;
+
+  // Validación visual simple
+  if (campo === 'nombre') {
+      if (!valor) inputEl.classList.add('border-red-300', 'bg-red-50', 'placeholder-red-400');
+      else inputEl.classList.remove('border-red-300', 'bg-red-50', 'placeholder-red-400');
+  }
+
+  checkRecursosChanges();
+}
+
+function agregarNuevoRecurso() {
+  const nuevoId = generateId();
+  
+  AdminState.recursos.push({
+    id_recurso: nuevoId,
+    nombre: '',
+    tipo: 'Dispositivo',
+    icono: 'mdi:cube-outline',
+    ubicacion: '',
+    capacidad: 1,
+    estado: 'Activo',
+  });
+  
+  renderTablaRecursos(); // Aquí sí render completo (hay nueva fila)
+  
+  setTimeout(() => { 
+    const tbody = document.getElementById('tablaRecursosBody'); 
+    if(tbody) tbody.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
+  }, 100);
+}
+
+function eliminarRecursoFila(index) {
+  mostrarConfirmacion('¿Eliminar Recurso?', 'Recuerda guardar cambios para confirmar.', () => {
+      AdminState.recursos.splice(index, 1);
+      renderTablaRecursos();
+      checkRecursosChanges();
+  });
+}
+
+// --- 5. GESTIÓN DE CAMBIOS (COMPARACIÓN PROFUNDA) ---
+
+function checkRecursosChanges() {
+  if (!AdminState.recursosOriginales) return;
+  
+  // Limpiamos los datos antes de comparar para evitar falsos positivos
+  // (A veces se cuelan propiedades extrañas en los objetos durante la ejecución)
+  const limpiar = (arr) => arr.map(r => ({
+      id: r.id_recurso,
+      nom: r.nombre,
+      tip: r.tipo,
+      cap: parseInt(r.capacidad), // Aseguramos comparación numérica
+      est: r.estado,
+      ubi: r.ubicacion || '',
+      ico: r.icono || 'mdi:cube-outline'
+
+  }));
+
+  const actualStr = JSON.stringify(limpiar(AdminState.recursos));
+  const originalStr = JSON.stringify(limpiar(AdminState.recursosOriginales));
+  
+  AdminState.cambiosPendientes = (actualStr !== originalStr);
+  
+  if (AdminState.cambiosPendientes) {
+    SaveBarManager.show("Recursos modificados", guardarCambiosRecursos, descartarCambiosRecursos);
+  } else {
+    SaveBarManager.hide();
+  }
+}
+
+function guardarCambiosRecursos() {
+  const invalidos = AdminState.recursos.filter(r => !r.nombre || r.nombre.trim() === '');
+  if (invalidos.length > 0) {
+      showToast('warning', `Falta el nombre en ${invalidos.length} recurso(s).`);
+      return;
+  }
+
+  showLoading();
+  google.script.run
+    .withSuccessHandler(res => {
+      hideLoading();
+      if (res.success) {
+        showToast('success', 'Recursos guardados');
+        AdminState.recursosOriginales = JSON.parse(JSON.stringify(AdminState.recursos));
+        AdminState.cambiosPendientes = false;
+        SaveBarManager.hide();
+        renderTablaRecursos();
+
+        // ✅ SINCRONIZAR con globalState (para la vista de usuario)
+        if (typeof globalState !== 'undefined') {
+          globalState.recursos = JSON.parse(JSON.stringify(AdminState.recursos));
+        }
+
+        adminHaCambiadoDatos = true;
+        if (typeof window.recargarDatosApp === 'function') {
+          window.recargarDatosApp();
+        }
+      } else {
+        showToast('error', res.error);
+      }
+    })
+    .withFailureHandler(err => { hideLoading(); showToast('error', err); })
+    .saveBatchRecursos(AdminState.recursos);
+}
+
+function descartarCambiosRecursos() {
+  mostrarConfirmacion('¿Descartar cambios?', 'Volverás al estado original.', () => {
+      AdminState.recursos = JSON.parse(JSON.stringify(AdminState.recursosOriginales));
+      AdminState.cambiosPendientes = false;
+      renderTablaRecursos();
+      SaveBarManager.hide();
+      showToast('info', 'Cambios descartados');
+  });
+}
+
+// EXPORTS
+window.inicializarRecursos = inicializarRecursos;
+window.renderTablaRecursos = renderTablaRecursos;
+window.toggleDropdownRecurso = toggleDropdownRecurso;
+window.actualizarDropdownRecurso = actualizarDropdownRecurso; // Nueva función
+window.editarRecursoInput = editarRecursoInput; // Renombrada para claridad
+window.agregarNuevoRecurso = agregarNuevoRecurso;
+window.eliminarRecursoFila = eliminarRecursoFila;
+window.guardarCambiosRecursos = guardarCambiosRecursos;
+window.descartarCambiosRecursos = descartarCambiosRecursos;
+
+
+/* =========================================================
+   6.3. GESTIÓN DE DISPONIBILIDAD (VERSIÓN FINAL BLINDADA 🛡️)
+   ========================================================= */
+
+const DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'];
+
+let DispState = {
+  recursoId: null,
+  datosOriginales: [], 
+  datosActuales: [],   
+  cambiosPendientes: false,
+  tramosCache: null
+};
+
+// 1. SELECTOR DE RECURSOS
+function renderSelectRecursos() {
+  const container = document.getElementById('dropdownRecursoDisp');
+  if(!container) return;
+  
+  container.innerHTML = '';
+  
+  const lista = [...AdminState.recursos].sort((a, b) => {
+      return (parseInt(a.orden) || 9999) - (parseInt(b.orden) || 9999);
+  });
+  
+  if (lista.length === 0) {
+    container.innerHTML = '<div class="p-4 text-center text-xs text-gray-400 italic">No hay recursos disponibles.</div>';
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+
+  lista.forEach(r => {
+    let icon = 'mdi:door-open'; 
+    let color = 'text-indigo-600 bg-indigo-50';
+    
+    if(r.tipo === 'Dispositivo') { icon = 'mdi:laptop'; color = 'text-purple-600 bg-purple-50'; }
+    if(r.tipo === 'Agrupado')    { icon = 'mdi:group';  color = 'text-orange-600 bg-orange-50'; }
+    if(r.icono && r.icono.includes(':')) icon = r.icono; 
+
+    const item = document.createElement('div');
+    item.className = "flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-0 transition-all group";
+    item.onclick = () => seleccionarRecursoDisp(r.id_recurso, r.nombre, icon, color);
+    
+    item.innerHTML = `
+      <div class="p-2 rounded-lg ${color} flex items-center justify-center group-hover:scale-110 transition-transform">
+         <iconify-icon icon="${icon}" class="text-lg"></iconify-icon>
+      </div>
+      <div class="flex flex-col">
+         <span class="text-sm font-bold text-gray-700">${r.nombre}</span>
+         <span class="text-[10px] text-gray-400 font-mono">${r.id_recurso}</span>
+      </div>
+    `;
+    fragment.appendChild(item);
+  });
+
+  container.appendChild(fragment);
+}
+
+function toggleRecursoDropdown(e) {
+  if(e) { e.stopPropagation(); e.preventDefault(); }
+  const drop = document.getElementById('dropdownRecursoDisp');
+  const estabaOculto = drop.classList.contains('hidden');
+  
+  document.querySelectorAll('.dropdown-menu').forEach(d => d.classList.add('hidden'));
+
+  if(estabaOculto) {
+      drop.classList.remove('hidden');
+      const closeFn = () => {
+          drop.classList.add('hidden');
+          document.removeEventListener('click', closeFn);
+      };
+      setTimeout(() => document.addEventListener('click', closeFn), 0);
+  }
+}
+
+function seleccionarRecursoDisp(id, nombre, icon, colorClass) {
+  const btn = document.getElementById('btnSelectorRecursoDisp');
+  btn.innerHTML = `
+      <div class="p-1.5 rounded-lg ${colorClass} flex items-center justify-center">
+          <iconify-icon icon="${icon}" class="text-lg"></iconify-icon>
+      </div>
+      <span class="flex-1 text-sm font-bold text-gray-800 truncate text-left">${nombre}</span>
+      <iconify-icon icon="mdi:chevron-down" class="text-gray-400"></iconify-icon>
+  `;
+  
+  document.getElementById('dropdownRecursoDisp').classList.add('hidden');
+  cargarMatrizDisponibilidad(id);
+}
+
+
+// 2. LÓGICA DE DATOS
+function cargarMatrizDisponibilidad(idRecurso) {
+  if (!idRecurso) return;
+  
+  DispState.recursoId = idRecurso;
+  const idTarget = String(idRecurso).trim().toLowerCase();
+  
+  const datosRaw = AdminState.disponibilidad.filter(d => {
+      const dId = String(d.id_recurso || '').trim().toLowerCase();
+      return dId === idTarget;
+  });
+
+  const datosNormalizados = datosRaw.map(d => ({
+    id_tramo: String(d.id_tramo).trim(),
+    dia_semana: String(d.dia_semana).trim(),
+    permitido: d.permitido || 'Si',
+    razon_bloqueo: d.razon_bloqueo || ''
+  }));
+
+  DispState.datosOriginales = JSON.parse(JSON.stringify(datosNormalizados));
+  DispState.datosActuales = JSON.parse(JSON.stringify(datosNormalizados));
+  
+  document.getElementById('emptyStateDisp').classList.add('hidden');
+  document.getElementById('contenedorMatriz').classList.remove('hidden');
+  document.getElementById('leyendaDisp').classList.remove('hidden');
+  
+  renderMatrizHTML();
+  checkDispChanges(); 
+}
+
+
+// 3. RENDERIZADO DE LA MATRIZ (CON SCROLL PRESERVATION 🛡️)
+function renderMatrizHTML() {
+  const tbody = document.getElementById('cuerpoMatriz');
+  if (!tbody) return;
+  
+  // ✅ Scroll Preservation
+  const scrollContainer = tbody.closest('.overflow-auto') || tbody.parentElement;
+  const scrollPos = scrollContainer ? scrollContainer.scrollTop : 0;
+  
+  tbody.innerHTML = '';
+  
+  if (!DispState.tramosCache) {
+      DispState.tramosCache = [...AdminState.tramos].sort((a,b) => (a.hora_inicio||'').localeCompare(b.hora_inicio||''));
+  }
+  const tramos = DispState.tramosCache;
+
+  const mapaDatos = new Map();
+  DispState.datosActuales.forEach(d => {
+      mapaDatos.set(`${d.id_tramo}-${d.dia_semana}`, d);
+  });
+
+  const fragment = document.createDocumentFragment();
+
+  tramos.forEach((tramo, index) => {
+    const tr = document.createElement('tr');
+    tr.className = "hover:bg-gray-50/50 transition-colors";
+    
+    tr.innerHTML = `
+      <td class="px-4 py-3 border-r border-gray-200 bg-gray-50 sticky left-0 z-20 w-32 min-w-[120px] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+        <div class="text-xs font-bold text-gray-700">${tramo.Nombre_Tramo || tramo.nombre}</div>
+        <div class="text-[10px] text-gray-400 font-mono mt-0.5 flex items-center gap-1">
+            <iconify-icon icon="mdi:clock-time-four-outline"></iconify-icon>
+            ${tramo.hora_inicio} - ${tramo.hora_fin}
+        </div>
+      </td>
+    `;
+
+    const esPrimeraFila = (index === 0);
+
+    DIAS.forEach(dia => {
+      const dato = mapaDatos.get(`${tramo.id_tramo}-${dia}`);
+      const td = document.createElement('td');
+      td.id = `td-${tramo.id_tramo}-${dia}`; // ID Único
+      
+      const configVisual = getConfigVisualCelda(dato, tramo.id_tramo, dia, esPrimeraFila);
+      td.className = configVisual.className;
+      td.innerHTML = configVisual.innerHTML;
+      
+      td.onclick = (e) => {
+        if(e.target.closest('.btn-info')) return; 
+        toggleCelda(tramo.id_tramo, dia, esPrimeraFila);
+      };
+
+      tr.appendChild(td);
+    });
+    fragment.appendChild(tr);
+  });
+  
+  tbody.appendChild(fragment);
+  
+  // ✅ Restaurar Scroll
+  if (scrollContainer) {
+    requestAnimationFrame(() => {
+      scrollContainer.scrollTop = scrollPos;
+    });
+  }
+}
+
+// ✅ HELPER VISUAL
+function getConfigVisualCelda(dato, idTramo, dia, esPrimeraFila) {
+    const esBloqueado = dato && dato.permitido === 'No';
+    const razon = dato ? (dato.razon_bloqueo || '') : '';
+    
+    const bgClass = esBloqueado ? "bg-red-50 hover:bg-red-100" : "bg-white hover:bg-green-50";
+    const className = `p-1 border border-gray-100 h-14 text-center transition-all duration-200 relative group min-w-[110px] ${bgClass}`;
+
+    const tooltipPos = esPrimeraFila ? 'top-full mt-2' : 'bottom-full mb-2';
+    const arrowBorder = esPrimeraFila ? 'border-l-transparent border-r-transparent border-b-gray-800' : 'border-l-transparent border-r-transparent border-t-gray-800';
+    const arrowPosClass = esPrimeraFila ? 'bottom-full' : 'top-full';
+
+    const tooltipHTML = razon ? `
+        <div class="absolute ${tooltipPos} left-1/2 -translate-x-1/2 px-3 py-2 bg-gray-800 text-white text-[11px] font-medium rounded-lg shadow-xl opacity-0 group-hover/btn:opacity-100 transition-all duration-200 pointer-events-none whitespace-normal w-48 text-center z-[100]">
+            ${razon}
+            <div class="absolute left-1/2 -translate-x-1/2 border-4 ${arrowBorder} ${arrowPosClass}"></div>
+        </div>
+    ` : '';
+
+    let innerHTML = '';
+    if (esBloqueado) {
+        innerHTML = `
+          <div class="relative w-full h-full flex flex-col items-center justify-center gap-1">
+             <div class="flex items-center gap-1">
+                 <iconify-icon icon="mdi:lock" class="text-red-500 text-lg animate-pulse-subtle"></iconify-icon>
+                 <span class="text-[10px] font-bold text-red-600 uppercase">Bloq.</span>
+             </div>
+             <div class="absolute top-1 right-1 group/btn"> 
+                 ${tooltipHTML}
+                 <button onclick="editarNota('${idTramo}', '${dia}')" 
+                         title="Editar motivo"
+                         class="btn-info w-6 h-6 rounded-full bg-white hover:bg-blue-50 text-red-400 hover:text-blue-600 border border-red-100 hover:border-blue-200 shadow-sm flex items-center justify-center transition-all transform hover:scale-110">
+                    <iconify-icon icon="${razon ? 'mdi:message-text' : 'mdi:pencil-outline'}" class="text-xs"></iconify-icon>
+                 </button>
+             </div>
+          </div>
+        `;
+    } else {
+        innerHTML = `
+          <div class="w-full h-full flex items-center justify-center opacity-0 group-hover:opacity-40 transition-opacity">
+             <iconify-icon icon="mdi:check-circle" class="text-green-500 text-2xl"></iconify-icon>
+          </div>
+        `;
+    }
+
+    return { className, innerHTML };
+}
+
+
+// 4. INTERACCIÓN (ACTUALIZACIÓN QUIRÚRGICA 💉)
+function toggleCelda(idTramo, dia, esPrimeraFila = false) {
+  idTramo = String(idTramo);
+  
+  let index = DispState.datosActuales.findIndex(d => 
+    d.id_tramo === idTramo && d.dia_semana === dia
+  );
+  
+  let datoActualizado = null;
+
+  if (index === -1) {
+    // Si no existe, creamos bloqueo
+    datoActualizado = { id_tramo: idTramo, dia_semana: dia, permitido: 'No', razon_bloqueo: '' };
+    DispState.datosActuales.push(datoActualizado);
+  } else {
+    // Si existe, lo modificamos (PERO NO LO BORRAMOS)
+    const actual = DispState.datosActuales[index];
+    
+    if (actual.permitido === 'No') {
+        // Desbloquear
+        actual.permitido = 'Si';
+        datoActualizado = actual; // Mantenemos el objeto para enviarlo al backend
+    } else {
+        // Bloquear
+        actual.permitido = 'No';
+        datoActualizado = actual;
+    }
+  }
+  
+  actualizarCeldaVisualmente(idTramo, dia, datoActualizado, esPrimeraFila);
+  checkDispChanges();
+}
+
+function actualizarCeldaVisualmente(idTramo, dia, dato, esPrimeraFila) {
+    const tdId = `td-${idTramo}-${dia}`;
+    const td = document.getElementById(tdId);
+    
+    if (!td) {
+        console.warn(`Celda ${tdId} no encontrada, forzando repintado completo.`);
+        renderMatrizHTML();
+        return;
+    }
+    
+    if (esPrimeraFila === undefined) {
+        const tr = td.parentElement;
+        const tbody = tr.parentElement;
+        esPrimeraFila = (Array.from(tbody.children).indexOf(tr) === 0);
+    }
+
+    const config = getConfigVisualCelda(dato, idTramo, dia, esPrimeraFila);
+    td.className = config.className;
+    td.innerHTML = config.innerHTML;
+}
+
+
+// 5. GESTIÓN DE CAMBIOS Y GUARDADO
+const getDispKey = (arr) => arr.map(d => `${d.id_tramo}|${d.dia_semana}|${d.permitido}|${d.razon_bloqueo}`).sort();
+
+function checkDispChanges() {
+  const normalize = (list) => {
+    return list
+      .filter(d => {
+          const tieneNota = d.razon_bloqueo && d.razon_bloqueo.trim().length > 0;
+          return d.permitido === 'No' || tieneNota;
+      })
+      .map(d => `${d.id_tramo}|${d.dia_semana}|${d.permitido}|${(d.razon_bloqueo || '').trim()}`)
+      .sort();
+  };
+
+  const originalStr = JSON.stringify(normalize(DispState.datosOriginales));
+  const actualStr = JSON.stringify(normalize(DispState.datosActuales));
+  
+  const hayCambios = (originalStr !== actualStr);
+  DispState.cambiosPendientes = hayCambios;
+  
+  if (hayCambios) {
+    SaveBarManager.show("Horarios modificados", guardarCambiosDisp, descartarCambiosDisp);
+  } else {
+    SaveBarManager.hide();
+  }
+}
+
+function guardarCambiosDisp() {
+  if (!DispState.recursoId) {
+      showToast('error', 'Error: No hay recurso seleccionado');
+      return;
+  }
+
+  showLoading();
+  
+  const payload = DispState.datosActuales.map(d => ({
+    id_recurso: DispState.recursoId,
+    id_tramo: d.id_tramo,
+    dia_semana: d.dia_semana,
+    permitido: d.permitido,
+    razon_bloqueo: d.razon_bloqueo
+  }));
+  
+  google.script.run
+    .withSuccessHandler(res => {
+      hideLoading();
+      if(res.success) {
+        showToast('success', 'Disponibilidad guardada');
+        DispState.datosOriginales = JSON.parse(JSON.stringify(DispState.datosActuales));
+        AdminState.disponibilidad = AdminState.disponibilidad.filter(d => String(d.id_recurso) !== String(DispState.recursoId));
+        payload.forEach(p => AdminState.disponibilidad.push(p));
+        checkDispChanges();
+      } else {
+        showToast('error', res.error);
+      }
+    })
+    .withFailureHandler(err => { hideLoading(); showToast('error', err); })
+    .saveBatchDisponibilidad(payload);
+}
+
+function descartarCambiosDisp() {
+  mostrarConfirmacion('¿Descartar cambios?', 'Volverás a la configuración guardada.', () => {
+      DispState.datosActuales = JSON.parse(JSON.stringify(DispState.datosOriginales));
+      renderMatrizHTML();
+      checkDispChanges();
+      showToast('info', 'Cambios revertidos');
+  });
+}
+
+// 6. GESTIÓN DEL MODAL
+
+function ensureModalExists() {
+    // Limpieza de modal antiguo
+    const oldModal = document.getElementById('modalEditarNota');
+    if (oldModal) {
+        oldModal.remove();
+        console.log("[Modal] Limpieza de versión anterior");
+    }
+
+    // Prevenir duplicados
+    if (window.isCreatingModal) return;
+    window.isCreatingModal = true;
+
+    const modalHTML = `
+    <div id="modalEditarNota" class="fixed inset-0 z-[9999] hidden" role="dialog" aria-modal="true">
+        <!-- Overlay con onclick directo -->
+        <div class="fixed inset-0 bg-gray-900/50 backdrop-blur-sm transition-opacity" 
+             onclick="window.cerrarModalEditarNota()"></div>
+        
+        <!-- Container centrado -->
+        <div class="fixed inset-0 z-10 flex min-h-full items-center justify-center p-4">
+            
+            <!-- Panel (con stopPropagation para que clicks internos no cierren) -->
+            <div onclick="event.stopPropagation()" 
+                 class="relative transform overflow-hidden rounded-xl bg-white text-left shadow-2xl transition-all w-full max-w-lg scale-95 opacity-0 duration-200" 
+                 id="modalPanelNota">
+                
+                <div class="bg-white px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
+                    <div class="sm:flex sm:items-start gap-4">
+                        <div class="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-blue-50 sm:mx-0 sm:h-10 sm:w-10">
+                            <iconify-icon icon="mdi:message-draw" class="text-blue-600 text-xl"></iconify-icon>
+                        </div>
+                        <div class="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left w-full">
+                            <h3 class="text-base font-semibold leading-6 text-gray-900">Motivo del bloqueo</h3>
+                            <div class="mt-2">
+                                <p class="text-sm text-gray-500 mb-3">Razón del bloqueo (ej: Mantenimiento, Limpieza).</p>
+                                <textarea id="notaTextarea" rows="3" 
+                                    class="w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6 p-3"
+                                    placeholder="Escribe aquí..."></textarea>
+                                <input type="hidden" id="notaTramoId">
+                                <input type="hidden" id="notaDia">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-gray-50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6 gap-2">
+                    <button type="button" 
+                            onclick="window.guardarNotaModal()" 
+                            class="inline-flex w-full justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 sm:ml-3 sm:w-auto transition-colors">
+                        Guardar Nota
+                    </button>
+                    <button type="button" 
+                            onclick="window.cerrarModalEditarNota()" 
+                            class="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto transition-colors">
+                        Cancelar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>`;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    window.isCreatingModal = false;
+    console.log("[Modal] Creado correctamente");
+}
+
+function editarNota(idTramo, dia) {
+  console.log(`[Modal] Abriendo para ${idTramo}-${dia}`);
+  ensureModalExists();
+  
+  const dato = DispState.datosActuales.find(d => 
+    String(d.id_tramo).trim() === String(idTramo).trim() && 
+    d.dia_semana === dia
+  );
+  
+  const txt = document.getElementById('notaTextarea');
+  const inpId = document.getElementById('notaTramoId');
+  const inpDia = document.getElementById('notaDia');
+
+  if (txt) txt.value = dato ? (dato.razon_bloqueo || '') : '';
+  if (inpId) inpId.value = idTramo;
+  if (inpDia) inpDia.value = dia;
+  
+  const modal = document.getElementById('modalEditarNota');
+  const panel = document.getElementById('modalPanelNota');
+  
+  if (modal && panel) {
+      modal.classList.remove('hidden');
+      requestAnimationFrame(() => {
+          panel.classList.remove('scale-95', 'opacity-0');
+          panel.classList.add('scale-100', 'opacity-100');
+          // Foco al textarea después de la animación
+          setTimeout(() => txt && txt.focus(), 50);
+      });
+  } else {
+      console.error("[Modal] No se encontraron elementos del modal");
+  }
+}
+
+function cerrarModalEditarNota() {
+  console.log("[Modal] Cerrando...");
+  const modal = document.getElementById('modalEditarNota');
+  const panel = document.getElementById('modalPanelNota');
+  
+  if (!modal || !panel) {
+      console.warn("[Modal] Elementos no encontrados para cerrar");
+      return;
+  }
+
+  // Animar salida
+  panel.classList.remove('scale-100', 'opacity-100');
+  panel.classList.add('scale-95', 'opacity-0');
+  
+  // Ocultar después de animación
+  setTimeout(() => {
+      modal.classList.add('hidden');
+      console.log("[Modal] Cerrado correctamente");
+  }, 200);
+}
+
+function guardarNotaModal() {
+  console.log("[Modal] Guardando nota...");
+  const txt = document.getElementById('notaTextarea');
+  if (!txt) {
+    console.error("[Modal] Textarea no encontrado");
+    return;
+  }
+
+  const texto = txt.value.trim();
+  const idTramo = document.getElementById('notaTramoId')?.value;
+  const dia = document.getElementById('notaDia')?.value;
+  
+  if (!idTramo || !dia) {
+    console.error("[Modal] Datos de tramo/día no encontrados");
+    return;
+  }
+  
+  let dato = DispState.datosActuales.find(d => 
+    String(d.id_tramo).trim() === String(idTramo).trim() && 
+    d.dia_semana === dia
+  );
+
+  if (dato) {
+      dato.razon_bloqueo = texto;
+      console.log("[Modal] Nota actualizada en dato existente");
+  } else if (texto) {
+      dato = { 
+        id_tramo: idTramo, 
+        dia_semana: dia, 
+        permitido: 'No', 
+        razon_bloqueo: texto 
+      };
+      DispState.datosActuales.push(dato);
+      console.log("[Modal] Nueva nota creada");
+  }
+  
+  cerrarModalEditarNota();
+  actualizarCeldaVisualmente(idTramo, dia, dato);
+  checkDispChanges();
+}
+
+// =========================================================
+// EXPORTS (Asegurar acceso global)
+// =========================================================
+window.renderSelectRecursos = renderSelectRecursos;
+window.toggleRecursoDropdown = toggleRecursoDropdown;
+window.seleccionarRecursoDisp = seleccionarRecursoDisp;
+window.editarNota = editarNota;
+window.guardarNotaModal = guardarNotaModal;
+window.cerrarModalEditarNota = cerrarModalEditarNota;
+window.guardarCambiosDisp = guardarCambiosDisp;
+window.descartarCambiosDisp = descartarCambiosDisp;
+
+
+/* ==========================================
+   6.4. GESTIÓN DE USUARIOS (Surgical Update ⚡)
+   ========================================== */
+
+// HELPER: Validación y Seguridad
+const esEmailValido = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+// 0. Inicialización
+function inicializarUsuarios() {
+  if (!AdminState.usuarios) return;
+  
+  // Normalizar
+  AdminState.usuarios = AdminState.usuarios.map(u => ({
+      ...u,
+      Nombre: u.Nombre || u.Nombre_Completo || '',
+      Email: u.Email || u.Email_Usuario || '',
+      Admin: (u.Admin === true || u.Admin === "TRUE" || u.Admin === "Si"),
+      Activo: (u.Activo === true || u.Activo === "TRUE" || u.Activo === "Si")
+  }));
+
+  AdminState.usuariosOriginales = JSON.parse(JSON.stringify(AdminState.usuarios));
+  renderTablaUsuarios();
+}
+
+// 1. Renderizar Tabla (Con 'data-usuario-index')
+function renderTablaUsuarios() {
+  const tbody = document.getElementById('tablaUsuariosBody');
+  if (!tbody) return;
+  
+  // Guardar scroll
+  const scrollPos = tbody.parentElement ? tbody.parentElement.scrollTop : 0;
+
+  // Asegurar table-fixed por si acaso
+  const tabla = tbody.closest('table');
+  if (tabla && !tabla.classList.contains('table-fixed')) {
+      tabla.classList.add('table-fixed');
+  }
+
+  tbody.innerHTML = '';
+  const filtro = (document.getElementById('buscadorUsuarios')?.value || '').toLowerCase();
+  
+  const lista = AdminState.usuarios.filter(u => {
+    const nombre = u.Nombre.toLowerCase();
+    const email = u.Email.toLowerCase();
+    return nombre.includes(filtro) || email.includes(filtro);
+  });
+
+  const countSpan = document.getElementById('totalUsuariosCount');
+  if(countSpan) {
+      const total = AdminState.usuarios.length;
+      countSpan.innerText = lista.length === total ? total : `${lista.length} / ${total}`;
+  }
+
+  if (lista.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center py-12 text-gray-400">No se encontraron usuarios</td></tr>`;
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+
+  lista.forEach((usuario) => {
+    const index = AdminState.usuarios.indexOf(usuario); // Índice REAL
+    const rnd = Math.random().toString(36).substring(7);
+    const inicial = usuario.Nombre.charAt(0).toUpperCase() || '?';
+
+    const tr = document.createElement('tr');
+    tr.className = 'hover:bg-gray-50 transition-colors border-b border-gray-100 group';
+    
+    // ✅ CLAVE 1: Añadimos el índice como atributo para encontrarlo luego
+    tr.setAttribute('data-usuario-index', index);
+
+    tr.innerHTML = `
+      <td class="pl-6 pr-2 py-4 whitespace-nowrap">
+        <div class="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold border border-blue-200 shadow-sm select-none">
+          ${inicial}
+        </div>
+      </td>
+
+      <td class="px-2 py-3">
+        <div class="flex flex-col gap-1 w-full">
+          <input type="text" 
+                 value="${escaparHTML(usuario.Nombre)}" 
+                 oninput="editarUsuario(${index}, 'Nombre', this.value)"
+                 class="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none text-sm font-medium text-gray-900 px-1 transition-colors truncate"
+                 autocomplete="off" name="user_name_${rnd}">
+                 
+          <input type="text" 
+                 value="${escaparHTML(usuario.Email)}"
+                 oninput="editarUsuario(${index}, 'Email', this.value)"
+                 class="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none text-xs text-gray-500 px-1 transition-colors truncate ${!esEmailValido(usuario.Email) && usuario.Email ? 'text-red-500 font-bold' : ''}"
+                 autocomplete="off" name="user_email_${rnd}">
+        </div>
+      </td>
+
+      <td class="px-2 py-3 whitespace-nowrap text-center">
+        <div class="flex flex-col items-center justify-center cursor-pointer group/toggle" onclick="toggleUsuarioPropiedad(${index}, 'Admin')">
+            <div class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${usuario.Admin ? 'bg-purple-600' : 'bg-gray-200 group-hover/toggle:bg-gray-300'}">
+                <span class="translate-x-1 inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${usuario.Admin ? 'translate-x-5' : 'translate-x-1'}"></span>
+            </div>
+            <span class="text-[10px] text-gray-400 mt-1 select-none w-full text-center block h-3 leading-3">
+                ${usuario.Admin ? 'Admin' : 'Usuario'}
+            </span>
+        </div>
+      </td>
+
+      <td class="px-2 py-3 whitespace-nowrap text-center">
+        <div class="flex flex-col items-center justify-center cursor-pointer group/toggle" onclick="toggleUsuarioPropiedad(${index}, 'Activo')">
+            <div class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${usuario.Activo ? 'bg-green-500' : 'bg-gray-200 group-hover/toggle:bg-gray-300'}">
+                <span class="translate-x-1 inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${usuario.Activo ? 'translate-x-5' : 'translate-x-1'}"></span>
+            </div>
+             <span class="text-[10px] text-gray-400 mt-1 select-none w-full text-center block h-3 leading-3">
+                ${usuario.Activo ? 'Activo' : 'Inactivo'}
+             </span>
+        </div>
+      </td>
+      
+      <td class="px-4 py-3 whitespace-nowrap text-right">
+         <button onclick="eliminarUsuario(${index})" 
+                class="text-gray-300 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
+          <iconify-icon icon="mdi:trash-can-outline" width="20"></iconify-icon>
+        </button>
+      </td>
+    `;
+    fragment.appendChild(tr);
+  });
+  
+  tbody.appendChild(fragment);
+  if(tbody.parentElement) tbody.parentElement.scrollTop = scrollPos;
+  actualizarBotonGuardarUsuarios();
+}
+
+// 2. Toggle "QUIRÚRGICO" (Sin repintar toda la tabla)
+function toggleUsuarioPropiedad(index, propiedad) {
+  // 1. Actualizar memoria (Modelo)
+  AdminState.usuarios[index][propiedad] = !AdminState.usuarios[index][propiedad];
+  const nuevoValor = AdminState.usuarios[index][propiedad];
+  
+  // 2. Buscar fila en DOM (Vista)
+  const tbody = document.getElementById('tablaUsuariosBody');
+  const fila = tbody.querySelector(`tr[data-usuario-index="${index}"]`);
+  
+  // Fallback de seguridad: Si no encontramos la fila (ej. filtro raro), repintamos todo
+  if (!fila) {
+    renderTablaUsuarios();
+    checkUsuariosChanges();
+    return;
+  }
+  
+  // 3. Modificar SOLO el elemento afectado
+  // Columna 2 = Admin (índice 2 en children porque Avatar es 0 y Datos es 1)
+  // Columna 3 = Activo (índice 3 en children)
+  const colIndex = propiedad === 'Admin' ? 2 : 3;
+  const celda = fila.children[colIndex];
+  
+  if (celda) {
+      const slider = celda.querySelector('.inline-flex');
+      const circle = slider.querySelector('span');
+      const label = celda.querySelector('.text-\\[10px\\]');
+      
+      // Aplicar clases según estado
+      if (nuevoValor) {
+        // ACTIVO (ON)
+        slider.className = `relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${propiedad === 'Admin' ? 'bg-purple-600' : 'bg-green-500'}`;
+        circle.className = 'translate-x-1 inline-block h-3 w-3 transform rounded-full bg-white transition-transform translate-x-5';
+        label.textContent = propiedad === 'Admin' ? 'Admin' : 'Activo';
+      } else {
+        // INACTIVO (OFF)
+        slider.className = 'relative inline-flex h-5 w-9 items-center rounded-full transition-colors bg-gray-200 group-hover/toggle:bg-gray-300';
+        circle.className = 'translate-x-1 inline-block h-3 w-3 transform rounded-full bg-white transition-transform translate-x-1';
+        label.textContent = propiedad === 'Admin' ? 'Usuario' : 'Inactivo';
+      }
+  }
+  
+  // 4. Check cambios (SaveBar)
+  checkUsuariosChanges();
+}
+
+// 3. Edición
+function editarUsuario(index, campo, valor) {
+  AdminState.usuarios[index][campo] = valor;
+  checkUsuariosChanges();
+}
+
+// 4. Agregar
+function agregarNuevoUsuario() {
+  const buscador = document.getElementById('buscadorUsuarios');
+  if(buscador) buscador.value = '';
+
+  const nuevo = { Nombre: '', Email: '', Activo: true, Admin: false };
+  AdminState.usuarios.push(nuevo);
+  
+  renderTablaUsuarios(); // Aquí sí repintamos todo para añadir la fila
+  checkUsuariosChanges();
+  
+  setTimeout(() => {
+    const tbody = document.getElementById('tablaUsuariosBody');
+    if(tbody && tbody.lastElementChild) {
+      tbody.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const inputs = tbody.lastElementChild.querySelectorAll('input');
+      if(inputs[0]) inputs[0].focus();
+    }
+  }, 50);
+}
+
+// 5. Eliminar
+function eliminarUsuario(index) {
+  const usuario = AdminState.usuarios[index];
+  const nombreSeguro = escaparHTML(usuario.Nombre || usuario.Email || 'Usuario');
+
+  mostrarConfirmacion(
+    '¿Eliminar Usuario?', 
+    `Se eliminará el acceso para: <b>${nombreSeguro}</b>`, 
+    () => {
+      AdminState.usuarios.splice(index, 1);
+      renderTablaUsuarios(); // Aquí repintamos porque borramos una fila entera
+      checkUsuariosChanges();
+    }
+  );
+}
+
+// 6. Check changes
+function checkUsuariosChanges() {
+  const actual = JSON.stringify(AdminState.usuarios);
+  const original = JSON.stringify(AdminState.usuariosOriginales);
+  
+  AdminState.cambiosPendientes = (actual !== original);
+  actualizarBotonGuardarUsuarios();
+}
+
+function actualizarBotonGuardarUsuarios() {
+  if (AdminState.cambiosPendientes) {
+    const diff = Math.abs(AdminState.usuarios.length - AdminState.usuariosOriginales.length);
+    SaveBarManager.show(
+        diff > 0 ? `${diff} cambios en lista` : 'Permisos modificados', 
+        guardarCambiosUsuarios, 
+        descartarCambiosUsuarios
+    );
+  } else {
+    SaveBarManager.hide();
+  }
+}
+
+// 7. Guardar
+function guardarCambiosUsuarios() {
+  const errores = [];
+  AdminState.usuarios.forEach((u, i) => {
+      if (!u.Nombre || u.Nombre.trim().length < 2) errores.push(`Fila ${i+1}: Falta nombre`);
+      if (!esEmailValido(u.Email)) errores.push(`Fila ${i+1}: Email inválido`);
+  });
+
+  if (errores.length > 0) {
+      showToast('warning', `Revisa los datos: ${errores.slice(0,3).join('. ')}`);
+      return;
+  }
+
+  showLoading();
+  
+  const payload = AdminState.usuarios.map(u => ({
+      Nombre: u.Nombre.trim(),
+      Email: u.Email.trim().toLowerCase(),
+      Admin: u.Admin,
+      Activo: u.Activo
+  }));
+
+  google.script.run
+    .withSuccessHandler(res => {
+      hideLoading();
+      if(res.success) {
+        showToast('success', 'Usuarios actualizados');
+        AdminState.usuariosOriginales = JSON.parse(JSON.stringify(AdminState.usuarios));
+        checkUsuariosChanges();
+      } else {
+        showToast('error', res.error);
+      }
+    })
+    .withFailureHandler(err => { hideLoading(); showToast('error', err); })
+    .saveBatchUsuarios(payload);
+}
+
+// 8. Descartar
+function descartarCambiosUsuarios() {
+  mostrarConfirmacion('¿Descartar cambios?', 'Se perderán las modificaciones.', () => {
+      if (AdminState.usuariosOriginales) {
+          AdminState.usuarios = JSON.parse(JSON.stringify(AdminState.usuariosOriginales));
+      }
+      renderTablaUsuarios();
+      checkUsuariosChanges();
+      showToast('info', 'Cambios descartados');
+  });
+}
+
+// EXPORTS
+window.inicializarUsuarios = inicializarUsuarios;
+window.renderTablaUsuarios = renderTablaUsuarios;
+window.editarUsuario = editarUsuario;
+window.agregarNuevoUsuario = agregarNuevoUsuario;
+window.eliminarUsuario = eliminarUsuario;
+window.toggleUsuarioPropiedad = toggleUsuarioPropiedad;
+window.guardarCambiosUsuarios = guardarCambiosUsuarios;
+window.descartarCambiosUsuarios = descartarCambiosUsuarios;
+
+
+
+/* ============================================
+   6.5. GESTIÓN DE CURSOS (OPTIMIZADA V3 - FINAL 🚀)
+   ============================================ */
+
+const CursosState = {
+  cursosOriginales: [],
+  cursosEnMemoria: [],
+  modoVisualizacion: 'botones',
+  modoOriginal: 'botones',
+  cambiosPendientes: false
+};
+
+// --- 1. INICIALIZACIÓN ---
+function inicializarCursos() {
+  if (!AdminState.cursos) return;
+  
+  // 1. Clonar datos
+  CursosState.cursosEnMemoria = JSON.parse(JSON.stringify(AdminState.cursos));
+  CursosState.cursosOriginales = JSON.parse(JSON.stringify(AdminState.cursos));
+  
+  // 2. Estado visual
+  const modo = AdminState.modoVisualizacion || 'botones';
+  CursosState.modoVisualizacion = modo;
+  CursosState.modoOriginal = modo;
+  
+  // 3. Resetear UI
+  CursosState.cambiosPendientes = false;
+  actualizarToggleVisualizacion();
+  renderTablaCursos();
+  SaveBarManager.hide();
+}
+
+// --- 2. RENDERIZADO OPTIMIZADO ---
+function renderTablaCursos(filtro = null) {
+  const tbody = document.getElementById('tablaCursosBody');
+  if (!tbody) return;
+  
+  // ✅ Preservar scroll
+  const scrollPos = tbody.parentElement ? tbody.parentElement.scrollTop : 0;
+  
+  tbody.innerHTML = '';
+
+  let lista = filtro || CursosState.cursosEnMemoria;
+
+  if (lista.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8 text-gray-400">No hay cursos</td></tr>`;
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+
+  lista.forEach((curso, index) => {
+    // Si hay filtro, buscamos el índice real en el array original
+    const realIndex = filtro ? CursosState.cursosEnMemoria.indexOf(curso) : index;
+    
+    const tr = document.createElement('tr');
+    tr.className = 'hover:bg-gray-50 transition-colors group bg-white border-b border-gray-100 draggable-row';
+    // Solo permitimos arrastrar si NO hay filtro activo
+    tr.setAttribute('draggable', !filtro); 
+    tr.dataset.index = realIndex;
+
+    const dragClass = filtro 
+      ? 'opacity-30 cursor-not-allowed' 
+      : 'cursor-grab hover:text-blue-600 active:cursor-grabbing handle';
+
+    // Validación visual (Borde rojo si está vacío)
+    const errorClass = (!curso.curso || !curso.curso.trim()) ? 'border-red-300 bg-red-50' : 'border-transparent hover:border-gray-300';
+    
+    // Usamos la función global escaparHTML
+    const valEtapa = typeof escaparHTML === 'function' ? escaparHTML(curso.etapa || '') : (curso.etapa || '');
+    const valCurso = typeof escaparHTML === 'function' ? escaparHTML(curso.curso || '') : (curso.curso || '');
+
+    tr.innerHTML = `
+      <td class="px-4 py-2 text-center w-16 min-w-[40px] text-gray-400 align-middle ${dragClass}">
+         <iconify-icon icon="mdi:drag-horizontal-variant" width="24"></iconify-icon>
+      </td>
+
+      <td class="px-4 py-2 min-w-[150px]">
+        <input type="text" value="${valEtapa}" placeholder="Ej: Primaria"
+          class="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none py-1 transition-colors text-gray-600"
+          oninput="editarCurso(${realIndex}, 'etapa', this.value)">
+      </td>
+
+      <td class="px-4 py-2 min-w-[150px]">
+        <input type="text" value="${valCurso}" placeholder="Ej: 1º A"
+          class="w-full bg-transparent border-b ${errorClass} focus:border-blue-500 outline-none py-1 transition-colors font-bold text-gray-800"
+          oninput="editarCurso(${realIndex}, 'curso', this.value)">
+      </td>
+
+      <td class="px-4 py-2 text-right w-24 min-w-[80px]">
+        <button onclick="eliminarCurso(${realIndex})" 
+                class="text-gray-300 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
+          <iconify-icon icon="mdi:trash-can-outline" width="20"></iconify-icon>
+        </button>
+      </td>
+    `;
+    fragment.appendChild(tr);
+  });
+  
+  tbody.appendChild(fragment);
+  
+  // ✅ Restaurar scroll
+  if(tbody.parentElement) tbody.parentElement.scrollTop = scrollPos;
+  
+  // ✅ Drag & Drop CORREGIDO:
+  // Ya no usamos "window.cursosDragDropInit".
+  // Llamamos siempre a la función, porque ella misma se encarga de limpiar listeners viejos.
+  if (!filtro && typeof enableGenericDragAndDrop === 'function') {
+    enableGenericDragAndDrop('tablaCursosBody', (oldIndex, newIndex) => {
+      // Usamos arrayMove global si existe
+      if (typeof arrayMove === 'function') {
+         arrayMove(CursosState.cursosEnMemoria, oldIndex, newIndex);
+      } else {
+         // Fallback manual
+         const item = CursosState.cursosEnMemoria.splice(oldIndex, 1)[0];
+         CursosState.cursosEnMemoria.splice(newIndex, 0, item);
+      }
+      renderTablaCursos(); // Repintar para refrescar índices
+      checkCursosChanges();
+    });
+  }
+  
+  checkCursosChanges();
+}
+
+// --- 3. ACCIONES ---
+
+function editarCurso(index, campo, valor) {
+  CursosState.cursosEnMemoria[index][campo] = valor;
+  checkCursosChanges();
+  
+  // Validación visual inmediata
+  if (campo === 'curso') {
+     const input = document.activeElement;
+     if (input && (!valor || !valor.trim())) {
+         input.classList.add('border-red-300', 'bg-red-50');
+         input.classList.remove('border-transparent');
+     } else if (input) {
+         input.classList.remove('border-red-300', 'bg-red-50');
+         input.classList.add('border-transparent');
+     }
+  }
+}
+
+function agregarNuevoCurso() {
+  const searchInput = document.getElementById('searchCursos');
+  if(searchInput) { searchInput.value = ''; }
+  
+  CursosState.cursosEnMemoria.push({ etapa: '', curso: '' });
+  
+  renderTablaCursos(); // Sin filtro
+  
+  setTimeout(() => {
+    const tbody = document.getElementById('tablaCursosBody');
+    if(tbody && tbody.lastElementChild) {
+       tbody.lastElementChild.scrollIntoView({ behavior: 'smooth' });
+       const inputs = tbody.lastElementChild.querySelectorAll('input');
+       if(inputs[1]) inputs[1].focus(); // Foco en nombre curso
+    }
+  }, 100);
+}
+
+function eliminarCurso(index) {
+  const curso = CursosState.cursosEnMemoria[index];
+  const nombre = curso.curso || 'este curso sin nombre';
+  
+  const nombreSeguro = typeof escaparHTML === 'function' ? escaparHTML(nombre) : nombre;
+  
+  mostrarConfirmacion(
+    '¿Eliminar Curso?', 
+    `Se eliminará &quot;<b>${nombreSeguro}</b>&quot;. Las reservas asociadas podrían quedar huérfanas.`, 
+    () => {
+      CursosState.cursosEnMemoria.splice(index, 1);
+      renderTablaCursos();
+      checkCursosChanges();
+    }
+  );
+}
+
+function filtrarCursos() {
+  const term = document.getElementById('searchCursos').value.toLowerCase();
+  const filtrados = CursosState.cursosEnMemoria.filter(c => 
+    (c.etapa || '').toLowerCase().includes(term) || 
+    (c.curso || '').toLowerCase().includes(term)
+  );
+  renderTablaCursos(term ? filtrados : null);
+}
+
+// --- 4. CONTROL DE CAMBIOS Y GUARDADO ---
+
+function checkCursosChanges() {
+  const estadoActual = JSON.stringify({
+    datos: CursosState.cursosEnMemoria,
+    modo: CursosState.modoVisualizacion
+  });
+  
+  const estadoOriginal = JSON.stringify({
+    datos: CursosState.cursosOriginales,
+    modo: CursosState.modoOriginal
+  });
+  
+  CursosState.cambiosPendientes = (estadoActual !== estadoOriginal);
+  actualizarBotonGuardarCursos();
+}
+
+function actualizarBotonGuardarCursos() {
+  if (CursosState.cambiosPendientes) {
+    const diff = CursosState.cursosEnMemoria.length - CursosState.cursosOriginales.length;
+    let texto = "Se han modificado los cursos";
+    if (diff > 0) texto = `${diff} cursos añadidos`;
+    if (diff < 0) texto = `${Math.abs(diff)} cursos eliminados`;
+
+    SaveBarManager.show(texto, guardarCambiosCursos, descartarCambiosCursos);
+  } else {
+    SaveBarManager.hide();
+  }
+}
+
+function guardarCambiosCursos() {
+  // ✅ Validación Previa (Bloqueante)
+  const cursosVacios = CursosState.cursosEnMemoria.some(c => !c.curso || !c.curso.trim());
+  if (cursosVacios) {
+      showToast('warning', 'Hay cursos sin nombre. Por favor, revísalos (marcados en rojo).');
+      renderTablaCursos();
+      return;
+  }
+
+  showLoading();
+  
+  const payload = {
+    cursos: CursosState.cursosEnMemoria,
+    modoVisualizacion: CursosState.modoVisualizacion
+  };
+
+  google.script.run
+    .withSuccessHandler(res => {
+  hideLoading();
+  if (res.success) {
+    showToast('success', 'Cursos actualizados correctamente');
+    
+    CursosState.cursosOriginales = JSON.parse(JSON.stringify(CursosState.cursosEnMemoria));
+    CursosState.modoOriginal = CursosState.modoVisualizacion;
+    
+    if(AdminState) AdminState.modoVisualizacion = CursosState.modoVisualizacion;
+    
+    CursosState.cambiosPendientes = false; 
+    SaveBarManager.hide();
+    
+    // ✅ MODIFICADO: Activar flag y recargar
+    adminHaCambiadoDatos = true;
+    if (typeof window.recargarDatosApp === 'function') {
+      window.recargarDatosApp();
+    }
+  } else {
+    showToast('error', res.error);
+  }
+})
+    .withFailureHandler(err => { hideLoading(); showToast('error', err); })
+    .saveAllCursos(payload);
+}
+
+function descartarCambiosCursos() {
+  mostrarConfirmacion(
+    '¿Descartar cambios?',
+    'Se perderán todas las modificaciones no guardadas.',
+    () => {
+      CursosState.cursosEnMemoria = JSON.parse(JSON.stringify(CursosState.cursosOriginales));
+      CursosState.modoVisualizacion = CursosState.modoOriginal;
+      
+      CursosState.cambiosPendientes = false;
+      actualizarToggleVisualizacion();
+      renderTablaCursos(); // Reset total
+      SaveBarManager.hide();
+      
+      showToast('info', 'Cambios descartados');
+    }
+  );
+}
+
+// --- 5. MODO VISUALIZACIÓN ---
+
+function cambiarModoVisualizacionCursos(nuevoModo) {
+  CursosState.modoVisualizacion = nuevoModo;
+  actualizarToggleVisualizacion();
+  checkCursosChanges(); 
+}
+
+function actualizarToggleVisualizacion() {
+  const container = document.getElementById('modoVisualizacionToggle');
+  if (!container) return;
+  
+  const btns = container.querySelectorAll('button');
+  btns.forEach(btn => {
+    const esActivo = btn.getAttribute('data-modo') === CursosState.modoVisualizacion;
+    if (esActivo) {
+      btn.className = 'px-3 py-1.5 rounded-md transition-all shadow-sm bg-white text-gray-800 font-medium border border-gray-200';
+    } else {
+      btn.className = 'px-3 py-1.5 rounded-md transition-all text-gray-500 hover:text-gray-700 hover:bg-gray-100';
+    }
+  });
+}
+
+// EXPORTS
+window.inicializarCursos = inicializarCursos;
+window.renderTablaCursos = renderTablaCursos;
+window.editarCurso = editarCurso;
+window.agregarNuevoCurso = agregarNuevoCurso;
+window.eliminarCurso = eliminarCurso;
+window.filtrarCursos = filtrarCursos;
+window.cambiarModoVisualizacionCursos = cambiarModoVisualizacionCursos;
+window.guardarCambiosCursos = guardarCambiosCursos;
+window.descartarCambiosCursos = descartarCambiosCursos;
+
+
+/* ============================================
+   6.6. GESTIÓN DE TRAMOS (OPTIMIZADO V4 - FINAL 🛡️)
+   ============================================ */
+
+// 1. INICIALIZACIÓN (CRÍTICO: Punto de entrada único)
+
+// Función auxiliar para normalizar formato HH:mm
+function normalizarHora(hora) {
+  if (!hora) return '';
+  
+  // Si ya viene como objeto Date, convertir
+  if (hora instanceof Date) {
+    const h = String(hora.getHours()).padStart(2, '0');
+    const m = String(hora.getMinutes()).padStart(2, '0');
+    return `${h}:${m}`;
+  }
+  
+  // Si es string, asegurar formato HH:mm
+  const partes = String(hora).split(':');
+  if (partes.length >= 2) {
+    const h = partes[0].padStart(2, '0');
+    const m = partes[1].padStart(2, '0');
+    return `${h}:${m}`;
+  }
+  
+  return hora;
+}
+
+function inicializarTramos() {
+  if (!AdminState.tramos) return;
+  
+  // Normalizar datos (asegurar que Nombre_Tramo, nombre Y HORAS estén correctas)
+  AdminState.tramos = AdminState.tramos.map(t => ({
+    ...t,
+    Nombre_Tramo: t.Nombre_Tramo || t.nombre || '',
+    nombre: t.nombre || t.Nombre_Tramo || '',
+    hora_inicio: normalizarHora(t.hora_inicio),  
+    hora_fin: normalizarHora(t.hora_fin)
+  }));
+  
+  // Resto del código...
+  AdminState.tramosOriginales = JSON.parse(JSON.stringify(AdminState.tramos));
+  AdminState.cambiosPendientes = false;
+  
+  renderTablaTramos();
+  SaveBarManager.hide();
+}
+
+// 2. RENDERIZADO
+function renderTablaTramos() {
+  const tbody = document.getElementById('tablaTramosBody');
+  if (!tbody) return;
+  
+  // UX: Mantener posición del scroll
+  const scrollPos = tbody.parentElement ? tbody.parentElement.scrollTop : 0;
+  tbody.innerHTML = '';
+
+  // Validación de seguridad
+  if (!AdminState.tramos || AdminState.tramos.length === 0) {
+     tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-gray-400">No hay tramos definidos</td></tr>`;
+     return;
+  }
+
+  const fragment = document.createDocumentFragment();
+
+  AdminState.tramos.forEach((tramo, index) => {
+    const tr = document.createElement('tr');
+    tr.className = 'hover:bg-gray-50 transition-colors group bg-white border-b border-gray-100 draggable-row';
+    tr.setAttribute('draggable', 'true');
+    tr.dataset.index = index;
+
+    // ✅ Usamos tu función global directamente
+    const valId = escaparHTML(tramo.id_tramo);
+    const valNombre = escaparHTML(tramo.Nombre_Tramo || tramo.nombre);
+    const valInicio = normalizarHora(tramo.hora_inicio) || '';
+    const valFin = normalizarHora(tramo.hora_fin) || '';
+
+    // UX: Bordes rojos si falta info
+    const errId = (!tramo.id_tramo || !tramo.id_tramo.trim()) ? 'border-red-300 bg-red-50' : 'border-transparent hover:border-gray-300';
+    const errNombre = (!tramo.Nombre_Tramo || !tramo.Nombre_Tramo.trim()) ? 'border-red-300 bg-red-50' : 'border-transparent hover:border-gray-300';
+    const errInicio = (!valInicio) ? 'border-red-300 bg-red-50' : 'border-gray-200';
+    const errFin = (!valFin) ? 'border-red-300 bg-red-50' : 'border-gray-200';
+
+    tr.innerHTML = `
+      <td class="px-4 py-2 text-center w-16 min-w-[40px] cursor-grab text-gray-400 hover:text-blue-600 active:cursor-grabbing handle align-middle">
+         <iconify-icon icon="mdi:drag-horizontal-variant" width="24"></iconify-icon>
+      </td>
+
+      <td class="px-4 py-2 w-24 min-w-[80px]">
+        <input type="text" value="${valId}" placeholder="ID"
+          class="w-full bg-transparent border-b ${errId} focus:border-blue-500 outline-none py-1 text-sm font-mono font-bold text-gray-700 text-center transition-colors"
+          oninput="editarTramo(${index}, 'id_tramo', this.value)">
+      </td>
+
+      <td class="px-4 py-2 min-w-[150px]">
+        <input type="text" value="${valNombre}" placeholder="Nombre del tramo"
+          class="w-full bg-transparent border-b ${errNombre} focus:border-blue-500 outline-none py-1 font-bold text-gray-800 transition-colors"
+          oninput="editarTramo(${index}, 'Nombre_Tramo', this.value)">
+      </td>
+
+      <td class="px-4 py-2 w-32 min-w-[110px]">
+        <div class="relative">
+            <input type="time" value="${valInicio}" 
+              class="bg-white border ${errInicio} rounded-lg px-2 py-1 text-sm focus:border-blue-500 outline-none transition-colors w-full text-center"
+              oninput="editarTramo(${index}, 'hora_inicio', this.value)">
+        </div>
+      </td>
+
+      <td class="px-4 py-2 w-32 min-w-[110px]">
+        <div class="relative">
+            <input type="time" value="${valFin}" 
+              class="bg-white border ${errFin} rounded-lg px-2 py-1 text-sm focus:border-blue-500 outline-none transition-colors w-full text-center"
+              oninput="editarTramo(${index}, 'hora_fin', this.value)">
+        </div>
+      </td>
+
+      <td class="px-4 py-2 text-right w-16 min-w-[60px]">
+        <button onclick="eliminarTramo(${index})" class="text-gray-300 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
+           <iconify-icon icon="mdi:trash-can-outline" width="20"></iconify-icon>
+        </button>
+      </td>
+    `;
+    fragment.appendChild(tr);
+  });
+  
+  tbody.appendChild(fragment);
+  if(tbody.parentElement) tbody.parentElement.scrollTop = scrollPos; // Restaurar scroll
+
+  // Drag & Drop Universal (Usa el DragDropManager global)
+  if (typeof enableGenericDragAndDrop === 'function') {
+    enableGenericDragAndDrop('tablaTramosBody', (oldIndex, newIndex) => {
+      // Usamos tu función global arrayMove
+      if (typeof arrayMove === 'function') {
+        arrayMove(AdminState.tramos, oldIndex, newIndex);
+      }
+      renderTablaTramos();
+      checkTramosChanges();
+    });
+  }
+  
+  checkTramosChanges();
+}
+
+// 3. EDICIÓN
+function editarTramo(index, campo, valor) {
+  const tramo = AdminState.tramos[index];
+  if (!tramo) return;
+
+  // Tracking de ID original
+  if (campo === 'id_tramo') {
+    if (!tramo._originalId) {
+      tramo._originalId = tramo.id_tramo;
+    }
+  }
+
+  tramo[campo] = valor;
+  
+  // Sincronización nombre
+  if(campo === 'Nombre_Tramo') tramo.nombre = valor;
+  
+  checkTramosChanges();
+  
+  // Validación visual "live"
+  if (campo === 'id_tramo' || campo === 'Nombre_Tramo') {
+      const el = document.activeElement;
+      if(el && (!valor || !valor.trim())) {
+          el.classList.add('border-red-300', 'bg-red-50');
+          el.classList.remove('border-transparent');
+      } else if (el) {
+          el.classList.remove('border-red-300', 'bg-red-50');
+          el.classList.add('border-transparent');
+      }
+  }
+}
+
+function agregarNuevoTramo() {
+  if (!AdminState.tramos) AdminState.tramos = [];
+  
+  const num = AdminState.tramos.length + 1;
+  const nuevoId = `T-${String(num).padStart(3, '0')}`;
+  
+  AdminState.tramos.push({
+    id_tramo: nuevoId,
+    Nombre_Tramo: '', 
+    nombre: '',
+    hora_inicio: '09:00',
+    hora_fin: '10:00'
+  });
+
+  renderTablaTramos();
+  
+  setTimeout(() => {
+     const tbody = document.getElementById('tablaTramosBody');
+     if(tbody && tbody.lastElementChild) {
+       tbody.lastElementChild.scrollIntoView({behavior:'smooth'});
+       const inputs = tbody.lastElementChild.querySelectorAll('input');
+       if(inputs[1]) inputs[1].focus(); // Foco en nombre
+     }
+  }, 100);
+}
+
+function eliminarTramo(index) {
+  const tramo = AdminState.tramos[index];
+  const nombre = tramo.Nombre_Tramo || tramo.nombre || 'este tramo';
+
+  // ✅ Usamos escaparHTML global
+  mostrarConfirmacion(
+    '¿Eliminar Tramo?', 
+    `Se eliminará &quot;<b>${escaparHTML(nombre)}</b>&quot;. Desaparecerá de la configuración de horarios.`, 
+    () => {
+      AdminState.tramos.splice(index, 1);
+      renderTablaTramos();
+      checkTramosChanges();
+    }
+  );
+}
+
+// 4. CONTROL DE CAMBIOS
+function checkTramosChanges() {
+  if (!AdminState.tramosOriginales) return;
+
+  // Limpiamos _originalId para comparar limpiamente
+  const cleanCurrent = AdminState.tramos.map(t => {
+      const { _originalId, ...rest } = t; 
+      return rest;
+  });
+  const cleanOriginal = AdminState.tramosOriginales.map(t => {
+      const { _originalId, ...rest } = t;
+      return rest;
+  });
+
+  const currentStr = JSON.stringify(cleanCurrent);
+  const originalStr = JSON.stringify(cleanOriginal);
+  
+  AdminState.cambiosPendientes = (currentStr !== originalStr);
+  actualizarEstadoBotonGuardarTramos();
+}
+
+function actualizarEstadoBotonGuardarTramos() {
+  if (AdminState.cambiosPendientes) {
+    const diff = AdminState.tramos.length - (AdminState.tramosOriginales || []).length;
+    let texto = "Horarios modificados";
+    if (diff > 0) texto = `${diff} tramos añadidos`;
+    if (diff < 0) texto = `${Math.abs(diff)} tramos eliminados`;
+
+    SaveBarManager.show(texto, guardarCambiosTramos, descartarCambiosTramos);
+  } else {
+    SaveBarManager.hide();
+  }
+}
+
+// 5. GUARDAR Y DESCARTAR
+function guardarCambiosTramos() {
+  // Validación de campos obligatorios
+  const tramosInvalidos = AdminState.tramos.some(t => 
+    !t.id_tramo?.trim() || !t.Nombre_Tramo?.trim() || !t.hora_inicio || !t.hora_fin
+  );
+
+  if (tramosInvalidos) {
+    showToast('warning', 'Hay tramos con datos incompletos (en rojo). Revísalos.');
+    renderTablaTramos(); 
+    return;
+  }
+
+  showLoading();
+  
+  const datosAEnviar = AdminState.tramos.map(t => ({
+      id_tramo: t.id_tramo,
+      Nombre_Tramo: t.Nombre_Tramo || t.nombre,
+      nombre: t.Nombre_Tramo || t.nombre,
+      hora_inicio: t.hora_inicio,
+      hora_fin: t.hora_fin,
+      _originalId: t._originalId 
+  }));
+
+  google.script.run
+    .withSuccessHandler(function(response) {
+  hideLoading();
+  if (response.success) {
+    showToast('success', 'Tramos guardados correctamente');
+    AdminState.tramosOriginales = JSON.parse(JSON.stringify(AdminState.tramos));
+    AdminState.tramos.forEach(t => delete t._originalId);
+    checkTramosChanges();
+    
+    // ✅ MODIFICADO: Activar flag y recargar
+    adminHaCambiadoDatos = true;
+    if (typeof window.recargarDatosApp === 'function') {
+      window.recargarDatosApp();
+    }
+  } else {
+    showToast('error', response.error);
+  }
+})
+    .withFailureHandler(err => {
+        hideLoading();
+        showToast('error', err);
+    })
+    .saveBatchTramos(datosAEnviar);
+}
+
+function descartarCambiosTramos() {
+  mostrarConfirmacion(
+    '¿Descartar cambios?',
+    'Volverás a la configuración original de tramos.',
+    () => {
+      AdminState.tramos = JSON.parse(JSON.stringify(AdminState.tramosOriginales));
+      renderTablaTramos();
+      AdminState.cambiosPendientes = false;
+      SaveBarManager.hide();
+      showToast('info', 'Cambios en tramos descartados');
+    }
+  );
+}
+
+// EXPORTS
+window.normalizarHora = normalizarHora;
+window.inicializarTramos = inicializarTramos;
+window.renderTablaTramos = renderTablaTramos;
+window.editarTramo = editarTramo;
+window.agregarNuevoTramo = agregarNuevoTramo;
+window.eliminarTramo = eliminarTramo;
+window.guardarCambiosTramos = guardarCambiosTramos;
+window.descartarCambiosTramos = descartarCambiosTramos;
+
+
+/* =========================================================
+   6.7. GESTIÓN DE CONFIGURACIÓN (V5 - FIX DETECCIÓN ⚙️)
+   ========================================================= */
+
+const ConfigState = {
+  configOriginal: null,
+  cambiosPendientes: false
+};
+
+window.configListenersAttached = false;
+
+// --- HELPERS ---
+const setCfgVal = (id, value) => {
+  const el = document.getElementById(id);
+  if (el) el.value = (value === null || value === undefined) ? '' : String(value);
+};
+
+const getCfgVal = (id) => {
+  const el = document.getElementById(id);
+  return el ? el.value.trim() : '';
+};
+
+const setCfgCheck = (id, value) => {
+  const el = document.getElementById(id);
+  if (el) el.checked = (value === true || value === 'true' || value === 'Si' || value === 1);
+};
+
+const getCfgCheck = (id) => {
+  const el = document.getElementById(id);
+  return el ? el.checked : false;
+};
+
+// --- INICIALIZACIÓN (CORREGIDA) ---
+function inicializarConfiguracion() {
+  if (!AdminState.config) return;
+  
+  // 1. PRIMERO renderizar (normaliza valores)
+  renderConfiguracion();
+  
+  // 2. LUEGO crear snapshot desde el DOM (valores ya normalizados)
+  ConfigState.configOriginal = construirConfigDesdeInputs();
+  ConfigState.cambiosPendientes = false;
+  
+  // 3. Activar listeners
+  attachConfigListeners();
+  
+  SaveBarManager.hide();
+}
+
+// --- RENDERIZAR ---
+function renderConfiguracion() {
+  if (!AdminState.config) return;
+
+  const configMap = {};
+  AdminState.config.forEach(c => configMap[c.clave] = c.valor);
+
+  // Renderizar TODOS los campos con defaults
+  setCfgVal('cfg_dias_vista_maximo',   configMap['dias_vista_maximo'] || '30');
+  setCfgVal('cfg_minutos_antelacion',  configMap['minutos_antelacion'] || '30');
+  setCfgVal('cfg_limite_reservas',     configMap['limite_reservas'] || '5');
+  setCfgVal('cfg_horas_cancelacion',   configMap['horas_cancelacion'] || '2');
+  setCfgVal('cfg_email_admin',         configMap['email_admin'] || '');
+  setCfgVal('cfg_nombre_centro',       configMap['nombre_centro'] || 'Sistema de Reservas');
+  setCfgVal('cfg_url_logo',            configMap['url_logo'] || '');
+  setCfgVal('cfg_max_tramos_simultaneos', configMap['max_tramos_simultaneos'] || '1');
+  
+  setCfgCheck('cfg_permitir_multitramo',  configMap['permitir_multitramo']);
+  setCfgCheck('cfg_exigir_motivo',        configMap['exigir_motivo']);
+  setCfgCheck('cfg_modo_mantenimiento',   configMap['modo_mantenimiento']);
+}
+
+// --- LISTENERS ---
+function attachConfigListeners() {
+  if (window.configListenersAttached) return;
+
+  const ids = [
+    'cfg_dias_vista_maximo', 'cfg_minutos_antelacion', 'cfg_limite_reservas',
+    'cfg_horas_cancelacion', 'cfg_email_admin', 'cfg_nombre_centro',
+    'cfg_url_logo', 'cfg_max_tramos_simultaneos', 'cfg_permitir_multitramo',
+    'cfg_exigir_motivo', 'cfg_modo_mantenimiento'
+  ];
+  
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('input', checkConfigChanges);
+      el.addEventListener('change', checkConfigChanges);
+    }
+  });
+
+  window.configListenersAttached = true;
+}
+
+// --- DETECCIÓN DE CAMBIOS ---
+function checkConfigChanges() {
+  if (!ConfigState.configOriginal) return;
+  
+  const configActual = construirConfigDesdeInputs();
+  
+  // Comparar JSONs ordenados
+  const sortFunc = (a,b) => a.clave.localeCompare(b.clave);
+  const actualStr = JSON.stringify(configActual.sort(sortFunc));
+  const originalStr = JSON.stringify([...ConfigState.configOriginal].sort(sortFunc));
+  
+  ConfigState.cambiosPendientes = (actualStr !== originalStr);
+  
+  if (ConfigState.cambiosPendientes) {
+    SaveBarManager.show('Configuración modificada', guardarConfiguracion, descartarCambiosConfiguracion);
+  } else {
+    SaveBarManager.hide();
+  }
+}
+
+function construirConfigDesdeInputs() {
+  return [
+    { clave: 'dias_vista_maximo',  valor: getCfgVal('cfg_dias_vista_maximo') },
+    { clave: 'minutos_antelacion', valor: getCfgVal('cfg_minutos_antelacion') },
+    { clave: 'limite_reservas',    valor: getCfgVal('cfg_limite_reservas') },
+    { clave: 'horas_cancelacion',  valor: getCfgVal('cfg_horas_cancelacion') },
+    { clave: 'email_admin',        valor: getCfgVal('cfg_email_admin') },
+    { clave: 'nombre_centro',      valor: getCfgVal('cfg_nombre_centro') },
+    { clave: 'url_logo',           valor: getCfgVal('cfg_url_logo') },
+    { clave: 'max_tramos_simultaneos', valor: getCfgVal('cfg_max_tramos_simultaneos') },
+    { clave: 'permitir_multitramo',    valor: getCfgCheck('cfg_permitir_multitramo') },
+    { clave: 'exigir_motivo',      valor: getCfgCheck('cfg_exigir_motivo') },
+    { clave: 'modo_mantenimiento', valor: getCfgCheck('cfg_modo_mantenimiento') }
+  ];
+}
+
+// --- VALIDACIÓN ---
+function validarConfiguracion() {
+  const errores = [];
+  
+  const diasVista = parseInt(getCfgVal('cfg_dias_vista_maximo'));
+  if (isNaN(diasVista) || diasVista < 1 || diasVista > 365) {
+    errores.push('Días de vista: entre 1 y 365');
+  }
+  
+  const minAnt = parseInt(getCfgVal('cfg_minutos_antelacion'));
+  if (isNaN(minAnt) || minAnt < 0) {
+    errores.push('Minutos antelación: debe ser positivo');
+  }
+  
+  const limRes = parseInt(getCfgVal('cfg_limite_reservas'));
+  if (isNaN(limRes) || limRes < 1 || limRes > 50) {
+    errores.push('Límite reservas: entre 1 y 50');
+  }
+  
+  const horasCanc = parseInt(getCfgVal('cfg_horas_cancelacion'));
+  if (isNaN(horasCanc) || horasCanc < 0) {
+    errores.push('Horas cancelación: debe ser positivo');
+  }
+  
+  const maxTramos = parseInt(getCfgVal('cfg_max_tramos_simultaneos'));
+  if (isNaN(maxTramos) || maxTramos < 1 || maxTramos > 10) {
+    errores.push('Tramos simultáneos: entre 1 y 10');
+  }
+  
+  const email = getCfgVal('cfg_email_admin');
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errores.push('Email de administrador inválido');
+  }
+  
+  const urlLogo = getCfgVal('cfg_url_logo');
+  if (urlLogo && !/^https?:\/\/.+/.test(urlLogo)) {
+    errores.push('URL del logo debe empezar con http:// o https://');
+  }
+  
+  return errores;
+}
+
+// --- GUARDAR ---
+function guardarConfiguracion() {
+  const errores = validarConfiguracion();
+  if (errores.length > 0) {
+    showToast('warning', `Revisa: ${errores.slice(0, 2).join('. ')}`);
+    return;
+  }
+  
+  showLoading();
+  const newConfig = construirConfigDesdeInputs();
+
+  google.script.run
+    .withSuccessHandler(res => {
+      hideLoading();
+      if(res.success) {
+        showToast('success', 'Configuración guardada');
+        
+        AdminState.config = newConfig;
+        ConfigState.configOriginal = JSON.parse(JSON.stringify(newConfig));
+        ConfigState.cambiosPendientes = false;
+        
+        SaveBarManager.hide();
+      } else {
+        showToast('error', res.error);
+      }
+    })
+    .withFailureHandler(err => {
+      hideLoading();
+      showToast('error', err);
+    })
+    .saveBatchConfig(newConfig);
+}
+
+// --- DESCARTAR ---
+function descartarCambiosConfiguracion() {
+  mostrarConfirmacion(
+    '¿Descartar cambios?',
+    'Volverás a la configuración guardada.',
+    () => {
+      // Revertir a snapshot original
+      const configMap = {};
+      ConfigState.configOriginal.forEach(c => configMap[c.clave] = c.valor);
+      
+      // Re-renderizar con valores originales
+      setCfgVal('cfg_dias_vista_maximo',   configMap['dias_vista_maximo']);
+      setCfgVal('cfg_minutos_antelacion',  configMap['minutos_antelacion']);
+      setCfgVal('cfg_limite_reservas',     configMap['limite_reservas']);
+      setCfgVal('cfg_horas_cancelacion',   configMap['horas_cancelacion']);
+      setCfgVal('cfg_email_admin',         configMap['email_admin']);
+      setCfgVal('cfg_nombre_centro',       configMap['nombre_centro']);
+      setCfgVal('cfg_url_logo',            configMap['url_logo']);
+      setCfgVal('cfg_max_tramos_simultaneos', configMap['max_tramos_simultaneos']);
+      
+      setCfgCheck('cfg_permitir_multitramo',  configMap['permitir_multitramo']);
+      setCfgCheck('cfg_exigir_motivo',        configMap['exigir_motivo']);
+      setCfgCheck('cfg_modo_mantenimiento',   configMap['modo_mantenimiento']);
+      
+      ConfigState.cambiosPendientes = false;
+      SaveBarManager.hide();
+      showToast('info', 'Cambios descartados');
+    }
+  );
+}
+
+// EXPORTS
+window.inicializarConfiguracion = inicializarConfiguracion;
+window.renderConfiguracion = renderConfiguracion;
+window.guardarConfiguracion = guardarConfiguracion;
+window.descartarCambiosConfiguracion = descartarCambiosConfiguracion;
+
+
+/* ==========================================
+   7️⃣ COMPONENTES REUTILIZABLES
+   ========================================== */
+
+/* ==========================================
+   7.1. DRAG & DROP UNIVERSAL (OPTIMIZADO V2 🚀)
+   ========================================== */
+
+// Tracker global para limpiar listeners y evitar memory leaks
+const DragDropManager = {
+  activeInstances: new Map(), // guarda: tbody.id -> función de limpieza
+  
+  cleanup(tableBodyId) {
+    const cleanup = this.activeInstances.get(tableBodyId);
+    if (cleanup) {
+      cleanup();
+      this.activeInstances.delete(tableBodyId);
+    }
+  }
+};
+
+function enableGenericDragAndDrop(tableBodyId, onReorderCallback) {
+  const tbody = document.getElementById(tableBodyId);
+  if (!tbody) return;
+
+  // 1. LIMPIEZA PREVIA (CRÍTICO: Elimina los listeners "zombis")
+  DragDropManager.cleanup(tableBodyId);
+
+  const rows = tbody.querySelectorAll('tr.draggable-row');
+  let dragSrcEl = null;
+  let currentDropTarget = null; // Cache para rendimiento
+
+  // Función de limpieza visual
+  const limpiarEstilos = () => {
+    if (currentDropTarget) {
+      currentDropTarget.classList.remove('drop-target');
+      currentDropTarget = null;
+    }
+    const dragging = tbody.querySelector('.dragging');
+    if (dragging) dragging.classList.remove('dragging');
+  };
+
+  // Array para guardar los "removeEventListener" de esta instancia
+  const cleanupFunctions = [];
+
+  rows.forEach(row => {
+    // --- LÓGICA DE RATÓN (PC) ---
+    
+    const onDragStart = function(e) {
+      dragSrcEl = this;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/html', this.innerHTML);
+      this.classList.add('dragging');
+    };
+
+    const onDragEnd = function() {
+      this.classList.remove('dragging');
+      limpiarEstilos();
+    };
+
+    const onDragOver = function(e) {
+      if (e.preventDefault) e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      
+      if (dragSrcEl !== this) {
+        // Optimización: Solo tocar el DOM si cambia el target
+        if (currentDropTarget !== this) {
+          if (currentDropTarget) currentDropTarget.classList.remove('drop-target');
+          this.classList.add('drop-target');
+          currentDropTarget = this;
+        }
+      }
+      return false;
+    };
+
+    const onDragLeave = function() {
+      this.classList.remove('drop-target');
+      if (currentDropTarget === this) currentDropTarget = null;
+    };
+
+    const onDrop = function(e) {
+      if (e.stopPropagation) e.stopPropagation();
+      limpiarEstilos();
+
+      if (dragSrcEl !== this) {
+        const oldIndex = parseInt(dragSrcEl.dataset.index);
+        const newIndex = parseInt(this.dataset.index);
+        if (typeof onReorderCallback === 'function') {
+          onReorderCallback(oldIndex, newIndex);
+        }
+      }
+      return false;
+    };
+
+    // Añadir listeners PC
+    row.addEventListener('dragstart', onDragStart);
+    row.addEventListener('dragend', onDragEnd);
+    row.addEventListener('dragover', onDragOver);
+    row.addEventListener('dragleave', onDragLeave);
+    row.addEventListener('drop', onDrop);
+
+    // Guardar limpiadores PC
+    cleanupFunctions.push(() => {
+      row.removeEventListener('dragstart', onDragStart);
+      row.removeEventListener('dragend', onDragEnd);
+      row.removeEventListener('dragover', onDragOver);
+      row.removeEventListener('dragleave', onDragLeave);
+      row.removeEventListener('drop', onDrop);
+    });
+
+    // --- LÓGICA TÁCTIL (MÓVIL) ---
+    
+    const handle = row.querySelector('.handle');
+    
+    if (handle) {
+      let touchStartedOnHandle = false;
+
+      const onTouchStart = function(e) {
+        // Solo iniciamos si tocamos el handle, permitiendo scroll en el resto
+        touchStartedOnHandle = true;
+        e.preventDefault(); // Evitar scroll mientras arrastramos el handle
+        dragSrcEl = row;
+        row.classList.add('dragging');
+      };
+
+      const onTouchMove = function(e) {
+        if (!touchStartedOnHandle) return;
+        
+        e.preventDefault(); // Stop scroll
+        
+        const touch = e.touches[0];
+        const targetElement = document.elementFromPoint(touch.clientX, touch.clientY);
+        const targetRow = targetElement ? targetElement.closest('tr.draggable-row') : null;
+
+        if (targetRow && targetRow !== currentDropTarget && targetRow !== dragSrcEl && tbody.contains(targetRow)) {
+          if (currentDropTarget) currentDropTarget.classList.remove('drop-target');
+          targetRow.classList.add('drop-target');
+          currentDropTarget = targetRow;
+        } else if (!targetRow && currentDropTarget) {
+          currentDropTarget.classList.remove('drop-target');
+          currentDropTarget = null;
+        }
+      };
+
+      const onTouchEnd = function(e) {
+        if (!touchStartedOnHandle) return;
+        
+        const touch = e.changedTouches[0];
+        const targetElement = document.elementFromPoint(touch.clientX, touch.clientY);
+        const targetRow = targetElement ? targetElement.closest('tr.draggable-row') : null;
+
+        limpiarEstilos();
+        row.classList.remove('dragging');
+        touchStartedOnHandle = false;
+
+        if (targetRow && targetRow !== dragSrcEl && tbody.contains(targetRow)) {
+          const oldIndex = parseInt(dragSrcEl.dataset.index);
+          const newIndex = parseInt(targetRow.dataset.index);
+          
+          if (typeof onReorderCallback === 'function') {
+            onReorderCallback(oldIndex, newIndex);
+          }
+        }
+      };
+
+      // Añadir listeners Móvil
+      handle.addEventListener('touchstart', onTouchStart, { passive: false });
+      handle.addEventListener('touchmove', onTouchMove, { passive: false });
+      handle.addEventListener('touchend', onTouchEnd);
+
+      // Guardar limpiadores Móvil
+      cleanupFunctions.push(() => {
+        handle.removeEventListener('touchstart', onTouchStart);
+        handle.removeEventListener('touchmove', onTouchMove);
+        handle.removeEventListener('touchend', onTouchEnd);
+      });
+    }
+  });
+
+  // Registrar la limpieza global para este TBODY
+  DragDropManager.activeInstances.set(tableBodyId, () => {
+    cleanupFunctions.forEach(fn => fn());
+  });
+}
+
+// ✅ Función segura para mover elementos en array
+function arrayMove(arr, oldIndex, newIndex) {
+    if (oldIndex < 0 || oldIndex >= arr.length) return arr;
+    if (newIndex < 0 || newIndex >= arr.length) return arr;
+    
+    const item = arr.splice(oldIndex, 1)[0];
+    arr.splice(newIndex, 0, item);
+    return arr;
+}
+
+// Exportar
+window.DragDropManager = DragDropManager;
+window.enableGenericDragAndDrop = enableGenericDragAndDrop;
+window.arrayMove = arrayMove;
+
+
+/* =========================================================
+   7.2. SELECTOR DE ICONOS AVANZADO (ICONIFY INTEGRADO) 🎨
+   ========================================================= */
+
+// 1. STARTER PACK (Iconos frecuentes para colegios)
+const ICON_STARTER_PACK = {
+  'General': ['mdi:cube-outline', 'mdi:home', 'mdi:information', 'mdi:star', 'mdi:bell', 'mdi:calendar'],
+  'Tecnología': ['mdi:laptop', 'mdi:tablet', 'mdi:projector', 'mdi:printer', 'mdi:wifi', 'mdi:mouse'],
+  'Espacios': ['mdi:door-open', 'mdi:chair-school', 'mdi:blackboard', 'mdi:library', 'mdi:food', 'mdi:flask'],
+  'Objetos': ['mdi:cart-outline', 'mdi:book-open-variant', 'mdi:pencil', 'mdi:music-note', 'mdi:basketball', 'mdi:bus']
+};
+
+// Variables globales (Declaradas UNA sola vez aquí)
+let indexRecursoEditandoIcono = null;
+let searchTimeout;
+
+// --- FUNCIONES PRINCIPALES ---
+
+function abrirSelectorIconos(index) {
+  indexRecursoEditandoIcono = index;
+  const modal = document.getElementById('modalIconPicker');
+  
+  // Fix Teletransporte (para que se vea encima de todo)
+  if (modal.parentNode !== document.body) document.body.appendChild(modal);
+  
+  // Resetear input y vista
+  document.getElementById('searchIconInput').value = '';
+  if(typeof renderCategoriasLocales === 'function') renderCategoriasLocales();
+  if(typeof renderGridLocal === 'function') renderGridLocal('General'); 
+  
+  // Mostrar
+  modal.classList.remove('hidden');
+  setTimeout(() => document.getElementById('searchIconInput').focus(), 50);
+}
+
+function cerrarSelectorIconos() {
+  document.getElementById('modalIconPicker').classList.add('hidden');
+  indexRecursoEditandoIcono = null;
+}
+
+// --- RENDERIZADO ---
+
+function renderCategoriasLocales() {
+  const catContainer = document.getElementById('iconCategories');
+  if(!catContainer) return;
+
+  catContainer.innerHTML = Object.keys(ICON_STARTER_PACK).map(cat => 
+    `<button onclick="renderGridLocal('${cat}')" 
+             class="px-3 py-1 text-xs font-medium bg-white hover:bg-blue-50 text-gray-600 hover:text-blue-600 rounded-full transition-colors border border-gray-200 shadow-sm">
+       ${cat}
+     </button>`
+  ).join('');
+}
+
+function renderGridLocal(category) {
+  renderIconsToGrid(ICON_STARTER_PACK[category] || []);
+}
+
+function renderIconsToGrid(iconList) {
+  const grid = document.getElementById('iconGrid');
+  if(!grid) return;
+  
+  if(iconList.length === 0) {
+      grid.innerHTML = `<div class="col-span-full text-center py-8 text-gray-400 text-sm">No se encontraron iconos</div>`;
+      return;
+  }
+  
+  grid.innerHTML = iconList.map(icon => {
+    const fullName = icon.includes(':') ? icon : `mdi:${icon}`;
+    const shortName = fullName.split(':').pop();
+    
+    return `
+      <button onclick="seleccionarIcono('${fullName}')" 
+              class="flex flex-col items-center justify-center p-2 bg-white rounded-xl border border-gray-200 hover:border-blue-500 hover:shadow-md transition-all gap-2 group h-20 relative"
+              title="${fullName}">
+        <iconify-icon icon="${fullName}" class="text-2xl text-gray-500 group-hover:text-blue-600 transition-colors"></iconify-icon>
+        <span class="text-[9px] text-gray-400 truncate w-full text-center group-hover:text-blue-500 font-mono">
+            ${shortName}
+        </span>
+      </button>
+    `;
+  }).join('');
+}
+
+// --- BÚSQUEDA (API ICONIFY) ---
+
+function filtrarIconosGrid() {
+  const query = document.getElementById('searchIconInput').value.trim();
+  
+  // Si está vacío, volvemos a las categorías locales
+  if (query.length === 0) {
+    renderGridLocal('General');
+    return;
+  }
+  
+  if (query.length < 3) return;
+
+  // Loading state
+  document.getElementById('iconGrid').innerHTML = `
+    <div class="col-span-full flex flex-col items-center justify-center py-8 text-gray-400">
+      <iconify-icon icon="mdi:loading" class="text-3xl animate-spin mb-2"></iconify-icon>
+      <span class="text-xs">Buscando en Iconify...</span>
+    </div>
+  `;
+
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => { buscarEnIconifyAPI(query); }, 500);
+}
+
+function buscarEnIconifyAPI(query) {
+  // Buscamos solo en MDI (Material Design) para mantener coherencia
+  const url = `https://api.iconify.design/search?query=${query}&limit=100`;
+  
+  fetch(url)
+    .then(res => res.json())
+    .then(data => {
+      if (data.icons && data.icons.length > 0) renderIconsToGrid(data.icons);
+      else renderIconsToGrid([]);
+    })
+    .catch(() => {
+        document.getElementById('iconGrid').innerHTML = `<div class="col-span-full text-center text-red-400 text-xs">Error de conexión</div>`;
+    });
+}
+
+// --- SELECCIÓN FINAL ---
+
+function seleccionarIcono(iconName) {
+  if (indexRecursoEditandoIcono === null || indexRecursoEditandoIcono === undefined) {
+    console.error('❌ No hay índice seleccionado');
+    cerrarSelectorIconos();
+    return;
+  }
+  
+  const index = indexRecursoEditandoIcono;
+  
+  // Validar que el recurso existe
+  if (!AdminState.recursos[index]) {
+    console.error(`❌ Recurso ${index} no existe. Total recursos: ${AdminState.recursos.length}`);
+    cerrarSelectorIconos();
+    return;
+  }
+  
+  // 1. Actualizar en memoria directamente (sin llamar a editarRecursoInput)
+  AdminState.recursos[index].icono = iconName;
+  
+  // 2. Actualizar visualmente SOLO el icono (cirugía quirúrgica)
+  const iconElement = document.querySelector(`button[onclick="abrirSelectorIconos(${index})"] iconify-icon`);
+  if (iconElement) {
+    iconElement.setAttribute('icon', iconName);
+  }
+  
+  // 3. Marcar cambios pendientes
+  if (typeof checkRecursosChanges === 'function') {
+    checkRecursosChanges();
+  }
+  
+  // 4. Cerrar modal
+  cerrarSelectorIconos();
+}
+
+// EXPORTS
+window.abrirSelectorIconos = abrirSelectorIconos;
+window.cerrarSelectorIconos = cerrarSelectorIconos;
+window.filtrarIconosGrid = filtrarIconosGrid;
+window.renderGridLocal = renderGridLocal;
+window.seleccionarIcono = seleccionarIcono;
+window.renderCategoriasLocales = renderCategoriasLocales;
+
+
+/* =========================================================
+   7.3. HELPERS
+   ========================================================= */
+
+function setVal(id, val) { 
+    const el = document.getElementById(id); 
+    if(el) el.value = val !== undefined ? val : ''; 
+}
+function setCheck(id, val) { 
+    const el = document.getElementById(id); 
+    if(el) el.checked = (String(val).toLowerCase() === 'true' || val === true || val === 1); 
+}
+function getVal(id) { return document.getElementById(id).value; }
+function getCheck(id) { return document.getElementById(id).checked; }
+
+// ✅ FUNCIÓN AUXILIAR: Extraer número de tramo
+function extraerNumeroTramo(idTramo) {
+  if (!idTramo) return 0;
+  const match = String(idTramo).match(/\d+/);
+  return match ? parseInt(match[0], 10) : 0;
+}
+
+/* =========================================================
+   8️⃣ SISTEMA DE CARGA
+   ========================================================= */
+
+/* =========================================================
+   8.1. VARIABLES DE CONTROL
+   ========================================================= */
+var adminDataReady = false;   // ¿Datos listos?
+var adminDataLoading = false; // ¿Cargando ahora mismo?
+
+/* =========================================================
+   8.2. FUNCIÓN DE CARGA MAESTRA (Modo Ninja 🥷)
+   ========================================================= */
+function loadAdminData(isSilent = false) {
+  if (adminDataReady) return; 
+  
+  adminDataLoading = true;
+
+  if (!isSilent) showLoading(); 
+
+  google.script.run
+    .withSuccessHandler(function(data) {
+      if (!isSilent) hideLoading(); 
+      
+      if (!data || !data.success) {
+        if (!isSilent) showToast('error', data ? (data.error || 'Error al cargar datos') : 'Error servidor');
+        adminDataLoading = false;
+        return;
+      }
+
+      console.group(isSilent ? "✅ Precarga Admin Silenciosa Completada" : "✅ Carga Admin Usuario Completada");
+
+      // --- 1. GUARDAR DATOS ---
+      AdminState.recursos = data.recursos || [];
+      AdminState.tramos = data.tramos || [];
+      AdminState.cursos = data.cursos || [];
+      AdminState.usuarios = data.usuarios || [];
+      AdminState.reservas = data.reservas || [];
+      AdminState.config = data.config || [];
+      AdminState.modoVisualizacion = data.modoVisualizacion || 'botones'; // ✅ AÑADIDO
+
+      // --- 2. COPIAS DE SEGURIDAD ---
+      AdminState.recursosOriginales = JSON.parse(JSON.stringify(AdminState.recursos));
+      AdminState.usuariosOriginales = JSON.parse(JSON.stringify(AdminState.usuarios));
+
+      // --- 3. DISPONIBILIDAD ---
+      const dispCruda = data.disponibilidad || [];
+      AdminState.disponibilidad = dispCruda.map(d => ({
+          id_recurso: String(d.id_recurso || d.ID_Recurso || '').trim(),
+          id_tramo: String(d.id_tramo || d.ID_Tramo || '').trim(),
+          dia_semana: String(d.dia_semana || d.Dia_Semana || '').trim(),
+          permitido: String(d.permitido || d.Permitido || 'Si').trim(),
+          razon_bloqueo: String(d.razon_bloqueo || d.Razon_Bloqueo || '').trim()
+      }));
+
+      // --- 4. RENDERIZADO E INICIALIZACIÓN ---
+      // ❌ ELIMINADO: if(typeof CursosState !== 'undefined') CursosState.modoVisualizacion = data.modoVisualizacion || 'botones';
+      
+      if (typeof renderTablaRecursos === 'function') renderTablaRecursos();
+      if (typeof inicializarRecursos === 'function') inicializarRecursos(); 
+      if (typeof inicializarTramos === 'function') inicializarTramos(); 
+      if (typeof renderSelectRecursos === 'function') renderSelectRecursos();
+      if (typeof inicializarCursos === 'function') inicializarCursos(); 
+      if (typeof inicializarUsuarios === 'function') inicializarUsuarios();
+      if (typeof renderTablaReservas === 'function') renderTablaReservas();
+      if (typeof inicializarConfiguracion === 'function') inicializarConfiguracion();
+
+      // --- 5. FINALIZAR ---
+      AdminState.cambiosPendientes = false;
+      if (typeof SaveBarManager !== 'undefined') SaveBarManager.hide();
+
+      adminDataReady = true; 
+      adminDataLoading = false;
+
+      // --- LÓGICA VISUAL FINAL ---
+      if (!isSilent && typeof openAdminPanelUI === 'function') {
+          openAdminPanelUI();
+      } else {
+          console.log("✅ Datos Admin listos en segundo plano (Invisible)");
+      }
+      
+      console.groupEnd();
+     })
+     .withFailureHandler(function(error) {
+      if (!isSilent) {
+          hideLoading();
+          showToast('error', 'Error de conexión: ' + error.message);
+      }
+      console.warn("⚠️ Fallo en precarga silenciosa:", error);
+      adminDataLoading = false;
+    })
+    .getAdminData();
+}
+
+/* =========================================================
+   8.3. PREFETCH
+   ========================================================= */
+// Se ejecuta 3 segundos después de entrar en la web
+function initAdminPrefetch() {
+  setTimeout(() => {
+    // Si aún no están listos y no se están cargando...
+    if (!adminDataReady && !adminDataLoading) {
+       loadAdminData(true); // true = Modo Silencioso (sin spinner)
+    }
+  }, 3000); 
+}
+
+/* =========================================================
+   8.4. 🔄 RECARGA INTELIGENTE DE LA APP PRINCIPAL (SILENCIOSA)
+   ========================================================= */
+
+/**
+ * Recarga datos desde el servidor y actualiza la vista de reservas
+ * Se llama automáticamente después de guardar cambios en Admin
+ */
+window.recargarDatosApp = function() {
+  console.log('🔄 Recargando datos de la aplicación principal (silencioso)...');
+  
+  // Recargar datos del servidor (SIN mostrar spinner ni toast)
+  google.script.run
+    .withSuccessHandler(function(data) {
+      if (data.success) {
+        console.log('✅ Datos recargados correctamente');
+        
+        // Actualizar globalState (si existe)
+        if (typeof globalState !== 'undefined') {
+          globalState.recursos = data.recursos || [];
+          globalState.tramos = data.tramos || [];
+          globalState.cursos = data.cursos || [];
+          globalState.usuariosMap = data.usuariosMap || {};
+          globalState.modoVisualizacionCursos = data.modoVisualizacionCursos || 'botones';
+        }
+        
+        // Re-renderizar tarjetas de recursos (si existe la función)
+        if (typeof renderRecursos === 'function') {
+          renderRecursos(data.recursos || []);
+        }
+      }
+    })
+    .withFailureHandler(function(error) {
+      console.warn('⚠️ Error al recargar vista (silencioso):', error);
+      // No mostramos nada al usuario, solo log
+    })
+    .getStaticData();
+};
+
+/* =========================================================
+   9️⃣ EVENTOS GLOBALES Y ARRANQUE
+   ========================================================= */
+
+/* =========================================================
+   9.1. GESTIÓN DE CIERRE DE DROPDOWNS (GLOBAL) 🖱️
+   ========================================================= */
+document.addEventListener('click', function(e) {
+  
+  // A. CERRAR DROPDOWNS GENÉRICOS (IDs que empiezan por "dropdown-")
+  // Solo cerramos si el click NO fue dentro del propio dropdown ni en su botón activador
+  const dropdowns = document.querySelectorAll('[id^="dropdown-"]:not(.hidden)');
+  dropdowns.forEach(drop => {
+    // Asumimos que el botón activador tiene un ID o clase relacionable, 
+    // pero para asegurar, cerramos si el click no está dentro del dropdown.
+    if (!drop.contains(e.target)) {
+       // Nota: Si tus botones no tienen stopPropagation(), esto podría cerrar el menú 
+       // justo al abrirlo. Lo ideal es controlar esto en la función de abrir.
+       drop.classList.add('hidden');
+    }
+  });
+
+  // B. CERRAR EL DROPDOWN ESPECÍFICO DE RECURSOS (Tu código específico)
+  const dropRecurso = document.getElementById('dropdownRecursoDisp');
+  const btnRecurso = document.getElementById('btnSelectorRecursoDisp');
+  
+  if (dropRecurso && !dropRecurso.classList.contains('hidden')) {
+      // Si el click NO fue en el dropdown Y NO fue en el botón
+      if (!dropRecurso.contains(e.target) && !btnRecurso.contains(e.target)) {
+          dropRecurso.classList.add('hidden');
+      }
+  }
+});
+
+/* ==========================================
+   9.2. FIX: FORZAR MENÚS FLOTANTES (STICKY)
+   Mueve los menús al <body> para que nada les impida flotar
+   ========================================== */
+function fixMenusFlotantes() {
+  const ids = [
+    'accionesTramosFlotante', 
+    'accionesCursosFlotante', 
+    'accionesUsuariosFlotante'
+  ];
+  
+  ids.forEach(id => {
+    const elemento = document.getElementById(id);
+    if (elemento && elemento.parentNode !== document.body) {
+      // Lo arrancamos de su cárcel y lo liberamos en el body
+      document.body.appendChild(elemento);
+    }
+  });
+}
+
+/* =========================================================
+   9.3. INICIALIZACIÓN DEL ADMIN 🚀
+   ========================================================= */
+document.addEventListener('DOMContentLoaded', function() {
+
+  // 1. Configurar los Listeners (Clicks de pestañas, botones de guardar, etc.)
+  if (typeof setupAdminListeners === 'function') {
+      setupAdminListeners(); 
+  }
+
+  // 2. LANZAR LA ESTRATEGIA DE "CARGA INTELIGENTE" (Prefetch)
+  // No llamamos a loadAdminData() directamente para no bloquear.
+  // Llamamos a initAdminPrefetch() para que cargue en silencio.
+  if (typeof initAdminPrefetch === 'function') {
+      initAdminPrefetch();
+  } else {
+      // Fallback: Si no existe la precarga, cargamos normal
+      console.warn("No se encontró initAdminPrefetch, cargando datos estándar...");
+      if(typeof loadAdminData === 'function') loadAdminData(false);
+  }
+});
+
+
+</script>

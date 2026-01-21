@@ -1,0 +1,1110 @@
+<!-- ========================================
+     PANEL ADMIN - SELECTOR ICONIFY HÍBRIDO
+     Sistema optimizado con categorías + buscador
+     ✅ CORREGIDO: 3 tipos de recurso
+     ======================================== -->
+
+<div id="tab-admin" class="tab-content p-6">
+
+  <!-- Sub-navegación del Panel Admin -->
+  <div class="mb-5">
+    <div
+      class="bg-gray-100/80 backdrop-blur-md p-2 rounded-2xl border border-gray-200/50 flex w-full overflow-x-auto shadow-inner gap-2 scrollbar-hide">
+
+      <button class="admin-subtab flex-1 whitespace-nowrap flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 outline-none focus:outline-none focus:ring-0 active" data-section="reservas">
+      <iconify-icon icon="mdi:clipboard-list-outline" class="text-lg"></iconify-icon>
+      <span>Reservas</span>
+    </button>
+
+      <button class="admin-subtab flex-1 whitespace-nowrap flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 outline-none focus:outline-none focus:ring-0 text-gray-500 hover:text-gray-700 hover:bg-gray-200/50" data-section="recursos">
+      <iconify-icon icon="mdi:domain" class="text-lg"></iconify-icon>
+      <span>Recursos</span>
+    </button>
+
+      <button class="admin-subtab flex-1 whitespace-nowrap flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 outline-none focus:outline-none focus:ring-0 text-gray-500 hover:text-gray-700 hover:bg-gray-200/50" data-section="disponibilidad">
+      <iconify-icon icon="mdi:calendar-lock-outline" class="text-lg"></iconify-icon>
+      <span>Disponibilidad</span>
+    </button>
+
+      <button class="admin-subtab flex-1 whitespace-nowrap flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 outline-none focus:outline-none focus:ring-0 text-gray-500 hover:text-gray-700 hover:bg-gray-200/50" data-section="usuarios">
+      <iconify-icon icon="mdi:account-group-outline" class="text-lg"></iconify-icon>
+      <span>Usuarios</span>
+    </button>
+
+      <button class="admin-subtab flex-1 whitespace-nowrap flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 outline-none focus:outline-none focus:ring-0 text-gray-500 hover:text-gray-700 hover:bg-gray-200/50" data-section="cursos">
+      <iconify-icon icon="mdi:school-outline" class="text-lg"></iconify-icon>
+      <span>Cursos</span>
+    </button>
+
+      <button class="admin-subtab flex-1 whitespace-nowrap flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 outline-none focus:outline-none focus:ring-0 text-gray-500 hover:text-gray-700 hover:bg-gray-200/50" data-section="tramos">
+      <iconify-icon icon="mdi:clock-time-four-outline" class="text-lg"></iconify-icon>
+      <span>Tramos</span>
+    </button>
+
+      <button class="admin-subtab flex-1 whitespace-nowrap flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 outline-none focus:outline-none focus:ring-0 text-gray-500 hover:text-gray-700 hover:bg-gray-200/50" data-section="config">
+      <iconify-icon icon="mdi:cog-outline" class="text-lg"></iconify-icon>
+      <span>Config</span>
+    </button>
+
+    </div>
+  </div>
+
+  <!-- ========================================
+       SECCIÓN: RECURSOS
+       ======================================== -->
+  <div id="admin-section-recursos" class="admin-section hidden">
+
+    <div class="max-w-5xl mx-auto">
+
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+        <div>
+          <h2 class="text-2xl font-bold text-gray-800 flex items-center gap-2">
+            <iconify-icon icon="mdi:domain" class="text-blue-600"></iconify-icon>
+            Gestión de Recursos
+          </h2>
+          <p class="text-sm text-gray-500 mt-1">Define las salas, dispositivos y agrupaciones</p>
+        </div>
+        <button onclick="agregarNuevoRecurso()" class="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl shadow-lg shadow-blue-600/20 transition-all transform active:scale-95 flex items-center justify-center gap-2 font-medium">
+    <iconify-icon icon="mdi:plus" class="text-xl"></iconify-icon>
+    <span>Nuevo Recurso</span>
+  </button>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="w-8 py-3 px-2"></th>
+                <th class="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase w-16">Icono</th>
+                <th class="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase w-16">ID</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Recurso</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-40">Tipo / Ubicación</th>
+                <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase w-20">Cap.</th>
+                <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase w-40">Estado</th>
+                <th class="px-4 py-3 w-16"></th>
+              </tr>
+            </thead>
+            <tbody id="tablaRecursosBody" class="bg-white divide-y divide-gray-200">
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p class="text-xs text-center text-gray-400 mt-4">
+        💡 Arrastra desde el icono <iconify-icon icon="mdi:drag-horizontal-variant"></iconify-icon> para reordenar.
+        Los cambios se guardan en bloque.
+      </p>
+
+    </div>
+  </div>
+
+  <!-- ========================================
+     SECCIÓN: TRAMOS HORARIOS
+     ======================================== -->
+  <div id="admin-section-tramos" class="admin-section hidden">
+
+    <div class="table-container-compact">
+
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+        <div>
+          <h2 class="text-2xl font-bold text-gray-800 flex items-center gap-2">
+            <iconify-icon icon="mdi:clock-time-four-outline" class="text-blue-600"></iconify-icon>
+            Gestión de Tramos Horarios
+          </h2>
+          <p class="text-sm text-gray-500 mt-1">Define los bloques de tiempo para reservas</p>
+        </div>
+        <button onclick="agregarNuevoTramo()" class="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl shadow-lg shadow-blue-600/20 transition-all transform active:scale-95 flex items-center justify-center gap-2 font-medium">
+    <iconify-icon icon="mdi:plus" class="text-xl"></iconify-icon>
+    <span>Nuevo Tramo</span>
+  </button>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="w-16 px-4 py-3 text-center"></th>
+                <th class="w-32 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-auto">Nombre</th>
+                <th class="w-32 px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Inicio</th>
+                <th class="w-32 px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Fin</th>
+                <th class="w-16 px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tablaTramosBody" class="bg-white divide-y divide-gray-200">
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p class="text-xs text-center text-gray-400 mt-4">
+        Los tramos se mostrarán en el calendario en este orden exacto.
+      </p>
+
+    </div>
+  </div>
+
+
+  <!-- ========================================
+     SECCIÓN: DISPONIBILIDAD
+     ======================================== -->
+  <div id="admin-section-disponibilidad" class="admin-section hidden">
+
+    <div class="max-w-4xl mx-auto">
+
+      <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 mb-6 border-b border-gray-100 pb-6">
+
+        <div>
+          <h2 class="text-2xl font-bold text-gray-800 flex items-center gap-2">
+            <iconify-icon icon="mdi:calendar-check" class="text-blue-600"></iconify-icon>
+            Matriz de Disponibilidad
+          </h2>
+          <p class="text-gray-500 text-sm mt-1">Bloquea tramos y añade motivos.</p>
+        </div>
+
+        <div class="relative w-full sm:w-72 z-50">
+          <button onclick="toggleRecursoDropdown(event)"
+          id="btnSelectorRecursoDisp"
+          class="w-full flex items-center gap-3 px-4 py-2.5 bg-white border border-gray-300 rounded-xl shadow-sm hover:border-blue-400 transition-all text-left group">
+
+      <div class="p-1.5 rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
+          <iconify-icon icon="mdi:cube-outline" class="text-lg"></iconify-icon>
+      </div>
+      
+      <span class="flex-1 text-sm font-medium text-gray-700 truncate" id="labelSelectorRecursoDisp">Selecciona Recurso...</span>
+      
+      <iconify-icon icon="mdi:chevron-down" class="text-gray-400 group-hover:text-blue-500 transition-colors"></iconify-icon>
+    </button>
+
+          <div id="dropdownRecursoDisp"
+            class="hidden absolute top-full left-0 mt-2 w-full bg-white border border-gray-100 rounded-xl shadow-xl overflow-hidden animate-fade-in-up max-h-80 overflow-y-auto z-60">
+          </div>
+        </div>
+
+      </div>
+
+      <div id="contenedorMatriz" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hidden">
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50 text-gray-500 text-xs uppercase font-medium sticky top-0 z-20 shadow-sm">
+              <tr>
+                <th
+                  class="px-4 py-3 text-left w-32 min-w-[120px] bg-gray-50 sticky left-0 z-30 border-r border-gray-200">
+                  Tramo
+                </th>
+                <th class="px-2 py-3 text-center min-w-[100px]">Lunes</th>
+                <th class="px-2 py-3 text-center min-w-[100px]">Martes</th>
+                <th class="px-2 py-3 text-center min-w-[100px]">Miércoles</th>
+                <th class="px-2 py-3 text-center min-w-[100px]">Jueves</th>
+                <th class="px-2 py-3 text-center min-w-[100px]">Viernes</th>
+              </tr>
+            </thead>
+            <tbody id="cuerpoMatriz" class="bg-white divide-y divide-gray-200">
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="emptyStateDisp" class="flex flex-col items-center justify-center py-20 text-gray-400">
+        <div class="bg-gray-50 p-6 rounded-full mb-4">
+          <iconify-icon icon="mdi:cursor-pointer" class="text-4xl text-blue-200"></iconify-icon>
+        </div>
+        <p class="text-lg font-medium text-gray-500">Selecciona un recurso arriba</p>
+        <p class="text-sm">Podrás configurar sus horarios haciendo clic en la rejilla.</p>
+      </div>
+
+      <div id="leyendaDisp" class="hidden mt-6 flex justify-center gap-6 text-xs text-gray-500">
+        <div class="flex items-center gap-2">
+          <div class="w-4 h-4 rounded bg-green-100 border border-green-300"></div>
+          <span>Disponible</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="w-4 h-4 rounded bg-red-100 border border-red-300"></div>
+          <span>Bloqueado</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="w-4 h-4 rounded bg-white border border-gray-200 flex items-center justify-center">
+            <span class="text-[10px] text-gray-400">✏️</span>
+          </div>
+          <span>Clic para Nota</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ========================================
+     SECCIÓN: CURSOS
+     ======================================== -->
+  <div id="admin-section-cursos" class="admin-section hidden">
+
+    <div class="table-container-compact">
+
+      <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
+
+        <div>
+          <h2 class="text-2xl font-bold text-gray-800 flex items-center gap-2">
+            <iconify-icon icon="mdi:school-outline" class="text-blue-600"></iconify-icon>
+            Gestión de Cursos
+          </h2>
+          <p class="text-gray-500 text-sm mt-1">Administra los grupos académicos</p>
+        </div>
+
+        <div class="flex flex-row gap-3 w-full lg:w-auto items-center">
+
+          <div class="bg-gray-100 p-1 rounded-lg flex text-sm shrink-0" id="modoVisualizacionToggle">
+            <button class="px-3 py-1.5 rounded-md transition-all font-medium"
+                  onclick="cambiarModoVisualizacionCursos('botones')" data-modo="botones">
+             Botones
+            </button>
+            <button class="px-3 py-1.5 rounded-md transition-all font-medium"
+                  onclick="cambiarModoVisualizacionCursos('lista')" data-modo="lista">
+             Lista
+            </button>
+          </div>
+
+          <button onclick="agregarNuevoCurso()" class="flex-1 sm:flex-none bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 transition-colors shadow-sm whitespace-nowrap">
+          <iconify-icon icon="mdi:plus" width="20"></iconify-icon>
+          <span>Nuevo Curso</span>
+          </button>
+        </div>
+
+      </div>
+
+      <div class="mb-4">
+        <div class="relative">
+          <iconify-icon icon="mdi:magnify" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+          </iconify-icon>
+          <input type="text" id="buscadorCursos" placeholder="Buscar curso..."
+                     class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                     onkeyup="filtrarCursos(this.value)">
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th scope="col"
+                  class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
+                </th>
+                <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Etapa</th>
+                <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Curso / Grupo</th>
+                <th scope="col"
+                  class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Acciones
+                </th>
+              </tr>
+            </thead>
+            <tbody id="tablaCursosBody" class="bg-white divide-y divide-gray-200">
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ========================================
+       SECCIÓN: USUARIOS (Placeholder)
+       ======================================== -->
+  <div id="admin-section-usuarios" class="admin-section hidden">
+
+    <div class="max-w-3xl mx-auto">
+
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+
+        <div>
+          <h2 class="text-2xl font-bold text-gray-800 flex items-center gap-2">
+            <iconify-icon icon="mdi:account-group-outline" class="text-blue-600"></iconify-icon>
+            Gestión de Usuarios
+          </h2>
+          <p class="text-gray-500 text-sm mt-1">Administra accesos y permisos</p>
+        </div>
+
+        <div class="flex flex-row gap-3 w-full sm:w-auto items-center">
+
+          <div
+            class="bg-blue-50 text-blue-700 px-3 py-2 rounded-lg text-sm font-medium border border-blue-100 shrink-0">
+            <span id="totalUsuariosCount">0</span> usuarios
+          </div>
+
+          <button onclick="agregarNuevoUsuario()" class="flex-1 sm:flex-none bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 flex items-center justify-center gap-2 transition-all shadow-lg shadow-blue-600/20 transform active:scale-95 whitespace-nowrap font-medium">
+      <iconify-icon icon="mdi:plus" width="20"></iconify-icon>
+      <span>Nuevo</span>
+    </button>
+
+        </div>
+
+      </div>
+
+      <div class="mb-5">
+        <div class="relative">
+          <iconify-icon icon="mdi:magnify" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+          </iconify-icon>
+          <input type="text" id="buscadorUsuarios"
+               placeholder="Buscar por nombre o email..."
+               class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none shadow-sm"
+               onkeyup="renderTablaUsuarios()">
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th scope="col"
+                  class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                </th>
+                <th scope="col" class="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Datos Usuario (Editable)
+                </th>
+                <th scope="col"
+                  class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
+                  Admin
+                </th>
+                <th scope="col"
+                  class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
+                  Acceso
+                </th>
+                <th scope="col"
+                  class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                </th>
+              </tr>
+            </thead>
+            <tbody id="tablaUsuariosBody" class="bg-white divide-y divide-gray-200">
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p class="text-xs text-center text-gray-400 mt-4">
+        Los cambios de nombre o email no afectan a la cuenta de Google, solo a cómo se ven aquí.
+      </p>
+
+    </div>
+  </div>
+
+  <!-- ========================================
+       SECCIÓN: CONFIG
+       ======================================== -->
+
+  <div id="admin-section-config" class="admin-section hidden pb-20">
+
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+      <div>
+        <h2 class="text-2xl font-bold text-gray-800 flex items-center gap-2">
+          <iconify-icon icon="mdi:cog-box" class="text-blue-600"></iconify-icon>
+          Configuración del Sistema
+        </h2>
+        <p class="text-gray-500 text-sm mt-1">Define las reglas globales de uso.</p>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+      <div
+        class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden group hover:shadow-md transition-shadow lg:col-span-2">
+        <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+          <iconify-icon icon="mdi:bank-outline" class="text-8xl text-indigo-500"></iconify-icon>
+        </div>
+
+        <h3 class="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2 border-b border-gray-100 pb-2">
+          <iconify-icon icon="mdi:id-card" class="text-indigo-500"></iconify-icon>
+          Identidad del Centro
+        </h3>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 relative z-10">
+          <div>
+            <label class="block text-sm font-bold text-gray-700 mb-1">Nombre del Centro</label>
+            <div class="relative">
+              <iconify-icon icon="mdi:format-title" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+              </iconify-icon>
+              <input type="text" id="cfg_nombre_centro" placeholder="Ej: IES Tecnológico Futuro" class="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 outline-none font-bold text-gray-800">
+            </div>
+            <p class="text-xs text-gray-400 mt-1">Aparecerá en la cabecera y en los correos.</p>
+          </div>
+
+          <div>
+            <label class="block text-sm font-bold text-gray-700 mb-1">URL del Logo (Opcional)</label>
+            <div class="relative">
+              <iconify-icon icon="mdi:image-link" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+              </iconify-icon>
+              <input type="text" id="cfg_url_logo" placeholder="https://miweb.com/logo.png" class="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 outline-none text-sm">
+            </div>
+            <p class="text-xs text-gray-400 mt-1">Pega el enlace directo a la imagen de tu logo.</p>
+          </div>
+        </div>
+      </div>
+
+      <div
+        class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden group hover:shadow-md transition-shadow">
+        <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+          <iconify-icon icon="mdi:clock-fast" class="text-8xl text-orange-500"></iconify-icon>
+        </div>
+
+        <h3 class="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2 border-b border-gray-100 pb-2">
+          <iconify-icon icon="mdi:timer-sand" class="text-orange-500"></iconify-icon>
+          Tiempos y Plazos
+        </h3>
+
+        <div class="space-y-6 relative z-10">
+          <div>
+            <label class="block text-sm font-bold text-gray-700 mb-1">📅 Horizonte (Días vista)</label>
+            <div class="flex items-center gap-3">
+              <input type="number" id="cfg_dias_vista_maximo" min="1" class="w-24 bg-gray-50 border-gray-300 rounded-lg focus:ring-orange-500 focus:border-orange-500 p-2 border font-mono font-bold text-center">
+              <span class="text-xs text-gray-500 leading-tight">¿Hasta cuan lejos en el futuro pueden reservar?</span>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-bold text-gray-700 mb-1">⚡ Antelación Mínima (Minutos)</label>
+            <div class="flex items-center gap-3">
+              <input type="number" id="cfg_minutos_antelacion" min="0" class="w-24 bg-gray-50 border-gray-300 rounded-lg focus:ring-orange-500 focus:border-orange-500 p-2 border font-mono font-bold text-center">
+              <span class="text-xs text-gray-500 leading-tight">Mínimo tiempo antes de la hora para reservar.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div
+        class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden group hover:shadow-md transition-shadow">
+        <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+          <iconify-icon icon="mdi:shield-lock" class="text-8xl text-green-600"></iconify-icon>
+        </div>
+
+        <h3 class="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2 border-b border-gray-100 pb-2">
+          <iconify-icon icon="mdi:gavel" class="text-green-600"></iconify-icon>
+          Límites y Abusos
+        </h3>
+
+        <div class="space-y-6 relative z-10">
+          <div>
+            <label class="block text-sm font-bold text-gray-700 mb-1">🔢 Máx. Reservas Activas</label>
+            <div class="flex items-center gap-3">
+              <input type="number" id="cfg_limite_reservas" min="0" class="w-24 bg-gray-50 border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500 p-2 border font-mono font-bold text-center">
+              <span class="text-xs text-gray-500 leading-tight">Total de reservas vivas simultáneas por usuario.</span>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-bold text-gray-700 mb-1">🧱 Máx. Tramos por Reserva</label>
+            <div class="flex items-center gap-3">
+              <input type="number" id="cfg_max_tramos_simultaneos" min="1" value="1" class="w-24 bg-gray-50 border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500 p-2 border font-mono font-bold text-center">
+              <span class="text-xs text-gray-500 leading-tight">Si activas multitramo, ¿cuántos seguidos pueden coger?</span>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-bold text-gray-700 mb-1">🚫 Tope Cancelación (Horas)</label>
+            <div class="flex items-center gap-3">
+              <input type="number" id="cfg_horas_cancelacion" min="0" class="w-24 bg-gray-50 border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500 p-2 border font-mono font-bold text-center">
+              <span class="text-xs text-gray-500 leading-tight">Antelación mínima para poder cancelar.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 lg:col-span-2 relative overflow-hidden">
+
+        <h3 class="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2 border-b border-gray-100 pb-2">
+          <iconify-icon icon="mdi:tune" class="text-blue-600"></iconify-icon>
+          Ajustes Generales
+        </h3>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 relative z-10">
+
+          <div class="space-y-4">
+            <div class="flex items-center justify-between p-4 bg-purple-50 rounded-xl border border-purple-100">
+              <div>
+                <div class="font-bold text-purple-900 text-sm">🧩 Permitir Multitramo</div>
+                <div class="text-xs text-purple-700/70">Seleccionar varios tramos juntos.</div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="cfg_permitir_multitramo" class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                 </label>
+            </div>
+
+            <div class="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-200">
+              <div>
+                <div class="font-bold text-gray-800 text-sm">📝 Exigir Motivo</div>
+                <div class="text-xs text-gray-500">Obligatorio rellenar "para qué".</div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="cfg_exigir_motivo" class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                 </label>
+            </div>
+
+            <div class="flex items-center justify-between p-4 bg-red-50 rounded-xl border border-red-100">
+              <div>
+                <div class="font-bold text-red-800 text-sm">🚧 Modo Mantenimiento</div>
+                <div class="text-xs text-red-600/70">Nadie podrá reservar.</div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="cfg_modo_mantenimiento" class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-red-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+                 </label>
+            </div>
+          </div>
+
+          <div class="flex flex-col justify-center">
+            <label class="block text-sm font-bold text-gray-700 mb-2">📧 Email Copia Oculta (Admin)</label>
+            <div class="relative">
+              <iconify-icon icon="mdi:email-check-outline"
+                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></iconify-icon>
+              <input type="email" id="cfg_email_admin" placeholder="direccion@colegio.com" class="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all">
+            </div>
+            <p class="text-xs text-gray-400 mt-2">Deja este campo vacío si no quieres recibir copias.</p>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ========================================
+       SECCIÓN: RESERVAS (Placeholder)
+       ======================================== -->
+  <div id="admin-section-reservas" class="admin-section active">
+
+    <div class="max-w-6xl mx-auto">
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+
+        <div>
+          <h2 class="text-2xl font-bold text-gray-800 flex items-center gap-2">
+            <iconify-icon icon="mdi:calendar-check-outline" class="text-blue-600"></iconify-icon>
+            Historial de Reservas
+          </h2>
+          <p class="text-gray-500 text-sm mt-1">Supervisa, filtra y gestiona las reservas del centro</p>
+        </div>
+
+        <div class="w-full sm:w-auto">
+          <div
+            class="bg-white text-gray-600 px-4 py-2.5 rounded-lg text-sm font-medium border border-gray-200 shadow-sm flex items-center justify-center sm:justify-start gap-2 w-full sm:w-auto transition-all">
+            <iconify-icon icon="mdi:database-clock-outline" class="text-blue-500 text-lg"></iconify-icon>
+            <span><span id="totalReservasCount" class="font-bold text-gray-800">0</span> registros</span>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="mb-5">
+        <div class="relative">
+          <iconify-icon icon="mdi:magnify" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+          </iconify-icon>
+          <input type="text" id="buscadorReservas"
+               placeholder="Buscar por email, recurso, fecha o estado..."
+               class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none shadow-sm transition-shadow"
+               onkeyup="renderTablaReservas()">
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha / Tramo
+                </th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Recurso</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Usuario /
+                  Curso</th>
+                <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">Cant.
+                </th>
+                <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Estado
+                </th>
+                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
+                  Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tablaReservasBody" class="bg-white divide-y divide-gray-200">
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<!-- ========================================
+     MODAL: CREAR/EDITAR RECURSO
+     CON SELECTOR ICONIFY HÍBRIDO
+     ✅ CORREGIDO: 3 tipos de recurso
+     ======================================== -->
+<dialog id="modalRecurso" class="p-0 border-0 w-full max-w-3xl shadow-xl rounded-xl bg-white">
+  <div class="mx-auto w-full">
+
+    <!-- Header del Modal -->
+    <div
+      class="flex justify-between items-center p-5 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+      <h3 id="modalRecursoTitle" class="text-2xl font-bold text-gray-900">Nuevo Recurso</h3>
+      <button id="closeModalRecurso" class="text-gray-400 hover:text-gray-600 text-2xl focus:outline-none focus:ring-2 focus:ring-gray-500 rounded">
+        &times;
+      </button>
+    </div>
+
+    <!-- Contenido del Modal -->
+    <form id="formRecurso" class="p-6">
+
+      <!-- Fila 1: ID y Nombre -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <label for="recursoId" class="block text-sm font-medium text-gray-700 mb-1">
+            ID del Recurso <span class="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            id="recursoId"
+            name="id_recurso"
+            placeholder="Ej: SALA_01, IMP3D_01"
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            required
+          >
+          <p class="text-xs text-gray-500 mt-1">Debe ser único y sin espacios</p>
+        </div>
+        <div>
+          <label for="recursoNombre" class="block text-sm font-medium text-gray-700 mb-1">
+            Nombre <span class="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            id="recursoNombre"
+            name="nombre"
+            placeholder="Ej: Sala de Informática, Impresora 3D"
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            required
+          >
+        </div>
+      </div>
+
+      <!-- Fila 2: Tipo y Capacidad -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <label for="recursoTipo" class="block text-sm font-medium text-gray-700 mb-1">
+            Tipo <span class="text-red-500">*</span>
+          </label>
+          <select
+            id="recursoTipo"
+            name="tipo"
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            required
+          >
+            <option value="">Selecciona un tipo...</option>
+            <option value="Sala">Sala (espacio físico)</option>
+            <option value="Dispositivo">Dispositivo (unidad individual)</option>
+            <option value="Agrupado">Agrupado (múltiples unidades)</option>
+          </select>
+          <p class="text-xs text-gray-500 mt-1">
+            <b>Sala/Dispositivo:</b> Solo 1 reserva simultánea<br>
+            <b>Agrupado:</b> Varias reservas simultáneas
+          </p>
+        </div>
+        <div>
+          <label for="recursoCapacidad" class="block text-sm font-medium text-gray-700 mb-1">
+            Capacidad <span class="text-red-500">*</span>
+          </label>
+          <input
+            type="number"
+            id="recursoCapacidad"
+            name="capacidad"
+            min="1"
+            value="1"
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            required
+          >
+          <p class="text-xs text-gray-500 mt-1">
+            <span id="capacidadHelp">Para Salas/Dispositivos: siempre 1<br>Para Agrupados: nº de unidades</span>
+          </p>
+        </div>
+      </div>
+
+      <!-- Fila 3: Ubicación y Estado -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <label for="recursoUbicacion" class="block text-sm font-medium text-gray-700 mb-1">
+            Ubicación
+          </label>
+          <input
+            type="text"
+            id="recursoUbicacion"
+            name="ubicacion"
+            placeholder="Ej: Planta 2, Edificio A, Aula 203"
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          >
+        </div>
+        <div>
+          <label for="recursoEstado" class="block text-sm font-medium text-gray-700 mb-1">
+            Estado <span class="text-red-500">*</span>
+          </label>
+          <select
+            id="recursoEstado"
+            name="estado"
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            required
+          >
+            <option value="Activo">Activo</option>
+            <option value="Mantenimiento">En Mantenimiento</option>
+            <option value="Inactivo">Inactivo</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Selector de Iconos ICONIFY -->
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          Icono <span class="text-red-500">*</span>
+        </label>
+
+        <!-- Preview del Icono Seleccionado -->
+        <div class="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-3">
+          <div id="iconoPreview" class="text-5xl">
+            <iconify-icon icon="mdi:package-variant" width="48" height="48"></iconify-icon>
+          </div>
+          <div>
+            <p class="text-sm font-medium text-gray-700">Icono seleccionado:</p>
+            <p id="iconoPreviewCode" class="text-xs text-gray-500 font-mono">mdi:package-variant</p>
+          </div>
+        </div>
+
+        <input type="hidden" id="recursoIcono" name="icono" value="mdi:package-variant">
+
+        <!-- Tabs de Categorías -->
+        <div class="mb-3 border-b border-gray-200 overflow-x-auto">
+          <div class="flex gap-1 min-w-max">
+            <button type="button" class="iconify-category-tab active" data-category="tecnologia">💻 Tecnología</button>
+            <button type="button" class="iconify-category-tab" data-category="ciencias">🔬 Ciencias</button>
+            <button type="button" class="iconify-category-tab" data-category="deportes">⚽ Deportes</button>
+            <button type="button" class="iconify-category-tab" data-category="arte">🎨 Arte</button>
+            <button type="button" class="iconify-category-tab" data-category="biblioteca">📚 Biblioteca</button>
+            <button type="button" class="iconify-category-tab" data-category="idiomas">🌍 Idiomas</button>
+            <button type="button" class="iconify-category-tab" data-category="naturaleza">🌱 Naturaleza</button>
+            <button type="button" class="iconify-category-tab" data-category="espacios">🏫 Espacios</button>
+            <button type="button" class="iconify-category-tab" data-category="ocio">🎮 Ocio</button>
+          </div>
+        </div>
+
+        <!-- Grid de Iconos de la Categoría -->
+        <div id="iconifyGrid"
+          class="grid grid-cols-8 gap-2 max-h-60 overflow-y-auto p-2 bg-white border border-gray-200 rounded-lg mb-3">
+          <!-- Se llenará dinámicamente -->
+        </div>
+
+        <!-- Buscador de Iconos (200k+ iconos) -->
+        <div class="mb-2">
+          <div class="flex gap-2">
+            <input
+              type="text"
+              id="iconifySearchInput"
+              placeholder="🔍 Buscar entre 200,000+ iconos... (Ej: robot, music, lab)"
+              class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+            <button type="button" id="iconifySearchBtn" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
+              Buscar
+            </button>
+          </div>
+          <p class="text-xs text-gray-500 mt-1">
+            Escribe en inglés para mejores resultados (ej: "printer", "microscope", "guitar")
+          </p>
+        </div>
+
+        <!-- Resultados de Búsqueda -->
+        <div id="iconifySearchResults"
+          class="hidden max-h-48 overflow-y-auto p-2 bg-gray-50 border border-gray-200 rounded-lg">
+          <!-- Se llenará dinámicamente -->
+        </div>
+      </div>
+
+      <!-- Botones de Acción -->
+      <div class="flex justify-between items-center pt-4 border-t border-gray-200">
+        <button
+          type="button"
+          id="btnGenerarDisponibilidad"
+          class="hidden px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+        >
+          📅 Generar Disponibilidad
+        </button>
+        <div class="flex gap-3 ml-auto">
+          <button type="button" id="cancelModalRecurso" class="px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 transition-colors">
+            Cancelar
+          </button>
+          <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+            Guardar Recurso
+          </button>
+        </div>
+      </div>
+
+    </form>
+
+  </div>
+</dialog>
+
+<!-- ========================================
+     MODAL: GENERAR DISPONIBILIDAD
+     ======================================== -->
+<dialog id="modalDisponibilidad" class="p-0 border-0 w-full max-w-xl shadow-xl rounded-xl bg-white">
+  <div class="mx-auto w-full">
+
+    <!-- Header del Modal -->
+    <div
+      class="flex justify-between items-center p-5 border-b border-gray-200 bg-gradient-to-r from-green-50 to-emerald-50">
+      <div>
+        <h3 class="text-2xl font-bold text-gray-900">Generar Disponibilidad</h3>
+        <p class="text-sm text-gray-600 mt-1">Para: <span id="recursoNombreDisp" class="font-semibold"></span></p>
+      </div>
+      <button id="closeModalDisponibilidad" class="text-gray-400 hover:text-gray-600 text-2xl focus:outline-none focus:ring-2 focus:ring-gray-500 rounded">
+        &times;
+      </button>
+    </div>
+
+    <!-- Contenido del Modal -->
+    <form id="formDisponibilidad" class="p-6">
+
+      <!-- Selección de Días -->
+      <div class="mb-4">
+        <div class="flex justify-between items-center mb-2">
+          <label class="block text-sm font-medium text-gray-700">
+            Días de la Semana <span class="text-red-500">*</span>
+          </label>
+          <button type="button" id="seleccionarTodosDias" class="text-xs text-blue-600 hover:text-blue-800 font-medium">
+            Todos
+          </button>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <label class="flex items-center gap-2 p-2 border border-gray-200 rounded hover:bg-gray-50 cursor-pointer">
+            <input type="checkbox" name="dias" value="Lunes" class="rounded text-blue-600 focus:ring-blue-500">
+            <span class="text-sm">Lunes</span>
+          </label>
+          <label class="flex items-center gap-2 p-2 border border-gray-200 rounded hover:bg-gray-50 cursor-pointer">
+            <input type="checkbox" name="dias" value="Martes" class="rounded text-blue-600 focus:ring-blue-500">
+            <span class="text-sm">Martes</span>
+          </label>
+          <label class="flex items-center gap-2 p-2 border border-gray-200 rounded hover:bg-gray-50 cursor-pointer">
+            <input type="checkbox" name="dias" value="Miércoles" class="rounded text-blue-600 focus:ring-blue-500">
+            <span class="text-sm">Miércoles</span>
+          </label>
+          <label class="flex items-center gap-2 p-2 border border-gray-200 rounded hover:bg-gray-50 cursor-pointer">
+            <input type="checkbox" name="dias" value="Jueves" class="rounded text-blue-600 focus:ring-blue-500">
+            <span class="text-sm">Jueves</span>
+          </label>
+          <label class="flex items-center gap-2 p-2 border border-gray-200 rounded hover:bg-gray-50 cursor-pointer">
+            <input type="checkbox" name="dias" value="Viernes" class="rounded text-blue-600 focus:ring-blue-500">
+            <span class="text-sm">Viernes</span>
+          </label>
+          <label class="flex items-center gap-2 p-2 border border-gray-200 rounded hover:bg-gray-50 cursor-pointer">
+            <input type="checkbox" name="dias" value="Sábado" class="rounded text-blue-600 focus:ring-blue-500">
+            <span class="text-sm">Sábado</span>
+          </label>
+          <label class="flex items-center gap-2 p-2 border border-gray-200 rounded hover:bg-gray-50 cursor-pointer">
+            <input type="checkbox" name="dias" value="Domingo" class="rounded text-blue-600 focus:ring-blue-500">
+            <span class="text-sm">Domingo</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Disponibilidad -->
+      <div class="mb-4">
+        <label for="dispPermitido" class="block text-sm font-medium text-gray-700 mb-2">
+          Disponibilidad <span class="text-red-500">*</span>
+        </label>
+        <select
+          id="dispPermitido"
+          name="permitido"
+          class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          required
+        >
+          <option value="Si">✅ Permitir reservas</option>
+          <option value="No">⛔ Bloquear reservas</option>
+        </select>
+      </div>
+
+      <!-- Razón de Bloqueo (Solo si está bloqueado) -->
+      <div id="razonBloqueoContainer" class="mb-4 hidden">
+        <label for="dispRazonBloqueo" class="block text-sm font-medium text-gray-700 mb-2">
+          Razón del Bloqueo
+        </label>
+        <input
+          type="text"
+          id="dispRazonBloqueo"
+          name="razon_bloqueo"
+          placeholder="Ej: Mantenimiento, Evento especial, etc."
+          class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+        >
+      </div>
+
+      <!-- Nota Informativa -->
+      <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+        <p class="text-sm text-blue-800">
+          ℹ️ Esta configuración se aplicará a <b>todos los tramos horarios</b> de los días seleccionados.
+        </p>
+      </div>
+
+      <!-- Botones de Acción -->
+      <div class="flex justify-end gap-3 pt-4 border-t border-gray-200">
+        <button type="button" id="cancelModalDisponibilidad" class="px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 transition-colors">
+          Cancelar
+        </button>
+        <button type="submit" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+          Generar Disponibilidad
+        </button>
+      </div>
+
+    </form>
+
+  </div>
+</dialog>
+
+<div id="modalConfirmacion"
+  class="fixed inset-0 bg-gray-900/60 z-[9999] hidden flex items-center justify-center backdrop-blur-sm transition-all duration-300">
+  <div
+    class="bg-white rounded-2xl shadow-2xl max-w-sm w-full mx-4 overflow-hidden transform transition-all scale-100 border border-gray-100">
+
+    <div class="p-6 text-center">
+      <div class="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-50 mb-5 ring-4 ring-red-50/50">
+        <iconify-icon icon="mdi:alert-outline" class="text-red-500 text-3xl"></iconify-icon>
+      </div>
+
+      <h3 class="text-xl font-bold text-gray-900 mb-2" id="confirmTitle">¿Estás seguro?</h3>
+      <p class="text-sm text-gray-500 mb-8 leading-relaxed" id="confirmMessage">
+        Esta acción no se puede deshacer.
+      </p>
+
+      <div class="flex gap-3 justify-center">
+        <button onclick="cerrarConfirmacion()"
+                class="flex-1 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-semibold text-sm transition-colors">
+          Cancelar
+        </button>
+        <button id="btnConfirmarAccion"
+                class="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl hover:bg-red-700 font-semibold text-sm shadow-lg shadow-red-600/20 transition-all transform hover:scale-[1.02]">
+          Sí, confirmar
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div id="modalIconPicker" class="fixed inset-0 z-[9999] hidden bg-gray-900/50 backdrop-blur-sm transition-opacity">
+  <div class="flex min-h-screen items-center justify-center p-4">
+    <div
+      class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden animate-fade-in-up">
+
+      <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+        <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+          <iconify-icon icon="mdi:emoticon-outline" class="text-blue-600"></iconify-icon>
+          Seleccionar Icono
+        </h3>
+        <button onclick="cerrarSelectorIconos()" class="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-200 transition-colors">
+          <iconify-icon icon="mdi:close" class="text-xl"></iconify-icon>
+        </button>
+      </div>
+
+      <div class="p-4 border-b border-gray-100 space-y-3">
+        <div class="relative">
+          <iconify-icon icon="mdi:magnify" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+          </iconify-icon>
+          <input type="text" id="searchIconInput" placeholder="Buscar icono (ej: wifi, book, computer)..."
+                 class="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all"
+                 oninput="filtrarIconosGrid()">
+        </div>
+
+        <div class="flex flex-wrap gap-2" id="iconCategories">
+        </div>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-4 bg-gray-50/50">
+        <div id="iconGrid" class="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-3">
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div id="modalEditarNota"
+  class="fixed inset-0 z-[9999] hidden overflow-y-auto bg-gray-900/50 backdrop-blur-sm transition-opacity"
+  aria-modal="true">
+  <div class="flex min-h-screen items-center justify-center p-4 text-center sm:p-0">
+    <div
+      class="relative transform overflow-hidden rounded-2xl bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-md">
+
+      <div class="bg-gray-50 px-6 py-5 flex items-center gap-4 border-b border-gray-100">
+        <div class="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 sm:h-10 sm:w-10">
+          <iconify-icon icon="mdi:comment-edit-outline" class="text-xl text-blue-600"></iconify-icon>
+        </div>
+        <div>
+          <h3 class="text-lg font-semibold leading-6 text-gray-900" id="modalEditarNotaTitle">Motivo del Bloqueo</h3>
+          <p class="text-sm text-gray-500">Añade una nota explicativa</p>
+        </div>
+      </div>
+
+      <div class="px-6 py-6">
+        <label for="notaTextarea" class="block text-sm font-medium leading-6 text-gray-900 mb-2">Descripción</label>
+        <textarea id="notaTextarea" rows="4" class="block w-full rounded-xl border-0 py-3 px-4 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6 resize-none bg-gray-50/50 focus:bg-white transition-all" placeholder="Ej: Festivo, Mantenimiento, Reservado para examen..."></textarea>
+        <input type="hidden" id="notaTramoId">
+        <input type="hidden" id="notaDia">
+      </div>
+
+      <div class="bg-gray-50/80 px-6 py-4 flex gap-3 items-center">
+
+        <button type="button" onclick="cerrarModalEditarNota()"
+          class="px-4 py-2.5 text-sm font-medium text-gray-500 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 hover:text-gray-700 transition-colors shadow-sm whitespace-nowrap">
+    Cancelar
+  </button>
+
+        <button type="button" onclick="guardarNotaModal()"
+          class="flex-1 justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-blue-600/20 hover:bg-blue-500 transition-all active:scale-95 flex items-center gap-2">
+    <iconify-icon icon="mdi:content-save-outline" class="text-lg"></iconify-icon>
+    <span>Guardar Nota</span>
+  </button>
+
+      </div>
+
+    </div>
+  </div>
+</div>
+
+
+<div id="globalSaveBar"
+  class="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:w-auto z-[9000] transition-all duration-500 transform translate-y-32 opacity-0 pointer-events-none">
+
+  <div
+    class="bg-white/90 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-200/50 p-3 sm:p-4 flex flex-col sm:flex-row items-center gap-3 sm:gap-6 w-full sm:min-w-[320px] sm:max-w-md">
+
+    <div class="flex items-center gap-3 w-full sm:w-auto justify-center sm:justify-start">
+      <div
+        class="h-10 w-10 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center shadow-inner shrink-0">
+        <iconify-icon icon="mdi:content-save-edit" class="text-xl animate-pulse"></iconify-icon>
+      </div>
+
+      <div class="flex flex-col text-center sm:text-left">
+        <span id="saveBarTitle" class="text-sm font-bold text-gray-800 leading-tight">Cambios sin guardar</span>
+        <span id="saveBarSubtitle" class="text-[10px] text-gray-500 leading-tight hidden sm:block">Hay modificaciones pendientes</span>
+      </div>
+    </div>
+
+    <div class="flex gap-2 w-full sm:w-auto justify-center">
+
+      <button id="btnGlobalDiscard" class="flex-1 sm:flex-none px-3 py-2 text-xs font-bold text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors border border-transparent hover:border-gray-200">
+        Descartar
+      </button>
+
+      <button id="btnGlobalSave" class="flex-1 sm:flex-none px-5 py-2 bg-gray-900 hover:bg-black text-white text-xs font-bold rounded-xl shadow-lg shadow-gray-900/20 transition-all transform active:scale-95 flex items-center justify-center gap-2">
+        <span>Guardar</span>
+        <iconify-icon icon="mdi:arrow-right"></iconify-icon>
+      </button>
+
+    </div>
+
+  </div>
+</div>

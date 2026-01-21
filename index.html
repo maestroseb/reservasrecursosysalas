@@ -1,0 +1,1028 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Reservas</title>
+
+  <!-- Iconify CDN -->
+  <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+
+  <!-- Tailwind CSS (el original es https://cdn.tailwindcss.com pero ahora mismo Andared lo bloquea y lo he desviado a una copia que he hecho en Github Pages-->
+  <script src="https://maestroseb.github.io/recursos/tailwind.js"></script>
+
+  <!-- Estilos Modulares y del Panel Admin -->
+  <?!= include('styles'); ?>
+
+</head>
+
+<body class="bg-gradient-to-br from-gray-50 to-gray-100 font-sans p-4 md:p-8 min-h-screen">
+
+  <!-- Loading Spinner -->
+  <div id="loadingSpinner">
+    <div class="spinner"></div>
+  </div>
+
+  <!-- Contenedor Principal -->
+  <div id="appContainer" class="max-w-7xl mx-auto bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden">
+
+    <!-- Header con Tabs -->
+    <div class="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm bg-white/95 backdrop-blur-sm">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between items-center py-3">
+
+          <!-- Logo + Nombre (usa clases adaptativas) -->
+          <div id="headerBranding" class="flex items-center gap-4">
+            <? if (logoUrl) { ?>
+            <img id="headerLogo" src="<?= logoUrl ?>" alt="Logo" class="h-10 w-auto object-contain transition-all">
+            <? } else { ?>
+            <div id="headerLogoPlaceholder"
+              class="h-10 w-10 bg-gradient-to-br from-indigo-600 to-blue-600 rounded-xl flex items-center justify-center text-white shadow-md shrink-0 transition-all">
+              <iconify-icon icon="mdi:school-outline" class="text-2xl"></iconify-icon>
+            </div>
+            <? } ?>
+
+            <div class="flex flex-col justify-center">
+              <h1 id="headerTitle" class="text-lg font-bold text-gray-900 leading-tight transition-all">
+                <?= appName ?>
+              </h1>
+              <div id="headerSubtitle" class="flex items-center gap-2 mt-0.5 transition-all">
+                <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                <p class="text-xs text-gray-500">
+                  Hola, <span class="font-semibold text-gray-700"><?= userNameForHtml ?></span>
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Botones (usa clases adaptativas) -->
+          <div class="flex items-center gap-2 sm:gap-3">
+
+            <!-- Botón Incidencias (oculto por defecto) -->
+            <button id="btnVerIncidencias"
+          class="hidden relative h-10 px-4 flex items-center gap-2 bg-orange-50 text-orange-600 hover:bg-orange-100 border border-orange-200 rounded-lg transition-all duration-200 shadow-sm"
+          onclick="mostrarSeccionIncidencias()">
+          <iconify-icon icon="mdi:alert-circle-outline" class="text-lg"></iconify-icon>
+          <span class="hidden sm:inline">Incidencias</span>
+          <span id="badgeIncidenciasPendientes" 
+                class="hidden absolute -top-2 -right-2 sm:static flex h-5 w-5 sm:h-auto sm:w-auto items-center justify-center rounded-full bg-red-600 !text-white text-[10px] font-bold shadow-sm leading-none border border-white sm:border-0 sm:px-2 sm:py-0.5 sm:text-xs">
+          </span>
+        </button>
+
+            <!-- Botón Mis Reservas -->
+            <button id="myReservationsButton"
+          class="h-10 px-3 min-[480px]:px-4 flex items-center gap-2 bg-white hover:bg-gray-50 text-gray-700 hover:text-blue-600 border border-gray-200 hover:border-blue-300 rounded-lg transition-all duration-200 shadow-sm active:scale-95">
+          <iconify-icon icon="mdi:clipboard-list-outline" class="text-xl min-[480px]:text-lg"></iconify-icon>
+          <span class="text-sm font-bold whitespace-nowrap hidden min-[480px]:inline">Mis Reservas</span>
+        </button>
+
+            <!-- Botones Admin -->
+            <div id="adminButtonsContainer" class="hidden">
+              <button id="btnIrAdmin"
+            class="h-10 px-3 min-[480px]:px-4 flex items-center gap-2 bg-gray-900 hover:bg-black text-white border border-transparent rounded-lg transition-all duration-200 shadow-md active:scale-95 group">
+            <iconify-icon icon="mdi:cog-outline" class="text-xl min-[480px]:text-lg animate-[spin_10s_linear_infinite] group-hover:animate-none"></iconify-icon>
+            <span class="text-sm font-bold whitespace-nowrap hidden min-[480px]:inline">Admin</span>
+          </button>
+
+              <button id="btnVolverApp"
+            class="hidden h-10 px-3 min-[480px]:px-4 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white border border-transparent rounded-lg transition-all duration-200 shadow-md active:scale-95">
+            <iconify-icon icon="mdi:arrow-left" class="text-xl min-[480px]:text-lg"></iconify-icon>
+            <span class="text-sm font-bold whitespace-nowrap hidden min-[480px]:inline">Volver</span>
+          </button>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========================================
+         TAB 1: RESERVAS (Código Original)
+         ======================================== -->
+    <div id="tab-reservas" class="tab-content active bg-gray-50">
+
+      <div id="step1_Recursos"
+        class="view-section transition-opacity duration-300 max-w-7xl mx-auto px-4 sm:px-6 py-5 pb-6">
+
+        <div class="mb-12">
+          <h2 class="flex items-center gap-3 text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-2">
+            <span class="bg-blue-100 text-blue-600 p-2 rounded-lg shadow-sm leading-none">
+          <iconify-icon icon="mdi:door-open" class="text-2xl"></iconify-icon>
+        </span>
+            Salas y Espacios
+          </h2>
+          <div id="salasContainer" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          </div>
+        </div>
+
+        <div>
+          <h2 class="flex items-center gap-3 text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-2">
+            <span class="bg-emerald-100 text-emerald-600 p-2 rounded-lg shadow-sm leading-none">
+          <iconify-icon icon="mdi:laptop" class="text-2xl"></iconify-icon>
+        </span>
+            Dispositivos y Carritos
+          </h2>
+          <div id="dispositivosContainer" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          </div>
+        </div>
+
+      </div>
+
+      <div id="step2_Tramos"
+        class="view-section transition-opacity duration-300 hidden opacity-0 max-w-5xl mx-auto px-2 sm:px-6 py-4 sm:py-6">
+
+        <div
+          class="relative bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-5 mb-4 sm:mb-6 overflow-hidden group">
+
+          <div id="headerWatermark"
+            class="absolute -right-4 -bottom-6 text-[5rem] sm:text-[9rem] opacity-[0.05] rotate-12 pointer-events-none select-none transition-transform duration-700 group-hover:scale-105 group-hover:rotate-6">
+          </div>
+
+          <div
+            class="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-6">
+
+            <div class="flex items-center gap-3 w-full sm:w-auto">
+
+              <button id="backButton" class="group flex flex-col items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl bg-gray-50 hover:bg-blue-600 text-gray-500 hover:text-white border border-gray-100 hover:border-blue-600 transition-all shrink-0 shadow-sm">
+          <iconify-icon icon="mdi:arrow-left" class="text-xl group-hover:-translate-x-1 transition-transform"></iconify-icon>
+        </button>
+
+              <div class="h-8 w-px bg-gray-200 hidden sm:block"></div>
+
+              <div class="flex items-center gap-3 overflow-hidden flex-1 min-w-0">
+
+                <div id="recursoIconHeader" class="text-3xl text-gray-700 shrink-0 hidden sm:block leading-none"></div>
+
+                <div class="flex flex-col min-w-0 w-full">
+                  <span class="text-[9px] sm:text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-none mb-0.5 sm:mb-1">Reservando en</span>
+                  <h2 id="tramosTitle"
+                    class="text-lg sm:text-2xl font-bold text-gray-900 leading-tight truncate w-full">
+                    Cargando...
+                  </h2>
+                </div>
+              </div>
+            </div>
+
+            <div class="w-full sm:w-auto flex flex-col items-start sm:items-end mt-[-5px] sm:mt-0 pl-[52px] sm:pl-0">
+
+              <div class="flex items-center gap-2 text-blue-600 mb-0.5">
+                <iconify-icon icon="mdi:calendar-month" class="text-lg sm:text-2xl"></iconify-icon>
+                <span class="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest sm:hidden">Fecha seleccionada</span>
+                <span class="text-[10px] font-bold uppercase tracking-widest hidden sm:inline">Fecha seleccionada</span>
+              </div>
+
+              <span id="selectedDateDisplay" class="font-bold text-blue-900 text-base sm:text-xl leading-none capitalize">
+            Calculando...
+         </span>
+
+            </div>
+
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-4 sm:gap-6 items-start">
+          <div class="md:col-span-7 bg-white p-4 sm:p-6 rounded-xl sm:rounded-2xl shadow-sm border border-gray-200">
+            <div class="flex justify-between items-center mb-4">
+              <button id="prevMonth" class="w-8 h-8 flex items-center justify-center hover:bg-gray-100 rounded-lg text-gray-500 transition-colors">
+          <iconify-icon icon="mdi:chevron-left" class="text-2xl"></iconify-icon>
+        </button>
+              <span id="monthYear" class="font-bold text-gray-800 capitalize text-base sm:text-lg">Mes Año</span>
+              <button id="nextMonth" class="w-8 h-8 flex items-center justify-center hover:bg-gray-100 rounded-lg text-gray-500 transition-colors">
+          <iconify-icon icon="mdi:chevron-right" class="text-2xl"></iconify-icon>
+        </button>
+            </div>
+            <div id="calendarGrid" class="grid grid-cols-7 gap-1 place-items-center"></div>
+          </div>
+          <div
+            class="md:col-span-5 bg-white p-4 sm:p-5 rounded-xl sm:rounded-2xl shadow-sm border border-gray-200 flex flex-col h-fit">
+
+            <div class="flex items-center gap-2 mb-3 pb-2 border-b border-gray-100 shrink-0">
+              <iconify-icon icon="mdi:clock-outline" class="text-gray-400 text-lg"></iconify-icon>
+              <h3 class="font-bold text-gray-700 text-sm">Horarios Disponibles</h3>
+            </div>
+
+            <div id="tramosContainer"
+              class="overflow-y-auto pr-2 custom-scrollbar flex flex-col gap-2 max-h-[320px] sm:max-h-[450px]">
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ============================================
+     SECCIÓN: VER INCIDENCIAS
+     ============================================ -->
+    <div id="seccionIncidencias" class="view-section hidden opacity-0 bg-gray-50">
+
+      <div class="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+
+        <!-- Header con título y botón volver -->
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+
+          <div>
+            <h2 class="text-2xl font-bold text-gray-800 flex items-center gap-2 leading-none">
+              <div class="p-2 bg-orange-100 rounded-lg text-orange-600">
+                <iconify-icon icon="mdi:alert-circle-outline" class="text-2xl"></iconify-icon>
+              </div>
+              Gestión de Incidencias
+            </h2>
+            <p class="text-sm text-gray-500 mt-1 ml-1">
+              <span id="contadorIncidencias">Cargando datos...</span>
+            </p>
+          </div>
+
+          <button onclick="volverDesdeIncidencias()"
+              class="group flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 hover:text-blue-600 hover:border-blue-300 rounded-xl shadow-sm transition-all active:scale-95">
+        <iconify-icon icon="mdi:arrow-left" class="text-lg group-hover:-translate-x-1 transition-transform"></iconify-icon>
+        <span class="font-semibold text-sm">Volver</span>
+      </button>
+        </div>
+
+        <!-- Filtros y buscador -->
+        <div class="flex flex-col lg:flex-row gap-4">
+
+          <!-- Tabs de filtros -->
+          <div class="flex-1 overflow-x-auto scrollbar-hide">
+            <div
+              class="bg-gray-100/80 backdrop-blur-md p-1.5 rounded-xl border border-gray-200/50 flex gap-1 min-w-max">
+
+              <button onclick="cambiarFiltroIncidencia('todas', this)"
+                  class="filter-tab active flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-all bg-white text-gray-800 shadow-sm ring-1 ring-black/5 cursor-default">
+            <iconify-icon icon="mdi:clipboard-list-outline"></iconify-icon>
+            Todas
+          </button>
+
+              <button onclick="cambiarFiltroIncidencia('activas', this)"
+                  class="filter-tab flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-white/50 transition-all cursor-pointer">
+            <iconify-icon icon="mdi:alert-circle-outline"></iconify-icon>
+            Activas
+          </button>
+
+              <button onclick="cambiarFiltroIncidencia('pendiente', this)"
+                  class="filter-tab flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-500 hover:text-red-600 hover:bg-red-50 transition-all cursor-pointer">
+            <iconify-icon icon="mdi:clock-alert-outline"></iconify-icon>
+            Pendientes
+          </button>
+
+              <button onclick="cambiarFiltroIncidencia('en-proceso', this)"
+                  class="filter-tab flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-500 hover:text-yellow-600 hover:bg-yellow-50 transition-all cursor-pointer">
+            <iconify-icon icon="mdi:progress-wrench"></iconify-icon>
+            En Proceso
+          </button>
+
+              <button onclick="cambiarFiltroIncidencia('resuelta', this)"
+                  class="filter-tab flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-500 hover:text-green-600 hover:bg-green-50 transition-all cursor-pointer">
+            <iconify-icon icon="mdi:check-circle-outline"></iconify-icon>
+            Resueltas
+          </button>
+
+            </div>
+          </div>
+
+          <!-- Buscador -->
+          <div class="relative w-full lg:w-72 shrink-0">
+            <iconify-icon icon="mdi:magnify" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-lg">
+            </iconify-icon>
+            <input type="text"
+               id="buscadorIncidencias"
+               placeholder="Buscar recurso, sala..."
+               oninput="filtrarIncidencias()"
+               class="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 text-gray-700 text-sm rounded-xl focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all shadow-sm placeholder:text-gray-400">
+          </div>
+        </div>
+
+        <!-- Lista de incidencias -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+
+          <!-- Header de tabla (solo desktop) -->
+          <div
+            class="hidden sm:grid grid-cols-12 gap-4 px-6 py-3 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <div class="col-span-1">ID</div>
+            <div class="col-span-3">Recurso</div>
+            <div class="col-span-2">Estado</div>
+            <div class="col-span-2">Prioridad</div>
+            <div class="col-span-2">Usuario</div>
+            <div class="col-span-2 text-right">Fecha</div>
+          </div>
+
+          <!-- Contenido dinámico -->
+          <div id="listaIncidencias" class="divide-y divide-gray-100">
+            <div class="flex flex-col items-center justify-center py-20 text-gray-400">
+              <iconify-icon icon="mdi:loading" class="text-4xl animate-spin mb-3 text-orange-500"></iconify-icon>
+              <p class="text-sm font-medium">Cargando incidencias...</p>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Tab: Panel Admin (MODULAR) -->
+    <?!= include('admin-panel'); ?>
+
+  </div>
+
+  <!-- MODAL: Confirmación de Reserva -->
+  <dialog id="confirmationModal"
+    class="p-0 border-none w-[calc(100%-2rem)] max-w-lg shadow-2xl rounded-2xl bg-white backdrop:bg-gray-900/40 backdrop:backdrop-blur-sm open:animate-in open:fade-in open:zoom-in-95 open:duration-200 max-h-[90vh] overflow-y-auto overscroll-contain open:flex open:flex-col">
+
+    <div class="bg-gray-50 border-b border-gray-100 p-6">
+      <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+        <iconify-icon icon="mdi:calendar-check" class="text-blue-600"></iconify-icon>
+        Confirmar Reserva
+      </h3>
+
+      <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-start gap-4">
+        <div id="modalResourceIcon"
+          class="w-12 h-12 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center text-2xl shrink-0">
+        </div>
+
+        <div class="flex-1 min-w-0">
+          <h4 id="modalResourceName" class="font-bold text-gray-900 truncate text-lg leading-tight mb-1">Nombre Recurso
+          </h4>
+          <div class="flex flex-col gap-1 text-sm text-gray-500">
+            <div class="flex items-center gap-1.5">
+              <iconify-icon icon="mdi:calendar-today" class="text-gray-400"></iconify-icon>
+              <span id="modalDateString" class="font-medium capitalize">Fecha</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <iconify-icon icon="mdi:clock-time-four-outline" class="text-gray-400"></iconify-icon>
+              <span id="modalTimeString" class="font-medium">Hora</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="p-6 space-y-6">
+
+      <div>
+        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+              ¿Para qué grupo es? <span class="text-red-500">*</span>
+            </label>
+        <div id="cursoSelectorContainer">
+        </div>
+        <p id="cursoError"
+          class="hidden flex items-center gap-1 text-xs text-red-500 mt-2 font-medium bg-red-50 p-2 rounded-lg">
+          <iconify-icon icon="mdi:alert-circle"></iconify-icon> Debes seleccionar un curso
+        </p>
+      </div>
+
+      <div id="cantidadContainer" class="hidden animate-fade-in">
+        <label class="flex justify-between items-center text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+              <span>Cantidad necesaria</span>
+              <span class="text-xs font-normal bg-green-50 text-green-700 px-2 py-0.5 rounded-full border border-green-100">
+                  Disponibles: <b id="maxCantidad">1</b>
+              </span>
+            </label>
+
+        <div class="flex items-center gap-3">
+          <div
+            class="flex items-center border border-gray-300 rounded-xl overflow-hidden shadow-sm w-full max-w-[160px] bg-white focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 transition-all">
+
+            <button type="button" onclick="adjustQuantity(-1)"
+            class="w-12 h-10 flex items-center justify-center bg-gray-50 hover:bg-gray-100 text-gray-600 border-r border-gray-200 active:bg-gray-200 transition-colors shrink-0">
+      <iconify-icon icon="mdi:minus" class="text-lg"></iconify-icon>
+    </button>
+
+            <input type="number" id="cantidadInput" min="1" value="1"
+           inputmode="numeric" pattern="[0-9]*"
+           oninput="validateManualInput(this)"
+           onfocus="this.select()"
+           class="flex-1 h-10 text-center font-bold text-gray-800 border-none focus:ring-0 appearance-none bg-white p-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none">
+
+            <button type="button" onclick="adjustQuantity(1)"
+            class="w-12 h-10 flex items-center justify-center bg-gray-50 hover:bg-gray-100 text-gray-600 border-l border-gray-200 active:bg-gray-200 transition-colors shrink-0">
+            <iconify-icon icon="mdi:plus" class="text-lg"></iconify-icon>
+            </button>
+          </div>
+
+          <button type="button" id="selectAllBtn"
+          class="px-4 py-2.5 bg-blue-50 text-blue-700 border border-blue-100 rounded-xl hover:bg-blue-100 text-sm font-bold transition-colors shadow-sm flex-1 whitespace-nowrap">
+          Coger todos
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <label for="notasInput" class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+              Notas adicionales (Opcional)
+            </label>
+        <div class="relative">
+          <div class="absolute top-3 left-3 text-gray-400">
+            <iconify-icon icon="mdi:comment-text-outline" class="text-lg"></iconify-icon>
+          </div>
+          <textarea id="notasInput" rows="1"
+                          class="block w-full pl-10 pr-3 py-2.5 rounded-xl border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-gray-50 focus:bg-white transition-colors resize-none"
+                          placeholder="Ej: Necesito un proyector..."></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-gray-50 px-6 py-4 flex items-center justify-between gap-3 border-t border-gray-100 rounded-b-2xl">
+
+      <!-- Izquierda: Botón Reportar (icono solo en móvil, con texto en desktop) -->
+      <button onclick="abrirModalReportarIncidenciaDesdeReserva()"
+          class="px-3 sm:px-4 py-2.5 text-orange-600 font-semibold hover:bg-orange-50 rounded-xl transition-colors text-sm flex items-center gap-2 border border-orange-200"
+          title="Reportar problema con este recurso">
+    <iconify-icon icon="mdi:alert-circle-outline" class="text-lg"></iconify-icon>
+    <span class="hidden sm:inline">Reportar</span>
+  </button>
+
+      <!-- Derecha: Botones Cancelar y Confirmar -->
+      <div class="flex gap-3">
+        <button id="cancelModalButton"
+            class="px-5 py-2.5 text-gray-600 font-semibold hover:bg-gray-200 rounded-xl transition-colors text-sm">
+      Cancelar
+    </button>
+        <button id="confirmModalButton"
+            class="px-6 py-2.5 bg-gray-900 text-white font-bold rounded-xl hover:bg-black shadow-lg shadow-gray-900/20 active:scale-95 transition-all text-sm flex items-center gap-2">
+      <span>Confirmar</span>
+      <iconify-icon icon="mdi:arrow-right"></iconify-icon>
+    </button>
+      </div>
+
+    </div>
+  </dialog>
+
+  <div id="myReservationsModal"
+    class="fixed inset-0 z-50 hidden items-center justify-center bg-gray-900/40 backdrop-blur-sm p-4 transition-opacity duration-300">
+
+    <div
+      class="bg-white w-full max-w-lg shadow-2xl rounded-2xl max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
+
+      <div class="flex justify-between items-center p-5 border-b border-gray-100 bg-white z-10 sticky top-0">
+        <div class="flex items-center gap-2">
+          <div class="bg-blue-50 p-2 rounded-lg text-blue-600 leading-none">
+            <iconify-icon icon="mdi:calendar-check-outline" class="text-xl"></iconify-icon>
+          </div>
+          <h3 class="text-xl font-bold text-gray-800">Mis Reservas</h3>
+        </div>
+
+        <button id="closeMyReservationsButton"
+                    class="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors focus:outline-none">
+            <iconify-icon icon="mdi:close" class="text-xl"></iconify-icon>
+            </button>
+      </div>
+
+      <div class="p-4 sm:p-5 overflow-y-auto custom-scrollbar bg-gray-50/50 flex-1">
+
+        <div id="myReservationsSpinner" class="hidden flex flex-col items-center justify-center py-12">
+          <iconify-icon icon="mdi:loading" class="text-4xl text-blue-500 animate-spin mb-3"></iconify-icon>
+          <p class="text-sm font-medium text-gray-400">Consultando agenda...</p>
+        </div>
+
+        <div id="myReservationsError"
+          class="hidden p-4 bg-red-50 border border-red-100 text-red-600 rounded-xl text-sm font-medium flex items-center gap-2 mb-4">
+          <iconify-icon icon="mdi:alert-circle" class="text-lg shrink-0"></iconify-icon>
+          <span id="myReservationsErrorText">Error desconocido</span>
+        </div>
+
+        <div id="myReservationsEmpty" class="hidden flex flex-col items-center justify-center py-10 text-center">
+          <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-3">
+            <iconify-icon icon="mdi:calendar-blank-outline" class="text-3xl text-gray-400"></iconify-icon>
+          </div>
+          <h4 class="text-gray-900 font-bold mb-1">Sin reservas activas</h4>
+          <p class="text-gray-500 text-sm max-w-[200px]">No tienes reservas futuras programadas en este momento.</p>
+        </div>
+
+        <div id="myReservationsList" class="flex flex-col gap-3">
+        </div>
+      </div>
+
+      <div class="px-5 py-3 bg-white border-t border-gray-100 text-center">
+        <p class="text-xs text-gray-400 flex items-center justify-center gap-1">
+          <iconify-icon icon="mdi:history" class="text-gray-300"></iconify-icon>
+          Solo se muestran reservas futuras o del día actual.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Confirmación de Cancelación -->
+  <div id="modalConfirmacionCancelacion"
+    class="fixed inset-0 bg-gray-900/60 z-[200] hidden flex items-center justify-center backdrop-blur-sm transition-all duration-300">
+    <div
+      class="bg-white rounded-2xl shadow-2xl max-w-sm w-full mx-4 overflow-hidden transform transition-all scale-100 border border-gray-100 animate-in zoom-in-95 fade-in duration-200">
+
+      <div class="p-6 text-center">
+        <div
+          class="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-50 mb-5 ring-4 ring-red-50/50">
+          <iconify-icon icon="mdi:alert-circle-outline" class="text-red-500 text-3xl"></iconify-icon>
+        </div>
+
+        <h3 class="text-xl font-bold text-gray-900 mb-2">¿Cancelar reserva?</h3>
+        <p class="text-sm text-gray-500 mb-6 leading-relaxed">
+          Esta acción no se puede deshacer. La reserva quedará disponible para otros usuarios.
+        </p>
+
+        <div class="flex gap-3 justify-center">
+          <button onclick="cerrarConfirmacionCancelacion()"
+                class="flex-1 px-4 py-2.5 bg-white border-2 border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-semibold text-sm transition-colors active:scale-95">
+          No, volver
+        </button>
+          <button id="btnConfirmarCancelacion"
+                onclick="confirmarCancelacionReserva()"
+                class="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl hover:bg-red-700 font-semibold text-sm shadow-lg shadow-red-600/20 transition-all transform hover:scale-[1.02] active:scale-95">
+          Sí, cancelar
+        </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============================================
+     MODAL: REPORTAR INCIDENCIA (OPTIMIZADO)
+     ============================================ -->
+  <div id="modalReportarIncidencia" class="fixed inset-0 z-[10000] hidden">
+    <!-- Overlay -->
+    <div class="fixed inset-0 bg-gray-900/50 backdrop-blur-sm" onclick="cerrarModalReportarIncidencia()"></div>
+
+    <!-- Panel -->
+    <div class="fixed inset-0 z-10 flex items-center justify-center p-4">
+      <div onclick="event.stopPropagation()"
+        class="relative bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+
+        <!-- Header -->
+        <div
+          class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-xl">
+          <div class="flex items-center gap-3">
+            <div id="modalIncidenciaIcono" class="p-2 rounded-lg bg-orange-50 text-orange-600 leading-none">
+              <iconify-icon icon="mdi:cube-outline" class="text-2xl"></iconify-icon>
+            </div>
+            <div>
+              <h3 class="text-lg font-bold text-gray-800">Reportar Incidencia</h3>
+              <p id="modalIncidenciaNombreRecurso" class="text-sm text-gray-500"></p>
+            </div>
+          </div>
+          <button onclick="cerrarModalReportarIncidencia()"
+                class="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+          <iconify-icon icon="mdi:close" class="text-xl text-gray-400"></iconify-icon>
+        </button>
+        </div>
+
+        <!-- Body -->
+        <div class="p-6 space-y-4">
+
+          <!-- Categoría -->
+          <div>
+            <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+            <iconify-icon icon="mdi:tag-outline"></iconify-icon>
+            Categoría
+          </label>
+            <select id="incidenciaCategoria"
+                  class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none">
+            <option value="Avería">🔧 Avería</option>
+            <option value="Limpieza">🧹 Limpieza</option>
+            <option value="Mantenimiento">⚙️ Mantenimiento</option>
+            <option value="Otro">📋 Otro</option>
+          </select>
+          </div>
+
+          <!-- Prioridad -->
+          <div>
+            <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+            <iconify-icon icon="mdi:flag-outline"></iconify-icon>
+            Prioridad
+          </label>
+            <select id="incidenciaPrioridad"
+                  class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none">
+            <option value="Baja">🟢 Baja - Puede esperar</option>
+            <option value="Media" selected>🟡 Media - Atender pronto</option>
+            <option value="Alta">🟠 Alta - Urgente</option>
+            <option value="Crítica">🔴 Crítica - Inmediato</option>
+          </select>
+          </div>
+
+          <!-- Descripción -->
+          <div>
+            <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+            <iconify-icon icon="mdi:message-text-outline"></iconify-icon>
+            Descripción del problema *
+          </label>
+            <textarea id="incidenciaDescripcion"
+                    rows="4"
+                    placeholder="Describe qué ha pasado con el recurso..."
+                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none resize-none"></textarea>
+            <!-- ✅ Mensaje de error inline -->
+            <div id="incidenciaError"
+              class="hidden mt-2 p-3 bg-red-50 border border-red-200 rounded-lg animate-fade-in">
+              <div class="flex items-start gap-2">
+                <iconify-icon icon="mdi:alert-circle" class="text-red-600 text-lg mt-0.5 shrink-0"></iconify-icon>
+                <div class="flex-1">
+                  <p id="incidenciaErrorTexto" class="text-sm text-red-800 font-medium"></p>
+                </div>
+                <button onclick="ocultarErrorIncidencia()"
+                class="text-red-400 hover:text-red-600 transition-colors shrink-0"
+                type="button">
+                <iconify-icon icon="mdi:close" class="text-lg"></iconify-icon>
+                </button>
+              </div>
+            </div>
+            <p class="text-xs text-gray-400 mt-1">Sé específico para ayudar a resolver el problema más rápido</p>
+          </div>
+
+        </div>
+
+        <!-- Footer -->
+        <div class="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4 flex gap-3 rounded-b-xl">
+          <button onclick="cerrarModalReportarIncidencia()"
+                class="flex-1 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium">
+          Cancelar
+        </button>
+          <button id="btnEnviarIncidencia" onclick="enviarReporteIncidencia()"
+                class="flex-[2] px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors font-medium flex items-center justify-center gap-2">
+          <iconify-icon icon="mdi:send"></iconify-icon>
+          <span>Enviar Reporte</span>
+        </button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ============================================
+     MODAL: CONFIRMACIÓN GENÉRICA
+     ============================================ -->
+  <div id="modalConfirmacionIncidencia"
+    class="fixed inset-0 z-50 hidden items-center justify-center bg-gray-900/40 backdrop-blur-sm p-4 transition-opacity duration-300">
+
+    <div
+      class="bg-white w-full max-w-md shadow-2xl rounded-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
+
+      <!-- Header -->
+      <div class="flex justify-between items-center p-5 border-b border-gray-100">
+        <div class="flex items-center gap-3">
+          <div id="modalConfirmIconContainer" class="p-2.5 rounded-xl leading-none">
+            <iconify-icon id="modalConfirmIcon" icon="mdi:help-circle" class="text-2xl"></iconify-icon>
+          </div>
+          <h3 id="modalConfirmTitulo" class="text-lg font-bold text-gray-800">Confirmar acción</h3>
+        </div>
+        <button onclick="cerrarModalConfirmacion()"
+                class="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
+            <iconify-icon icon="mdi:close" class="text-xl"></iconify-icon>
+        </button>
+      </div>
+
+      <!-- Contenido -->
+      <div class="p-5 bg-gray-50/50">
+        <p id="modalConfirmMensaje" class="text-sm text-gray-600 leading-relaxed"></p>
+
+        <!-- Info Box (opcional) -->
+        <div id="modalConfirmInfoBox" class="hidden mt-4 p-3 rounded-lg border">
+          <div class="flex items-center gap-2 text-sm">
+            <span id="modalConfirmInfoIcon"></span>
+            <div>
+              <p id="modalConfirmInfoLinea1" class="font-medium"></p>
+              <p id="modalConfirmInfoLinea2" class="opacity-75"></p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="flex gap-3 p-5 border-t border-gray-100 bg-white">
+        <button onclick="cerrarModalConfirmacion()"
+                class="flex-1 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-colors">
+          Cancelar
+        </button>
+        <button id="modalConfirmBtnAceptar" onclick="ejecutarAccionConfirmacion()"
+                class="flex-1 px-4 py-2.5 font-semibold rounded-xl transition-colors">
+          Aceptar
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ============================================
+     MODAL: RESOLVER INCIDENCIA
+     ============================================ -->
+  <div id="modalResolverIncidencia"
+    class="fixed inset-0 z-50 hidden items-center justify-center bg-gray-900/40 backdrop-blur-sm p-4 transition-opacity duration-300">
+
+    <div
+      class="bg-white w-full max-w-md shadow-2xl rounded-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
+
+      <!-- Header -->
+      <div class="flex justify-between items-center p-5 border-b border-gray-100">
+        <div class="flex items-center gap-3">
+          <div class="bg-green-50 p-2.5 rounded-xl text-green-600 leading-none">
+            <iconify-icon icon="mdi:check-circle-outline" class="text-2xl"></iconify-icon>
+          </div>
+          <div>
+            <h3 class="text-lg font-bold text-gray-800">Resolver Incidencia</h3>
+            <p id="modalResolverSubtitulo" class="text-xs text-gray-500"></p>
+          </div>
+        </div>
+        <button onclick="cerrarModalResolver()"
+                class="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
+            <iconify-icon icon="mdi:close" class="text-xl"></iconify-icon>
+        </button>
+      </div>
+
+      <!-- Contenido -->
+      <div class="p-5 bg-gray-50/50">
+        <div class="p-3 bg-green-50 border border-green-100 rounded-xl mb-4">
+          <p class="text-sm text-green-700 flex items-center gap-2">
+            <iconify-icon icon="mdi:email-fast-outline" class="text-lg"></iconify-icon>
+            Se enviará un email al usuario notificando la resolución.
+          </p>
+        </div>
+
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          Nota de resolución <span class="text-gray-400 font-normal">(opcional)</span>:
+        </label>
+        <textarea id="modalResolverTexto"
+                  rows="3"
+                  placeholder="Ej: Se ha reparado el equipo y está listo para usar..."
+                  class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm text-gray-700 placeholder-gray-400 focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none resize-none transition-all"></textarea>
+      </div>
+
+      <!-- Footer -->
+      <div class="flex gap-3 p-5 border-t border-gray-100 bg-white">
+        <button onclick="cerrarModalResolver()"
+                class="flex-1 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-colors">
+          Cancelar
+        </button>
+        <button id="modalResolverBtnConfirmar" onclick="confirmarResolucion()"
+                class="flex-1 px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2">
+          <iconify-icon icon="mdi:check-all"></iconify-icon>
+          Marcar Resuelta
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ============================================
+     MODAL: EDITAR NOTA INCIDENCIA
+     ============================================ -->
+  <div id="modalNotaIncidencia"
+    class="fixed inset-0 z-50 hidden items-center justify-center bg-gray-900/40 backdrop-blur-sm p-4 transition-opacity duration-300">
+
+    <div
+      class="bg-white w-full max-w-md shadow-2xl rounded-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
+
+      <!-- Header -->
+      <div class="flex justify-between items-center p-5 border-b border-gray-100">
+        <div class="flex items-center gap-3">
+          <div class="bg-blue-50 p-2.5 rounded-xl text-blue-600 leading-none">
+            <iconify-icon icon="mdi:comment-edit-outline" class="text-2xl"></iconify-icon>
+          </div>
+          <div>
+            <h3 class="text-lg font-bold text-gray-800">Nota Administrativa</h3>
+            <p id="modalNotaIncidenciaSubtitulo" class="text-xs text-gray-500"></p>
+          </div>
+        </div>
+        <button onclick="cerrarModalNotaIncidencia()"
+                class="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
+            <iconify-icon icon="mdi:close" class="text-xl"></iconify-icon>
+        </button>
+      </div>
+
+      <!-- Contenido -->
+      <div class="p-5 bg-gray-50/50">
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          Escribe una nota para el usuario:
+        </label>
+        <textarea id="modalNotaIncidenciaTexto"
+                  rows="4"
+                  placeholder="Describe la solución o información relevante..."
+                  class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm text-gray-700 placeholder-gray-400 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none resize-none transition-all"></textarea>
+        <p class="mt-2 text-xs text-gray-400 flex items-center gap-1">
+          <iconify-icon icon="mdi:information-outline"></iconify-icon>
+          Esta nota será visible para el usuario que reportó la incidencia.
+        </p>
+      </div>
+
+      <!-- Footer -->
+      <div class="flex gap-3 p-5 border-t border-gray-100 bg-white">
+        <button onclick="cerrarModalNotaIncidencia()"
+                class="flex-1 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-colors">
+          Cancelar
+        </button>
+        <button id="modalNotaIncidenciaBtnGuardar" onclick="guardarNotaIncidenciaModal()"
+                class="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2">
+          <iconify-icon icon="mdi:check"></iconify-icon>
+          Guardar
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- JavaScript -->
+  <script>
+    /* ==========================================
+     SCRIPT PRINCIPAL UNIFICADO (INDEX)
+     ========================================== */
+
+  // 1. VARIABLES GLOBALES (Inyectadas por Google Apps Script)
+  window.USER_EMAIL = <?= userEmailForJs ?>;
+  window.USER_NAME = <?= userNameForJs ?>;
+  window.IS_ADMIN = <?= isAdminForJs ?> === 'true';
+
+  // 2. FUNCIÓN PARA ABRIR LA INTERFAZ ADMIN (La hacemos global para poder llamarla desde fuera si hace falta)
+  window.openAdminPanelUI = function() {
+      const adminPanel = document.getElementById('tab-admin');
+      const btnIrAdmin = document.getElementById('btnIrAdmin');
+      const btnVolver = document.getElementById('btnVolverApp');
+
+      // Mostrar Panel
+      if (adminPanel) {
+         adminPanel.classList.remove('hidden');
+         adminPanel.classList.add('active'); 
+      }
+
+      // Cambiar botones Header
+      if(btnIrAdmin) btnIrAdmin.classList.add('hidden');
+      if(btnVolver) btnVolver.classList.remove('hidden');
+
+      // Abrir pestaña Reservas por defecto si no hay ninguna activa
+      const tabReservasBtn = document.querySelector('.admin-tab-btn[data-tab="reservas"]');
+      if(tabReservasBtn && !document.querySelector('.admin-tab-btn.active')) {
+          tabReservasBtn.click();
+      }
+  };
+
+  // ✅ NUEVA: FUNCIÓN PARA CERRAR LA INTERFAZ ADMIN
+  window.closeAdminPanelUI = function() {
+    const adminPanel = document.getElementById('tab-admin');
+    const btnIrAdmin = document.getElementById('btnIrAdmin');
+    const btnVolver = document.getElementById('btnVolverApp');
+
+    // Ocultar Panel Admin
+    if (adminPanel) {
+        adminPanel.classList.add('hidden');
+        adminPanel.classList.remove('active');
+    }
+
+    // Restaurar botones Header
+    if (btnIrAdmin) btnIrAdmin.classList.remove('hidden');
+    if (btnVolver) btnVolver.classList.add('hidden');
+    
+    console.log('🔒 Panel Admin cerrado');
+  };
+
+  // 3. EVENTO PRINCIPAL: DOMContentLoaded
+  document.addEventListener('DOMContentLoaded', function() {
+    
+    // --- A. INICIALIZACIÓN DE LA APP (Cargar tarjetas, etc.) ---
+    if (typeof initializeVariables === 'function') initializeVariables();
+    if (typeof setupEventListeners === 'function') setupEventListeners();
+    if (typeof showLoading === 'function') showLoading();
+    
+    google.script.run
+      .withSuccessHandler(onInitialDataSuccess)
+      .withFailureHandler(onFailure)
+      .getStaticData();
+
+    // ✅ AÑADIDO: Cargar incidencias en segundo plano (para badge del header)
+    google.script.run
+    .withSuccessHandler(function(response) {
+    // Validación robusta: verificar que response no es null
+    if (response && response.success) {
+      todasLasIncidencias = response.incidencias || [];
+      actualizarContadorIncidencias();
+      console.log(`✅ ${todasLasIncidencias.length} incidencias cargadas al inicio`);
+    } else {
+      // Si no hay respuesta válida, inicializar vacío
+      console.warn('⚠️ No se pudieron cargar incidencias:', response);
+      todasLasIncidencias = [];
+    }
+    })
+    .withFailureHandler(function(error) {
+    console.warn('⚠️ Error al cargar incidencias:', error);
+    todasLasIncidencias = [];
+    })
+    .getIncidencias();
+
+    // --- B. LÓGICA DE NAVEGACIÓN DEL HEADER (Admin vs App) ---
+    const containerAdmin = document.getElementById('adminButtonsContainer');
+    const btnIrAdmin = document.getElementById('btnIrAdmin');
+    const btnVolver = document.getElementById('btnVolverApp');
+    const adminPanel = document.getElementById('tab-admin');
+    
+    const step1App = document.getElementById('step1') || document.getElementById('step1_Recursos');
+
+    // 1. MOSTRAR BOTÓN ADMIN SI ES ADMIN
+    if (window.IS_ADMIN && containerAdmin) {
+      containerAdmin.classList.remove('hidden');
+    }
+
+    // 2. CLICK EN "IR AL ADMIN" (Lógica Inteligente 🧠)
+    if (btnIrAdmin) {
+      btnIrAdmin.addEventListener('click', function() {
+        console.log("🔧 Usuario solicita entrar a Admin...");
+
+        // Ocultar vistas de la App
+        document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
+
+        if (typeof adminDataReady !== 'undefined' && adminDataReady) {
+            console.log("⚡ Datos listos. Abriendo instantáneamente.");
+            window.openAdminPanelUI(); 
+        } else {
+            console.log("⏳ Datos no listos. Forzando carga con espera...");
+            if (typeof loadAdminData === 'function') {
+                loadAdminData(false); 
+            } else {
+                console.warn("No se encontró loadAdminData, abriendo panel vacío.");
+                window.openAdminPanelUI();
+            }
+        }
+      });
+    }
+
+    // 3. AL PULSAR "VOLVER" (Salir del Admin y volver al Inicio 🏠)
+    if (btnVolver) {
+      btnVolver.addEventListener('click', function() {
+        console.log("🔙 Volviendo a la App...");
+
+        // 1. Ocultar Panel Admin
+        window.closeAdminPanelUI();
+        
+        // 2. RESET COMPLETO: Ocultar TODAS las vistas
+        document.querySelectorAll('.view-section').forEach(el => {
+          el.classList.add('hidden');
+          el.classList.add('opacity-0');
+        });
+        
+        // 3. Mostrar SOLO la vista principal de recursos
+        const step1Recursos = document.getElementById('step1_Recursos');
+        if (step1Recursos) {
+           step1Recursos.classList.remove('hidden');
+           void step1Recursos.offsetWidth;
+           step1Recursos.classList.remove('opacity-0');
+        }
+        
+        // 4. Limpiar el estado global
+        if (typeof globalState !== 'undefined') {
+          globalState.recursoActual = null;
+          globalState.fechaActual = null;
+          globalState.tramoActual = null;
+          globalState.disponibilidad = [];
+        }
+        
+        // 5. Cambiar botones del Header
+        btnVolver.classList.add('hidden');
+        btnIrAdmin.classList.remove('hidden');
+        
+        // ✅ AÑADIDO: Restaurar botón incidencias si hay pendientes
+        const btnVerInc = document.getElementById('btnVerIncidencias');
+        if (btnVerInc && typeof hayIncidenciasPendientes === 'function' && hayIncidenciasPendientes()) {
+          btnVerInc.classList.remove('hidden');
+        }
+        
+        // 6. Ocultar mensajes de error/éxito
+        if (typeof hideMessages === 'function') {
+          hideMessages();
+        }
+
+        // 7. Recargar datos por si hubo cambios en admin
+        if (typeof adminHaCambiadoDatos !== 'undefined' && adminHaCambiadoDatos === true) {
+          console.log('📊 Detectados cambios guardados, recargando vista...');
+          
+          if (typeof window.recargarDatosApp === 'function') {
+            window.recargarDatosApp();
+          }
+          
+          // ✅ AÑADIDO: También recargar incidencias
+          if (typeof cargarIncidencias === 'function') {
+            google.script.run
+            .withSuccessHandler(function(response) {
+            if (response && response.success) {
+           todasLasIncidencias = response.incidencias || [];
+           actualizarContadorIncidencias();
+           }
+           })
+           .withFailureHandler(function(error) {
+           console.warn('⚠️ Error al recargar incidencias:', error);
+           })
+           .getIncidencias();
+          }
+          
+          adminHaCambiadoDatos = false;
+        } else {
+          console.log('✨ No hay cambios guardados, vista sin modificar');
+        }
+      });
+    }
+  });
+
+  </script>
+
+  <?!= include('scripts'); ?>
+
+  <?!= include('admin-scripts'); ?>
+
+</body>
+
+</html>

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body { font-family: 'Inter', sans-serif; margin: 0; padding: 20px; background: #f9fafb; }
+      .step-number { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+      .sticky-header { position: sticky; top: 0; background: white; z-index: 10; padding: 20px; margin: -20px -20px 20px -20px; border-bottom: 2px solid #e5e7eb; }
+    </style>
+  </head>
+  <body>
+
+    <div class="sticky-header">
+      <div class="flex items-center gap-4 mb-3">
+        <div class="bg-indigo-50 w-14 h-14 rounded-full flex items-center justify-center text-indigo-600">
+          <iconify-icon icon="mdi:rocket-launch-outline" width="28"></iconify-icon>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold text-gray-800 m-0">Activar Sistema</h1>
+          <p class="text-sm text-gray-500 m-0">Sigue estos 3 pasos</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-md border border-gray-100 p-5 mb-4">
+      <div class="flex items-center gap-3 mb-3">
+        <div class="step-number w-8 h-8 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0 text-sm">1</div>
+        <h3 class="text-base font-bold text-gray-800 m-0">Abrir Apps Script</h3>
+      </div>
+      <p class="text-sm text-gray-600 mb-3">En el menú superior, ve a:</p>
+      <div class="bg-indigo-50 border-2 border-indigo-200 rounded-lg p-3 text-sm font-semibold text-indigo-900">
+        <strong>Extensiones</strong> → <strong>Apps Script</strong>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-md border border-gray-100 p-5 mb-4">
+      <div class="flex items-center gap-3 mb-3">
+        <div class="step-number w-8 h-8 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0 text-sm">2</div>
+        <h3 class="text-base font-bold text-gray-800 m-0">Crear Implementación</h3>
+      </div>
+      <p class="text-sm text-gray-600 mb-2">Haz clic en el botón azul:</p>
+      <div class="bg-indigo-50 border-2 border-indigo-200 rounded-lg p-3 mb-3 text-sm font-semibold text-indigo-900">
+        <strong>Implementar</strong> → <strong>Nueva implementación</strong>
+      </div>
+      <div class="bg-amber-50 border-2 border-amber-200 rounded-lg p-3 text-sm">
+        <p class="font-bold text-amber-900 mb-1">⚙️ Configura así:</p>
+        <ul class="space-y-1 text-amber-800 ml-4 text-xs">
+          <li>• Tipo: <strong>Aplicación web</strong></li>
+          <li>• Ejecutar como: <strong>Yo</strong></li>
+          <li>• Acceso: <strong>Cualquier usuario</strong></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-md border border-gray-100 p-5 mb-4">
+      <div class="flex items-center gap-3 mb-3">
+        <div class="step-number w-8 h-8 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0 text-sm">3</div>
+        <h3 class="text-base font-bold text-gray-800 m-0">Copiar y Abrir</h3>
+      </div>
+      
+      <p class="text-sm text-gray-600 mb-4">
+        Google te dará una URL (enlace web). 
+        <br><br>
+        <strong>Copia esa URL, abre una pestaña nueva en tu navegador y pégala allí.</strong>
+      </p>
+
+      <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-800 flex items-start gap-2">
+        <iconify-icon icon="mdi:information-outline" width="20" class="mt-0.5"></iconify-icon>
+        <span>Al abrir el enlace, verás el asistente final para crear las pestañas y configurar tu cuenta de Admin automáticamente.</span>
+      </div>
+    </div>
+
+    <div class="text-center mt-6">
+      <button onclick="google.script.host.close()" class="text-gray-400 hover:text-gray-600 text-xs underline">
+        Cerrar instrucciones
+      </button>
+    </div>
+
+  </body>
+</html>

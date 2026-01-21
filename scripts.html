@@ -1,0 +1,2984 @@
+<script>
+  /* ============================================
+   SISTEMA DE RESERVAS - JAVASCRIPT PRINCIPAL
+   ============================================ */
+
+/* === ESTADO GLOBAL === */
+// NOTA: userEmail, userName e isAdmin se inyectan desde index.html
+const globalState = {
+  userEmail: window.USER_EMAIL,
+  userName: window.USER_NAME,
+  isAdmin: window.IS_ADMIN,
+  recursos: [], 
+  tramos: [], 
+  disponibilidad: [], // Se carga bajo demanda por recurso
+  reservas: [],
+  misReservasActivas: [], 
+  cursos: [],
+  modoVisualizacionCursos: 'botones',
+  cursoSeleccionado: null,
+  usuariosMap: {},
+  recursoActual: null, 
+  fechaActual: null, 
+  tramoActual: null,
+  isLoadingDisponibilidad: false
+};
+
+/* ============================================
+   SISTEMA UNIFICADO DE TOASTS 🎯
+   ============================================ */
+
+var toastTimeout;
+
+function showToast(type, message) {
+  // A. AUTO-GENERACIÓN: Si no existe el elemento, lo creamos
+  let toast = document.getElementById('globalToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'globalToast';
+    toast.className = 'fixed top-6 left-1/2 -translate-x-1/2 z-[9999] opacity-0 pointer-events-none transform -translate-y-24 transition-all duration-500';
+    document.body.appendChild(toast);
+  }
+
+  // B. CONFIGURACIÓN VISUAL
+  const configs = {
+    success: { 
+      icon: 'mdi:check-circle', 
+      color: 'text-green-600', 
+      bg: 'bg-white', 
+      border: 'border-green-200' 
+    },
+    error: { 
+      icon: 'mdi:alert-circle', 
+      color: 'text-red-600', 
+      bg: 'bg-white', 
+      border: 'border-red-200' 
+    },
+    info: { 
+      icon: 'mdi:information', 
+      color: 'text-blue-600', 
+      bg: 'bg-white', 
+      border: 'border-blue-200' 
+    },
+    loading: { 
+      icon: 'mdi:loading', 
+      color: 'text-gray-600', 
+      bg: 'bg-white', 
+      border: 'border-gray-200', 
+      animate: 'animate-spin' 
+    }
+  };
+
+  const config = configs[type] || configs.info;
+  const iconAnimation = config.animate || '';
+
+  // C. CLASES RESPONSIVE
+  toast.className = `fixed top-6 left-1/2 -translate-x-1/2 z-[9999] flex items-center justify-center sm:justify-start gap-3 px-5 py-3 rounded-2xl shadow-2xl transition-all duration-500 transform ${config.bg} ${config.border} border w-[90%] sm:w-auto sm:max-w-md`;
+
+  // D. CONTENIDO
+  toast.innerHTML = `
+    <iconify-icon icon="${config.icon}" class="text-2xl ${config.color} ${iconAnimation} shrink-0"></iconify-icon>
+    <span class="text-sm font-medium text-gray-700 text-center sm:text-left leading-tight">${message}</span>
+  `;
+
+  // E. ANIMACIÓN DE ENTRADA
+  requestAnimationFrame(() => {
+    toast.classList.remove('-translate-y-24', 'opacity-0', 'pointer-events-none');
+    toast.classList.add('translate-y-0', 'opacity-100');
+  });
+
+  // F. AUTO-CIERRE (excepto loading)
+  if (toastTimeout) clearTimeout(toastTimeout);
+  if (type !== 'loading') {
+    toastTimeout = setTimeout(hideToast, 3500);
+  }
+}
+
+function hideToast() {
+  const toast = document.getElementById('globalToast');
+  if (toast) {
+    toast.classList.remove('translate-y-0', 'opacity-100');
+    toast.classList.add('-translate-y-24', 'opacity-0', 'pointer-events-none');
+  }
+}
+
+// ✅ FUNCIONES DE ATAJO (para mantener compatibilidad)
+function showSuccess(message) {
+  showToast('success', message);
+}
+
+function showError(message) {
+  showToast('error', message);
+}
+
+function showInfo(message) {
+  showToast('info', message);
+}
+
+// ✅ ALIAS para compatibilidad con código antiguo
+function hideMessages() {
+  hideToast();
+}
+
+/* ============================================
+   UTILIDADES GENERALES
+   ============================================ */
+
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
+
+// Selector rápido de elementos
+const $ = (id) => document.getElementById(id);
+
+// Formatear fecha a formato ISO (YYYY-MM-DD)
+function formatDateToISO(date) {
+  const year = date.getFullYear();
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// Debouncing para navegación de calendario
+let navigationTimeout = null;
+function debounceCalendarNavigation(callback, delay = 300) {
+  if (navigationTimeout) clearTimeout(navigationTimeout);
+  navigationTimeout = setTimeout(callback, delay);
+}
+
+/* === VARIABLES DOM === */
+
+let spinner, step1, step2, backButton, tramosTitle, tramosContainer, recursoIconHeader,
+    calendarGrid, monthYear, prevMonthBtn, nextMonthBtn, errorMessage,
+    errorMessageText, successMessage, successMessageText, modal, modalTitle, modalSubtitle,
+    cursoSelectorContainer, cursoError, cantidadContainer, 
+    cantidadInput, maxCantidad, notasInput, cancelModalButton, confirmModalButton, 
+    selectAllBtn, myReservationsButton, myReservationsModal, closeMyReservationsButton, 
+    myReservationsSpinner, myReservationsError, myReservationsEmpty, myReservationsList,
+    adminPanelButton;
+
+function initializeVariables() {
+  spinner = $("loadingSpinner");
+  step1 = $("step1_Recursos");
+  step2 = $("step2_Tramos");
+  backButton = $("backButton");
+  tramosTitle = $("tramosTitle");
+  tramosContainer = $("tramosContainer");
+  calendarGrid = $("calendarGrid");
+  monthYear = $("monthYear");
+  prevMonthBtn = $("prevMonth");
+  nextMonthBtn = $("nextMonth");
+  errorMessage = $("errorMessage");
+  errorMessageText = $("errorMessageText");
+  successMessage = $("successMessage");
+  successMessageText = $("successMessageText");
+  modal = $("confirmationModal");
+  modalTitle = $("modalTitle");
+  cursoSelectorContainer = $("cursoSelectorContainer");
+  cursoError = $("cursoError");
+  cantidadContainer = $("cantidadContainer");
+  cantidadInput = $("cantidadInput");
+  maxCantidad = $("maxCantidad");
+  notasInput = $("notasInput");
+  cancelModalButton = $("cancelModalButton");
+  confirmModalButton = $("confirmModalButton");
+  myReservationsButton = $("myReservationsButton");
+  myReservationsModal = $("myReservationsModal");
+  closeMyReservationsButton = $("closeMyReservationsButton");
+  myReservationsSpinner = $("myReservationsSpinner");
+  myReservationsError = $("myReservationsError");
+  myReservationsEmpty = $("myReservationsEmpty");
+  myReservationsList = $("myReservationsList");
+  modalSubtitle = $("modalSubtitle");
+  selectAllBtn = $("selectAllBtn");
+  recursoIconHeader = $("recursoIconHeader");
+  adminPanelButton = $("adminPanelButton");
+}
+
+/* === UI Y MENSAJES === */
+
+function showLoading() { 
+  if (spinner) spinner.style.display = 'flex'; 
+}
+
+function hideLoading() { 
+  if (spinner) spinner.style.display = 'none'; 
+}
+
+function switchView(viewToHide, viewToShow) {
+   if (!viewToHide || !viewToShow) return;
+   viewToHide.classList.add('opacity-0');
+   setTimeout(() => {
+     viewToHide.classList.add('hidden');
+     viewToShow.classList.remove('hidden');
+     void viewToShow.offsetWidth;
+     viewToShow.classList.remove('opacity-0');
+   }, 300);
+}
+
+/* === CARGA INICIAL DE DATOS === */
+
+function onInitialDataSuccess(data) {
+  console.log("✅ Datos iniciales (V4 Optimizado) recibidos:", data);
+  if (!data || data.success === false) {
+    onFailure({ message: (data && data.error) || "No se recibieron datos del servidor." });
+    return;
+  }
+  
+  globalState.recursos = data.recursos || [];
+  globalState.tramos = data.tramos || [];
+  globalState.disponibilidad = []; 
+  globalState.reservas = data.reservas || [];
+  globalState.cursos = data.cursos || [];
+  globalState.modoVisualizacionCursos = data.modoVisualizacionCursos || 'botones';
+  globalState.usuariosMap = data.usuariosMap || {};
+  globalState.misReservasActivas = data.misReservasActivas || []; // Guardar mis reservas en el estado
+
+  
+  console.log(`📊 Datos cargados: ${globalState.recursos.length} recursos, ${globalState.tramos.length} tramos, ${globalState.reservas.length} reservas activas, ${globalState.cursos.length} cursos.`);
+  console.log(`👥 Usuarios en mapa: ${Object.keys(globalState.usuariosMap).length}`);
+  
+  renderRecursos();
+  
+  // Mostrar botón de admin si el usuario es administrador
+  if (globalState.isAdmin && adminPanelButton) {
+    adminPanelButton.classList.remove('hidden');
+  }
+  
+  hideLoading();
+  // ✅ AÑADIR: Precargar AdminState inmediatamente (silencioso)
+  if (globalState.isAdmin && typeof loadAdminData === 'function') {
+    console.log('🚀 Iniciando precarga de AdminState...');
+    loadAdminData(true); // true = modo silencioso
+  }
+}
+
+function onFailure(error) {
+  console.error("❌ Error al llamar a Apps Script:", error.message || error);
+  showError(error.message || "Error desconocido. Revisa la consola.");
+  hideLoading();
+}
+
+/* ============================================
+   RENDERIZADO DE RECURSOS (TÍTULO 1.15rem 📏)
+   ============================================ */
+function renderRecursos() {
+  const salasCont = document.getElementById("salasContainer");
+  const dispCont = document.getElementById("dispositivosContainer");
+  if (!salasCont || !dispCont) return;
+  
+  salasCont.innerHTML = ''; 
+  dispCont.innerHTML = '';
+  let salasHtml = ''; 
+  let dispHtml = '';
+  
+  // Ordenar
+  globalState.recursos.sort((a, b) => (a.orden || 999) - (b.orden || 999));
+
+  globalState.recursos.forEach(recurso => {
+    const tipo = recurso.tipo.toLowerCase();
+    const isSala = tipo === 'sala';
+    
+    // TEMA DE COLORES
+    const theme = isSala ? {
+        border: 'bg-blue-500', 
+        textTitle: 'text-gray-800',
+        iconColor: 'text-blue-600',
+        badge: 'bg-blue-50 text-blue-700 border-blue-200',
+        watermark: 'text-blue-600'
+    } : {
+        border: 'bg-emerald-500',
+        textTitle: 'text-gray-800',
+        iconColor: 'text-emerald-600',
+        badge: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+        watermark: 'text-emerald-600'
+    };
+    
+    // MARCA DE AGUA
+    let iconWatermark = '';
+    if (recurso.icono && recurso.icono.includes(':')) {
+      iconWatermark = `<iconify-icon icon="${recurso.icono}" class="text-[8rem] sm:text-[9rem]"></iconify-icon>`;
+    } else {
+      const emoji = recurso.icono || (isSala ? '🚪' : '💻');
+      iconWatermark = `<span class="text-[7rem] sm:text-[8rem] leading-none grayscale opacity-60">${emoji}</span>`;
+    }
+    
+    // HTML TARJETA
+    const buttonHtml = `
+    <button onclick="handleRecursoClick(this)" data-id="${recurso.id_recurso}" 
+        class="recurso-btn group relative w-full bg-white rounded-xl shadow-md hover:shadow-xl border border-gray-200 hover:border-gray-300 transition-all duration-300 hover:-translate-y-1 overflow-hidden text-left cursor-pointer h-full min-h-[100px] sm:min-h-[140px]">
+      
+      <div class="absolute left-0 top-0 bottom-0 w-2 ${theme.border}"></div>
+
+      <div class="absolute -right-6 -bottom-8 rotate-12 opacity-[0.35] group-hover:opacity-[0.2] group-hover:scale-110 transition-all duration-500 pointer-events-none select-none ${theme.watermark}">
+         ${iconWatermark}
+      </div>
+
+      <div class="relative z-10 p-3 sm:p-5 pl-5 sm:pl-8 flex flex-col justify-between h-full">
+         
+         <div class="flex-1">
+            <h3 class="font-bold text-[1.15rem] sm:text-xl ${theme.textTitle} leading-tight mb-0.5 pr-4 line-clamp-2">${recurso.nombre}</h3>
+            
+            <div class="hidden sm:flex items-center gap-2 text-gray-500 text-sm font-medium mt-1">
+               <div class="bg-gray-100 p-0.5 rounded-md leading-none">
+                   <iconify-icon icon="mdi:map-marker-radius-outline" class="text-sm"></iconify-icon>
+               </div>
+               <span class="truncate">${recurso.ubicacion}</span>
+            </div>
+         </div>
+
+         <div class="w-1/2 h-px bg-gray-100 my-2 sm:my-3 group-hover:bg-gray-200 transition-colors"></div>
+
+         <div class="flex items-center justify-between mt-auto">
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 sm:px-3 sm:py-1 rounded-md text-[10px] sm:text-xs font-bold uppercase tracking-wide border ${theme.badge}">
+               ${tipo === 'agrupado' ? '<iconify-icon icon="mdi:layers-outline"></iconify-icon>' : '<iconify-icon icon="mdi:account-group-outline"></iconify-icon>'}
+               ${tipo === 'agrupado' ? recurso.capacidad + ' Uds.' : 'Cap. ' + recurso.capacidad}
+            </span>
+            
+            <iconify-icon icon="mdi:arrow-right" class="text-gray-300 text-lg sm:text-xl opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all duration-300"></iconify-icon>
+         </div>
+
+      </div>
+    </button>`;
+    
+    if (isSala) salasHtml += buttonHtml;
+    else dispHtml += buttonHtml;
+  });
+  
+  const emptyState = `
+    <div class="col-span-full py-8 sm:py-12 text-center border-2 border-dashed border-gray-200 rounded-xl bg-gray-50">
+        <iconify-icon icon="mdi:ghost-outline" class="text-3xl sm:text-4xl text-gray-300 mb-2"></iconify-icon>
+        <p class="text-gray-400 font-medium text-sm sm:text-base">No hay recursos activos.</p>
+    </div>`;
+
+  salasCont.innerHTML = salasHtml || emptyState;
+  dispCont.innerHTML = dispHtml || emptyState;
+}
+
+/* === GESTIÓN DE RECURSOS === */
+
+/* ============================================
+   MANEJO DE CLIC EN RECURSO (LÓGICA SINCRONIZADA 🔄)
+   ============================================ */
+function handleRecursoClick(recursoBtn) {
+  hideMessages();
+  
+  // 1. Obtener recurso
+  const recursoId = recursoBtn.dataset.id || recursoBtn.getAttribute('data-id');
+  globalState.recursoActual = globalState.recursos.find(r => String(r.id_recurso) === String(recursoId));
+  
+  if (globalState.recursoActual) {
+    
+    // --- LÓGICA DE FECHA INICIAL (ANTES DE NADA) ---
+    // Calculamos "Hoy" o "Mañana" aquí mismo para pintar la cabecera YA.
+    const ahora = new Date();
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    
+    // Si es tarde, pasamos a mañana
+    if (ahora.getHours() > 13 || (ahora.getHours() === 13 && ahora.getMinutes() > 10)) {
+       hoy.setDate(hoy.getDate() + 1);
+    }
+    
+    // Saltar finde
+    let diaDeHoy = hoy.getDay();
+    if (diaDeHoy === 6) hoy.setDate(hoy.getDate() + 2); // Sábado -> Lunes
+    else if (diaDeHoy === 0) hoy.setDate(hoy.getDate() + 1); // Domingo -> Lunes
+    
+    // GUARDAMOS LA FECHA EN EL ESTADO GLOBAL
+    globalState.fechaActual = hoy;
+
+    // 2. Cambiar vista
+    switchView(step1, step2);
+    
+    // 3. ACTUALIZAR CABECERA (¡Ahora sí tiene fecha!)
+    // Como globalState.fechaActual ya tiene valor, updateStep2Header pintará "Lunes 1..."
+    updateStep2Header(globalState.recursoActual);
+    
+    // 4. Cargar Disponibilidad
+    if (globalState.isLoadingDisponibilidad) {
+      console.log("⏳ Carga en curso...");
+      return;
+    }
+    
+    globalState.isLoadingDisponibilidad = true;
+    showLoading();
+    
+    google.script.run
+      .withSuccessHandler((result) => {
+        globalState.isLoadingDisponibilidad = false;
+        hideLoading();
+        
+        if (result.success) {
+          globalState.disponibilidad = result.disponibilidad;
+          
+          // Renderizamos calendario y tramos con la fecha que YA calculamos arriba
+          renderCalendar(globalState.fechaActual.getFullYear(), globalState.fechaActual.getMonth());
+          loadTramos();
+          
+        } else {
+          showToast('error', result.error || 'Error disponibilidad');
+        }
+      })
+      .withFailureHandler((error) => {
+        globalState.isLoadingDisponibilidad = false;
+        hideLoading();
+        showToast('error', 'Error: ' + error.message);
+      })
+      .cargarDisponibilidadRecurso(recursoId);
+  }
+}
+
+/* ============================================
+   ACTUALIZAR CABECERA (LÓGICA PRESERVADA + FIX VISUAL) 🎨
+   ============================================ */
+function updateStep2Header(recurso) {
+    const watermarkDiv = document.getElementById('headerWatermark');
+    const iconHeaderDiv = document.getElementById('recursoIconHeader');
+    const titleDiv = document.getElementById('tramosTitle');
+
+    // 1. Poner el Título
+    if (titleDiv) titleDiv.textContent = recurso.nombre;
+
+    // 2. Preparar Iconos (TU LÓGICA ORIGINAL)
+    let iconHtmlSmall = '';
+    let iconHtmlBig = '';
+    const tipo = recurso.tipo.toLowerCase();
+    
+    // Detectar si es Iconify (tiene :) o Emoji
+    if (recurso.icono && recurso.icono.includes(':')) {
+        // --- ES ICONIFY ---
+        const colorClass = tipo === 'sala' ? 'text-blue-600' : 'text-emerald-600';
+        iconHtmlSmall = `<iconify-icon icon="${recurso.icono}" class="${colorClass}"></iconify-icon>`;
+        iconHtmlBig = `<iconify-icon icon="${recurso.icono}"></iconify-icon>`;
+    } else {
+        // --- ES EMOJI ---
+        const emoji = recurso.icono || (tipo === 'sala' ? '🚪' : '💻');
+        iconHtmlSmall = `<span>${emoji}</span>`;
+        iconHtmlBig = `<span class="grayscale opacity-50 font-emoji">${emoji}</span>`;
+    }
+
+    // 3. Inyectar Icono Pequeño
+    if (iconHeaderDiv) iconHeaderDiv.innerHTML = iconHtmlSmall;
+
+    // 4. Inyectar MARCA DE AGUA (TU LÓGICA + Ajuste de posición)
+    if (watermarkDiv) {
+        const colorWatermark = tipo === 'sala' ? 'text-blue-500' : 'text-emerald-500';
+        
+        // Ajustamos las clases de Tailwind para que quede contenido dentro de la caja nueva
+        watermarkDiv.className = `absolute -right-8 -bottom-12 text-[10rem] opacity-[0.20] rotate-12 pointer-events-none select-none transition-transform duration-700 group-hover:scale-105 group-hover:rotate-6 ${colorWatermark}`;
+        
+        watermarkDiv.innerHTML = iconHtmlBig;
+    }
+
+    // 5. FECHA (Actualizar ID seleccionado)
+    // Esto asegura que se actualiza el span correcto
+    updateSelectedDateDisplay();
+}
+
+/* ============================================
+   2. RENDERIZAR CALENDARIO (COMPACTO) 📅
+   ============================================ */
+function renderCalendar(year, month) {
+  if (!calendarGrid || !monthYear) return;
+  
+  // Cabeceras días (Muy minimalistas)
+  calendarGrid.innerHTML = 
+    ['L','M','X','J','V','S','D'].map(d => 
+      `<div class="w-8 h-8 flex items-center justify-center text-[10px] font-bold text-gray-400 tracking-wide">${d}</div>`
+    ).join('');
+  
+  // Título Mes
+  const fechaTitulo = new Date(year, month, 1);
+  let textoMes = fechaTitulo.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+  monthYear.textContent = textoMes.charAt(0).toUpperCase() + textoMes.slice(1);
+  
+  // Huecos vacíos
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  let startOffset = firstDay.getDay();
+  if (startOffset === 0) startOffset = 6; else startOffset--;
+  
+  for (let i = 0; i < startOffset; i++) { 
+    calendarGrid.innerHTML += '<div class="w-8 h-8"></div>'; 
+  }
+  
+  // Control de fechas
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const ahora = new Date();
+  const esTardeHoy = (ahora.getHours() > 13 || (ahora.getHours() === 13 && ahora.getMinutes() > 10));
+  
+  let htmlDias = '';
+  for (let day = 1; day <= lastDay.getDate(); day++) {
+    const thisDate = new Date(year, month, day);
+    
+    // ESTILOS DE DÍA (Compactos w-8 h-8)
+    // Redondos totalmente (rounded-full) para estilo móvil
+    let classes = "w-8 h-8 flex items-center justify-center rounded-full text-xs font-medium transition-all duration-200";
+    let isDisabled = false;
+    
+    const diaDeLaSemana = thisDate.getDay();
+    const esFinDeSemana = (diaDeLaSemana === 0 || diaDeLaSemana === 6);
+    const esHoyMismo = (thisDate.getTime() === hoy.getTime());
+    const esPasado = thisDate < hoy;
+
+    if (esPasado || (esHoyMismo && esTardeHoy) || esFinDeSemana) {
+      classes += " text-gray-300 cursor-not-allowed"; 
+      isDisabled = true;
+    } else if (globalState.fechaActual && thisDate.getTime() === globalState.fechaActual.getTime()) {
+      classes += " bg-gray-900 text-white shadow-md font-bold"; // Seleccionado (Negro/Oscuro elegante)
+    } else if (esHoyMismo) {
+      classes += " text-blue-600 border border-blue-200 font-bold"; 
+    } else {
+      classes += " hover:bg-gray-100 text-gray-700";
+    }
+    
+    htmlDias += `<button class="${classes}" data-day="${day}" ${isDisabled ? 'disabled' : ''}>${day}</button>`;
+  }
+  calendarGrid.innerHTML += htmlDias;
+
+}
+
+/* ============================================
+   3. MANEJAR CLIC EN DÍA (FIX INVALID DATE) 🔧
+   ============================================ */
+function handleDayClick(dayStr) {
+  const day = parseInt(dayStr);
+  
+  // ⚠️ FIX: Usamos el mes/año que ACTUALMENTE se está mostrando en el calendario
+  // No usamos globalState.fechaActual directamente porque podría ser de otro mes
+  // Para obtener el mes/año visual, lo extraemos de la variable 'fechaActual' 
+  // PERO asumiendo que el renderCalendar se llamó con esos datos.
+  
+  // Lo más seguro: Reutilizar el año/mes que tenemos en memoria si hemos navegado
+  // Pero como globalState.fechaActual se actualiza al navegar meses (normalmente), usaremos eso.
+  
+  const currentYear = globalState.fechaActual.getFullYear();
+  const currentMonth = globalState.fechaActual.getMonth();
+  
+  // Construimos fecha segura
+  const nuevaFecha = new Date(currentYear, currentMonth, day);
+  
+  if (isNaN(nuevaFecha.getTime())) {
+     console.error("Fecha inválida");
+     return; 
+  }
+
+  globalState.fechaActual = nuevaFecha;
+  
+  // Renderizamos de nuevo (para mover el círculo de selección)
+  renderCalendar(currentYear, currentMonth);
+  
+  // Actualizamos el texto debajo del calendario
+  updateSelectedDateDisplay();
+
+  // Cargamos tramos
+  loadTramos();
+}
+
+// Función auxiliar para mostrar la fecha bonita
+function updateSelectedDateDisplay() {
+    const display = document.getElementById('selectedDateDisplay');
+    if(display && globalState.fechaActual) {
+        const opciones = { weekday: 'long', day: 'numeric', month: 'long' };
+        let texto = globalState.fechaActual.toLocaleDateString('es-ES', opciones);
+        display.textContent = texto.charAt(0).toUpperCase() + texto.slice(1);
+    }
+}
+
+/* === TRAMOS === */
+
+/* ============================================
+   CARGA DE TRAMOS (CON DETECCIÓN DE FECHAS PASADAS ⏳)
+   ============================================ */
+function loadTramos() {
+  if (!tramosTitle || !tramosContainer) return;
+  hideMessages();
+  
+  // Cachear elementos que se usan múltiples veces
+  const cantContainer = $('cantidadContainer');
+  const inputCant = $('cantidadInput');
+  const maxSpan = $('maxCantidad');
+  const btnSelectAll = $('selectAllBtn');
+  
+  const { id_recurso: recursoId, nombre: recursoNombre, tipo, capacidad } = globalState.recursoActual;
+  const fecha = globalState.fechaActual;
+
+  // --- 1. LÓGICA VISUAL INTELIGENTE 🧠 ---
+  
+  // A. Preparar fechas para comparar (sin horas)
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const fechaSeleccionada = new Date(fecha);
+  fechaSeleccionada.setHours(0, 0, 0, 0);
+  const esPasado = fechaSeleccionada < hoy;
+
+  // B. Formato de texto
+  const opcionesFecha = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+  let fechaTexto = fecha.toLocaleDateString('es-ES', opcionesFecha);
+  fechaTexto = fechaTexto.charAt(0).toUpperCase() + fechaTexto.slice(1);
+
+  // C. Decidir Color e Icono
+  let claseColor = '';
+  let iconoBadge = '';
+
+  if (esPasado) {
+      // ESTILO "APAGADO" PARA EL PASADO 🌑
+      claseColor = 'bg-gray-100 text-gray-400 border-gray-200'; 
+      iconoBadge = 'mdi:history'; // Icono de historial
+  } else {
+      // ESTILO "VIVO" PARA HOY/FUTURO 🎨
+      const diaSemanaIndex = fecha.getDay();
+      const mapaColores = {
+          1: 'bg-blue-50 text-blue-700 border-blue-200',       // Lunes
+          2: 'bg-teal-50 text-teal-700 border-teal-200',       // Martes
+          3: 'bg-amber-50 text-amber-700 border-amber-200',    // Miércoles
+          4: 'bg-indigo-50 text-indigo-700 border-indigo-200', // Jueves
+          5: 'bg-rose-50 text-rose-700 border-rose-200',       // Viernes
+          6: 'bg-purple-50 text-purple-700 border-purple-200', // Sábado
+          0: 'bg-gray-50 text-gray-700 border-gray-200'        // Domingo
+      };
+      claseColor = mapaColores[diaSemanaIndex] || mapaColores[0];
+      iconoBadge = 'mdi:calendar-month-outline';
+  }
+
+  // D. SOLUCIÓN LIMPIA
+  // Solo actualizamos el texto. El diseño, la etiqueta "Reservando en" y la posición ya están definidos en el HTML.
+  tramosTitle.textContent = recursoNombre;
+  
+  // --- FIN LÓGICA VISUAL ---
+
+  const fechaISO = formatDateToISO(fecha);
+  
+  // 1. CALCULAR DÍA (Para lógica de negocio)
+  let diaSemanaJS = fecha.getDay();
+  let diaSemanaGoogle = (diaSemanaJS === 0) ? 7 : diaSemanaJS;
+  const diaSemanaStr = String(diaSemanaGoogle);
+
+  // 2. MAPA DISPONIBILIDAD
+  const disponibilidadMap = new Map();
+  globalState.disponibilidad
+    .filter(d => String(d.id_recurso) === String(recursoId)) 
+    .forEach(d => {
+       if (!disponibilidadMap.has(d.id_tramo)) disponibilidadMap.set(d.id_tramo, []);
+       disponibilidadMap.get(d.id_tramo).push(d);
+    });
+
+  // 3. MAPA RESERVAS
+  const reservasMap = new Map();
+  globalState.reservas
+    .filter(r => String(r.id_recurso) === String(recursoId) && r.fecha === fechaISO && r.estado.toLowerCase() === 'confirmada')
+    .forEach(r => {
+      const tramoId = r.id_tramo;
+      const cantidad = parseInt(r.cantidad, 10) || 1;
+      reservasMap.set(tramoId, (reservasMap.get(tramoId) || 0) + cantidad);
+    });
+    
+  let tramosHtml = '';
+  let tramosCount = 0;
+  
+  const ahora = new Date();
+  const hoyHoras = new Date(); hoyHoras.setHours(0, 0, 0, 0);
+  const esHoy = (fecha.getTime() === hoyHoras.getTime());
+
+  // 4. GENERAR TRAMOS
+  globalState.tramos.forEach(tramo => {
+    const tramoId = String(tramo.id_tramo); 
+    
+    // Si la fecha es PASADA, deshabilitamos todo directamente
+    let isDisabled = esPasado;
+    let buttonClass = "";
+    let mensaje = "";
+    let disponibles = 0;
+
+    if (esPasado) {
+        mensaje = "Fecha pasada";
+        buttonClass = "bg-gray-50 border-gray-100 text-gray-400 opacity-60 cursor-not-allowed";
+    } else {
+        // Lógica normal para Hoy/Futuro
+        const reglasTramo = disponibilidadMap.get(tramoId) || [];
+        const reglaHoy = reglasTramo.find(d => {
+            const diaRegla = String(d.dia_semana).trim(); 
+            return diaRegla === diaSemanaStr || diaRegla.startsWith(diaSemanaStr + " ");
+        });
+
+        const permitido = reglaHoy ? reglaHoy.permitido.toLowerCase() : 'si'; 
+        const razonBloqueo = reglaHoy ? reglaHoy.razon_bloqueo : '';
+
+        const totalReservado = reservasMap.get(tramoId) || 0;
+        
+        if (permitido !== 'si' && permitido !== 'yes' && permitido !== 'true') {
+          mensaje = razonBloqueo || "Bloqueado";
+          buttonClass = "tramo-btn-no-permitido";
+          isDisabled = true;
+        } else {
+          const esAgrupado = tipo.toLowerCase() === 'agrupado';
+          const capacidadTotal = parseInt(capacidad, 10) || 1;
+
+          if (esAgrupado) {
+            disponibles = capacidadTotal - totalReservado;
+            if (disponibles <= 0) {
+              mensaje = "Completo";
+              buttonClass = "tramo-btn-reservado";
+              isDisabled = true;
+            } else {
+              mensaje = disponibles + ' disponibles';
+              isDisabled = false;
+              buttonClass = "tramo-btn-disponible";
+              tramosCount++;
+            }
+          } else {
+            if (totalReservado > 0) {
+              const reserva = globalState.reservas.find(r => 
+                String(r.id_recurso) === String(recursoId) && 
+                r.fecha === fechaISO && 
+                String(r.id_tramo) === tramoId && 
+                r.estado.toLowerCase() === 'confirmada'
+              );
+              
+              if (reserva && reserva.email_usuario) {
+                const email = reserva.email_usuario.toLowerCase();
+                const miEmail = globalState.userEmail ? globalState.userEmail.toLowerCase() : '';
+                const nombre = globalState.usuariosMap[email];
+                mensaje = (email === miEmail) ? "Reservado por ti" : 'Reservado por ' + (nombre || email);
+              } else {
+                mensaje = "Reservado";
+              }
+              buttonClass = "tramo-btn-reservado";
+              isDisabled = true;
+            } else {
+              mensaje = "Disponible";
+              disponibles = 1;
+              isDisabled = false;
+              buttonClass = "tramo-btn-disponible";
+              tramosCount++;
+            }
+          }
+          
+          // Hora pasada (si es hoy)
+          if (!isDisabled && esHoy && tramo.hora_inicio) {
+             const parts = tramo.hora_inicio.split(':');
+             if(parts.length === 2) {
+                 const h = parseInt(parts[0]);
+                 const m = parseInt(parts[1]);
+                 const horaLimite = new Date(fecha);
+                 horaLimite.setHours(h, m + 10);
+                 if (ahora > horaLimite) {
+                    isDisabled = true;
+                    mensaje = "Ya ha pasado";
+                    buttonClass = "tramo-btn-no-permitido";
+                    tramosCount--;
+                 }
+             }
+          }
+        }
+    }
+    
+    // HTML BOTÓN
+    tramosHtml += `<button class="tramo-btn p-2 border rounded-lg text-left ${buttonClass}" 
+        data-tramo-id="${tramoId}" 
+        data-disponibles="${disponibles}" 
+        ${isDisabled ? 'disabled' : ''}>
+      <div>
+        <span class="font-bold text-lg">${tramo.nombre_tramo}</span>
+        <span class="text-sm text-gray-500 ml-2">(${tramo.hora_inicio || ''} - ${tramo.hora_fin || ''})</span>
+      </div>
+      <span class="block text-xs mt-1 truncate">${mensaje}</span>
+    </button>`;
+  });
+  
+  tramosContainer.innerHTML = tramosHtml || '<div class="col-span-full text-center text-gray-500 py-4">No hay tramos configurados.</div>';
+  
+  if (tramosCount <= 6) {
+    tramosContainer.style.maxHeight = 'none';
+    tramosContainer.style.overflowY = 'visible';
+  } else {
+    tramosContainer.style.maxHeight = '400px';
+    tramosContainer.style.overflowY = 'auto';
+  }
+}
+
+/* ============================================
+   ABRIR MODAL DE RESERVA (LÓGICA ACTUALIZADA 🔓)
+   ============================================ */
+function handleTramoClick(tramoBtn) {
+  const tramoId = tramoBtn.dataset.tramoId;
+  const disponibles = parseInt(tramoBtn.dataset.disponibles, 10);
+  
+  // 1. Obtener datos
+  globalState.tramoActual = globalState.tramos.find(t => t.id_tramo === tramoId);
+  const recurso = globalState.recursoActual;
+  const esAgrupado = recurso.tipo.toLowerCase() === 'agrupado' || recurso.tipo.toLowerCase() === 'carrito';
+
+  // ✅ PASO 2: Cachear elementos del modal
+  const modalName = $('modalResourceName');
+  const modalIcon = $('modalResourceIcon');
+  const modalDate = $('modalDateString');
+  const modalTime = $('modalTimeString');
+  const cantContainer = $('cantidadContainer');
+  const inputCant = $('cantidadInput');
+  const maxSpan = $('maxCantidad');
+  const btnSelectAll = $('selectAllBtn');
+  const notas = $('notasInput');
+  const btnConfirm = $('confirmModalButton');
+
+  // A. Nombre
+  if(modalName) modalName.textContent = recurso.nombre;
+
+  // B. Icono
+  if(modalIcon) {
+     if (recurso.icono && recurso.icono.includes(':')) {
+        modalIcon.innerHTML = `<iconify-icon icon="${recurso.icono}"></iconify-icon>`;
+     } else {
+        modalIcon.textContent = recurso.icono || '📅';
+     }
+  }
+
+  // C. Fecha Bonita (Capitalizada)
+  if(modalDate) {
+      const opciones = { weekday: 'long', day: 'numeric', month: 'long' };
+      let fechaTexto = globalState.fechaActual.toLocaleDateString('es-ES', opciones);
+      modalDate.textContent = fechaTexto.charAt(0).toUpperCase() + fechaTexto.slice(1);
+  }
+
+  // D. Hora
+  if(modalTime) {
+      modalTime.textContent = `${globalState.tramoActual.nombre_tramo} (${globalState.tramoActual.hora_inicio} - ${globalState.tramoActual.hora_fin})`;
+  }
+
+  // 3. RENDERIZAR SELECTOR DE CURSOS
+  renderCursoSelector();
+  
+  // 4. GESTIÓN DE CANTIDAD (STEPPER) 🔢
+
+  if (esAgrupado) {
+    cantContainer.classList.remove('hidden'); // Mostrar Stepper
+    maxSpan.textContent = disponibles;
+    inputCant.max = disponibles;
+    inputCant.value = 1; // Resetear siempre a 1
+    
+    // Configurar botón "Coger todos"
+    if (btnSelectAll) {
+    btnSelectAll.onclick = function() {
+    const input = document.getElementById('cantidadInput');
+    input.value = getMaxAvailable();
+    // NO hacemos focus - solo cambiamos el valor
+    };
+   } 
+  } else {
+    cantContainer.classList.add('hidden'); // Ocultar
+    inputCant.value = 1;
+    inputCant.max = 1;
+  }
+  
+  // 5. LIMPIEZA FINAL Y ABRIR
+  
+  if(notas) notas.value = '';
+  if(btnConfirm) {
+      btnConfirm.disabled = false;
+      // Restauramos contenido original del botón (con icono)
+      btnConfirm.innerHTML = `<span>Confirmar</span> <iconify-icon icon="mdi:arrow-right"></iconify-icon>`;
+  }
+
+  // ✅ BLOQUEAR SCROLL DEL FONDO
+  document.body.style.overflow = 'hidden';
+  
+  const modal = document.getElementById('confirmationModal');
+  modal.showModal();
+}
+
+/* ============================================
+   GESTIÓN DE CANTIDAD (STEPPER MEJORADO 🎯)
+   ============================================ */
+
+// Obtener el máximo disponible
+function getMaxAvailable() {
+    const maxElement = document.getElementById('maxCantidad');
+    return parseInt(maxElement.textContent) || 1;
+}
+
+// Validar lo que escribe el usuario manualmente
+function validateManualInput(input) {
+    let val = parseInt(input.value);
+    const max = getMaxAvailable();
+
+    // Si está vacío, no hacemos nada aún (permite borrar)
+    if (input.value === '') return;
+
+    // Si no es número o es menor que 1, ponemos 1
+    if (isNaN(val) || val < 1) {
+        val = 1;
+    } 
+    // Si es mayor que el máximo, lo corregimos al máximo
+    else if (val > max) {
+        val = max;
+        // Feedback visual: sacudir el input
+        input.classList.add('animate-shake');
+        setTimeout(() => input.classList.remove('animate-shake'), 500);
+    }
+
+    // Actualizamos el valor solo si cambió
+    if (val !== parseInt(input.value)) {
+       input.value = val;
+    }
+}
+
+// Ajustar con botones (+ y -)
+function adjustQuantity(change) {
+    const input = document.getElementById('cantidadInput');
+    let currentVal = parseInt(input.value) || 1;
+    const max = getMaxAvailable();
+    
+    let newVal = currentVal + change;
+
+    // Límites
+    if (newVal < 1) newVal = 1;
+    if (newVal > max) newVal = max;
+
+    input.value = newVal;
+}
+
+/* === SELECTOR DE CURSOS === */
+
+/* ============================================
+   SELECTOR DE CURSOS (V3 RESPONSIVE 🎯)
+   ============================================ */
+function renderCursoSelector() {
+  // Cachear elementos
+  const container = $('cursoSelectorContainer');
+  const errorMsg = $('cursoError');
+  if (!container) return;
+  
+  globalState.cursoSeleccionado = null;
+  if(errorMsg) errorMsg.classList.add('hidden');
+  
+  const modo = AdminState.modoVisualizacion || 'botones';
+  console.log('[Selector Cursos] Modo:', modo);
+  
+  // Crear mapa de etapas
+  const etapasMap = new Map();
+  globalState.cursos.forEach(c => {
+    if (!etapasMap.has(c.etapa)) etapasMap.set(c.etapa, []);
+    etapasMap.get(c.etapa).push(c.curso);
+  });
+  
+  // ============================================
+  // MODO LISTA: LAYOUT RESPONSIVE
+  // ============================================
+  if (modo === 'lista') {
+    console.log('[Selector Cursos] Renderizando HÍBRIDO RESPONSIVE');
+    
+    // ✅ Container flex responsive: columna en móvil, fila en desktop
+    let html = '<div class="flex flex-col md:flex-row md:items-start gap-3">';
+    
+    // 1. Botones de Etapas (izquierda en desktop)
+    html += '<div class="md:w-3/4">';
+    html += '<p class="text-xs font-bold text-gray-600 mb-1.5">Selecciona la etapa:</p>';
+    html += '<div id="etapasSelector" class="flex flex-wrap gap-1.5">';
+    etapasMap.forEach((_, etapa) => {
+      html += `<button type="button" class="etapa-btn px-3 py-1.5 bg-gray-50 border border-gray-200 text-gray-600 rounded-lg sm:hover:bg-gray-100 sm:hover:text-gray-800 transition-colors text-xs font-semibold shadow-sm focus:outline-none select-none active:scale-95" data-etapa="${etapa}">${etapa}</button>`;
+    });
+    html += '</div>';
+    html += '</div>';
+    
+    // 2. Select de Cursos (derecha en desktop, debajo en móvil)
+    html += '<div id="cursosSelectStage" class="hidden md:w-1/2">';
+    html += '<label id="cursoLabel" class="block text-xs font-bold text-gray-600 mb-1">Selecciona el curso:</label>';
+    html += '<select id="cursoSelect" class="block w-full px-3 py-1.5 text-sm border-gray-300 rounded-lg bg-white border focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm">';
+    html += '<option value="">-- Elige un curso --</option>';
+    html += '</select>';
+    html += '</div>';
+    
+    html += '</div>'; // Cierre del flex container
+    
+    container.innerHTML = html;
+    
+    const etapasSelector = document.getElementById('etapasSelector');
+    const cursosSelectStage = document.getElementById('cursosSelectStage');
+    const cursoSelect = document.getElementById('cursoSelect');
+    const cursoLabel = document.getElementById('cursoLabel');
+    
+    // --- EVENTO: Click en Etapa ---
+    if (etapasSelector) {
+      etapasSelector.addEventListener('click', (e) => {
+        const btn = e.target.closest('.etapa-btn');
+        if (!btn) return;
+        
+        const activeClass = ['bg-blue-600', 'text-white', 'border-blue-600', 'sm:hover:bg-blue-700', 'sm:hover:text-white'];
+        const inactiveClass = ['bg-gray-50', 'text-gray-600', 'border-gray-200', 'sm:hover:bg-gray-100', 'sm:hover:text-gray-800'];
+        
+        const wasActive = btn.classList.contains('bg-blue-600');
+        
+        // Resetear todas las etapas
+        etapasSelector.querySelectorAll('.etapa-btn').forEach(b => {
+          b.classList.remove(...activeClass);
+          b.classList.add(...inactiveClass);
+        });
+        
+        // Limpiar selección
+        globalState.cursoSeleccionado = null;
+        if (errorMsg) errorMsg.classList.add('hidden');
+        
+        if (!wasActive) {
+          // Activar etapa seleccionada
+          btn.classList.remove(...inactiveClass);
+          btn.classList.add(...activeClass);
+          
+          const etapa = btn.dataset.etapa;
+          const cursosDeEtapa = etapasMap.get(etapa) || [];
+          
+          // Actualizar label con nombre de etapa
+          if (cursoLabel) {
+            cursoLabel.textContent = `Cursos de ${etapa}:`;
+          }
+          
+          // Llenar select con cursos de esta etapa
+          let optionsHtml = '<option value="">-- Elige un curso --</option>';
+          cursosDeEtapa.forEach(curso => {
+            const fullCurso = `${etapa} - ${curso}`;
+            optionsHtml += `<option value="${fullCurso}">${curso}</option>`;
+          });
+          
+          cursoSelect.innerHTML = optionsHtml;
+          cursosSelectStage.classList.remove('hidden');
+          
+          // ✅ Animación suave al aparecer (opcional)
+          cursosSelectStage.classList.add('animate-fade-in');
+          
+        } else {
+          // Desactivar: ocultar select
+          cursosSelectStage.classList.add('hidden');
+          cursoSelect.innerHTML = '<option value="">-- Elige un curso --</option>';
+          if (cursoLabel) {
+            cursoLabel.textContent = 'Selecciona el curso:';
+          }
+        }
+      });
+    }
+    
+    // --- EVENTO: Cambio en Select ---
+    if (cursoSelect) {
+      cursoSelect.addEventListener('change', (e) => {
+        globalState.cursoSeleccionado = e.target.value || null;
+        if (errorMsg) errorMsg.classList.add('hidden');
+        console.log('[Selector Cursos] Seleccionado:', globalState.cursoSeleccionado);
+      });
+    }
+    
+  // ============================================
+  // MODO BOTONES: TODO BOTONES (Sin cambios)
+  // ============================================
+  } else {
+    console.log('[Selector Cursos] Renderizando BOTONES completo');
+    
+    // 1. Botones de Etapas
+    let html = '<div id="etapasSelector" class="flex flex-wrap gap-1.5 mb-2">';
+    etapasMap.forEach((_, etapa) => {
+      html += `<button type="button" class="etapa-btn px-2.5 py-1 bg-gray-50 border border-gray-200 text-gray-600 rounded-md sm:hover:bg-gray-100 sm:hover:text-gray-800 transition-colors text-xs font-semibold shadow-sm focus:outline-none select-none active:scale-95" data-etapa="${etapa}">${etapa}</button>`;
+    });
+    html += '</div>';
+    
+    // 2. Área de Cursos (Botones)
+    html += '<div id="cursosStage" class="hidden">';
+    html += '<p class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Clase:</p>';
+    html += '<div id="cursosButtons" class="grid grid-cols-5 gap-1.5"></div>';
+    html += '</div>';
+    
+    container.innerHTML = html;
+    
+    const etapasSelector = document.getElementById('etapasSelector');
+    const cursosStage = document.getElementById('cursosStage');
+    const cursosButtons = document.getElementById('cursosButtons');
+    
+    // --- EVENTO ETAPAS ---
+    if (etapasSelector) {
+      etapasSelector.addEventListener('click', (e) => {
+        const btn = e.target.closest('.etapa-btn');
+        if (!btn) return;
+        btn.blur(); 
+
+        const activeClass = ['bg-gray-800', 'text-white', 'border-gray-800', 'sm:hover:bg-gray-800', 'sm:hover:text-white'];
+        const inactiveClass = ['bg-gray-50', 'text-gray-600', 'border-gray-200', 'sm:hover:bg-gray-100', 'sm:hover:text-gray-800'];
+
+        const wasActive = btn.classList.contains('bg-gray-800');
+
+        // Resetear
+        etapasSelector.querySelectorAll('.etapa-btn').forEach(b => {
+          b.classList.remove(...activeClass);
+          b.classList.add(...inactiveClass);
+        });
+        cursosStage.classList.add('hidden');
+        globalState.cursoSeleccionado = null;
+
+        if (!wasActive) {
+          // Activar
+          btn.classList.remove(...inactiveClass);
+          btn.classList.add(...activeClass);
+          
+          const etapa = btn.dataset.etapa;
+          const cursosDeEtapa = etapasMap.get(etapa) || [];
+          let cursosHtml = '';
+          
+          cursosDeEtapa.forEach(curso => {
+            const fullCurso = `${etapa} - ${curso}`;
+            cursosHtml += `<button type="button" class="curso-btn py-1.5 px-0.5 bg-white border border-gray-200 text-gray-600 rounded sm:hover:border-blue-400 sm:hover:text-blue-600 sm:hover:bg-blue-50 transition-colors text-[11px] font-bold shadow-sm focus:outline-none select-none active:scale-95 truncate" title="${curso}" data-curso="${fullCurso}">${curso}</button>`;
+          });
+          
+          cursosButtons.innerHTML = cursosHtml;
+          cursosStage.classList.remove('hidden');
+        }
+      });
+    }
+    
+    // --- EVENTO CURSOS ---
+    if (cursosButtons) {
+      cursosButtons.addEventListener('click', (e) => {
+        const btn = e.target.closest('.curso-btn');
+        if (!btn) return;
+        btn.blur();
+
+        const activeClass = ['bg-blue-600', 'text-white', 'border-blue-600', 'sm:hover:bg-blue-600', 'sm:hover:text-white', 'sm:hover:border-blue-600'];
+        const inactiveClass = ['bg-white', 'text-gray-600', 'border-gray-200', 'sm:hover:border-blue-400', 'sm:hover:text-blue-600', 'sm:hover:bg-blue-50'];
+
+        const wasActive = btn.classList.contains('bg-blue-600');
+
+        // Resetear hermanos
+        cursosButtons.querySelectorAll('.curso-btn').forEach(b => {
+          b.classList.remove(...activeClass);
+          b.classList.add(...inactiveClass);
+        });
+
+        if (!wasActive) {
+          // Activar nuevo
+          btn.classList.remove(...inactiveClass);
+          btn.classList.add(...activeClass);
+          
+          globalState.cursoSeleccionado = btn.dataset.curso;
+          if (errorMsg) errorMsg.classList.add('hidden');
+        } else {
+          globalState.cursoSeleccionado = null;
+        }
+      });
+    }
+  }
+}
+
+/* === GESTIÓN DE RESERVAS === */
+
+function handleConfirmReservation() {
+  if (!globalState.cursoSeleccionado) {
+    cursoError.classList.remove('hidden');
+    return;
+  }
+  
+  confirmModalButton.disabled = true;
+  confirmModalButton.textContent = "Reservando...";
+  showLoading();
+  modal.close();
+  
+  const cantidad = parseInt(cantidadInput.value, 10);
+  const max = parseInt(cantidadInput.max, 10);
+  
+  if (cantidad < 1 || cantidad > max) {
+    onFailure({ message: 'Cantidad no válida. Debe ser entre 1 y ' + max + '.'});
+    confirmModalButton.disabled = false;
+    confirmModalButton.textContent = "Confirmar Reserva";
+    modal.showModal();
+    return;
+  }
+  
+  const reservaData = {
+    recursoId: globalState.recursoActual.id_recurso,
+    recursoNombre: globalState.recursoActual.nombre,
+    fechaISO: formatDateToISO(globalState.fechaActual),
+    tramoId: globalState.tramoActual.id_tramo,
+    tramoNombre: globalState.tramoActual.nombre_tramo,
+    notas: notasInput.value.trim(),
+    cantidad: cantidad,
+    curso: globalState.cursoSeleccionado
+  };
+  
+  google.script.run
+    .withSuccessHandler(onReservaSuccess)
+    .withFailureHandler(onFailure)
+    .crearNuevaReserva(reservaData);
+}
+
+function onReservaSuccess(response) {
+  // ✅ CRÍTICO: Ocultar loading SIEMPRE al inicio
+  hideLoading();
+  
+  if (response.success) {
+    showSuccess(response.message);
+    
+    // Agregar a reservas globales (para disponibilidad)
+    globalState.reservas.push(response.nuevaReserva);
+    
+    // Agregar también a mis reservas activas
+    globalState.misReservasActivas.push(response.nuevaReserva);
+    
+    // Ordenar mis reservas por fecha
+    globalState.misReservasActivas.sort((a, b) => {
+      const dateA = new Date(a.fecha);
+      const dateB = new Date(b.fecha);
+      return dateA - dateB;
+    });
+    
+    const recursoId = globalState.recursoActual ? globalState.recursoActual.id_recurso : null;
+    
+    if (recursoId) {
+      google.script.run
+        .withSuccessHandler((result) => {
+          if (result.success) {
+            globalState.disponibilidad = result.disponibilidad;
+            if (!step2.classList.contains('hidden')) {
+              loadTramos();
+            }
+          }
+        })
+        .withFailureHandler((e) => console.error("Error recargando disponibilidad:", e))
+        .cargarDisponibilidadRecurso(recursoId);
+    }
+    
+    // Desbloquear scroll al cerrar
+    document.body.style.overflow = '';
+
+    switchView(step2, step1);
+    globalState.recursoActual = null;
+  } else {
+    onFailure({ message: response.message });
+    if (response.message.includes("Conflicto")) {
+      refreshDisponibilidadAndReloadTramos();
+    }
+  }
+  
+  confirmModalButton.disabled = false;
+  confirmModalButton.innerHTML = `<span>Confirmar</span> <iconify-icon icon="mdi:arrow-right"></iconify-icon>`;
+}
+
+function refreshDisponibilidadAndReloadTramos() {
+  console.warn("⚠️ Conflicto detectado. Recargando disponibilidad...");
+  
+  const recursoId = globalState.recursoActual.id_recurso;
+  showLoading();
+  
+  google.script.run
+    .withSuccessHandler((result) => {
+      hideLoading();
+      if (result.success) {
+        globalState.disponibilidad = result.disponibilidad;
+        loadTramos();
+        showError("La disponibilidad ha cambiado. Por favor, revisa los tramos y vuelve a intentarlo.");
+      } else {
+        onFailure(result);
+      }
+    })
+    .withFailureHandler(onFailure)
+    .cargarDisponibilidadRecurso(recursoId);
+}
+
+/* === MIS RESERVAS === */
+
+/* ============================================
+   GESTIÓN MODAL MIS RESERVAS (DISEÑO TARJETAS 🗂️)
+   ============================================ */
+
+function openMyReservationsModal() {
+  // Cachear elementos
+  const modal = $('myReservationsModal');
+  const list = $('myReservationsList');
+  const errorDiv = $('myReservationsError');
+  const emptyDiv = $('myReservationsEmpty');
+  const spinner = $('myReservationsSpinner');
+
+  
+  // ✅ BLOQUEAR SCROLL
+  document.body.style.overflow = 'hidden';
+
+  // Mostrar modal
+  modal.classList.remove('hidden'); 
+  modal.classList.add('flex');
+  
+  // Reset visual
+  list.innerHTML = '';
+  errorDiv.classList.add('hidden');
+  emptyDiv.classList.add('hidden');
+  
+  // ✅ CAMBIO: Ya no mostramos spinner ni hacemos llamada al servidor
+  // Usamos los datos que ya tenemos en memoria
+  
+  // Simular la respuesta del servidor con datos locales
+  const fakeResponse = {
+    success: true,
+    reservations: globalState.misReservasActivas
+  };
+  
+  onMyReservationsSuccess(fakeResponse);
+}
+
+function onMyReservationsSuccess(response) {
+  // Cachear elementos
+  const list = $('myReservationsList');
+  const spinner = $('myReservationsSpinner');
+  const emptyDiv = $('myReservationsEmpty');
+  
+  spinner.classList.add('hidden');
+  
+  if (!response.success) {
+    onMyReservationsFailure(response);
+    return;
+  }
+  
+  if (response.reservations.length === 0) {
+    emptyDiv.classList.remove('hidden');
+  } else {
+    let html = '';
+    
+    response.reservations.forEach(res => {
+      // 1. Datos del Recurso
+      const recurso = globalState.recursos.find(r => r.id_recurso === res.id_recurso) || { nombre: 'Recurso eliminado', icono: 'mdi:help-circle-outline' };
+      
+      // Icono (lógica Iconify vs Emoji)
+      let iconHtml = '';
+      if (recurso.icono && recurso.icono.includes(':')) {
+         iconHtml = `<iconify-icon icon="${recurso.icono}" class="text-2xl text-gray-600"></iconify-icon>`;
+      } else {
+         iconHtml = `<span class="text-xl grayscale opacity-70">${recurso.icono || '📅'}</span>`;
+      }
+
+      // 2. Datos del Tramo y Fecha
+      const tramo = globalState.tramos.find(t => t.id_tramo === res.id_tramo) || { nombre_tramo: 'Hora desconocida', hora_inicio: '??', hora_fin: '??' };
+      
+      const fechaObj = new Date(res.fecha); // Asumimos formato compatible
+      // Ajuste visual de fecha
+      const fechaBonita = fechaObj.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' }).replace('.', '');
+      // Capitalizar (lun, 12 oct -> Lun, 12 Oct)
+      const fechaFinal = fechaBonita.charAt(0).toUpperCase() + fechaBonita.slice(1);
+
+      // 3. Badges (Curso y Cantidad)
+      let badgesHtml = '';
+      if (res.curso) {
+      badgesHtml += `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 uppercase tracking-wide mr-2">
+      ${res.curso}
+     </span>`;
+     }
+     if (res.cantidad > 1) {
+    badgesHtml += `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-100 uppercase tracking-wide">
+      # ${res.cantidad} Uds.
+    </span>`;
+     }
+
+      // 4. Notas (si hay)
+      const notasHtml = res.notas ? 
+        `<div class="mt-2 text-xs text-gray-500 bg-gray-50 p-2 rounded border border-gray-100 flex gap-1 items-start">
+            <iconify-icon icon="mdi:comment-text-outline" class="mt-0.5 text-gray-400"></iconify-icon>
+            <span class="italic line-clamp-2">${res.notas}</span>
+         </div>` : '';
+
+      // 5. Construcción de la TARJETA HTML
+      html += `
+      <div id="reserva-item-${res.id_reserva}" class="group bg-white p-4 rounded-xl shadow-sm border border-gray-100 hover:shadow-md hover:border-blue-100 transition-all duration-300 relative">
+          
+          <div class="flex items-start justify-between gap-3">
+              <div class="flex items-start gap-3 flex-1 min-w-0">
+                  <div class="w-10 h-10 rounded-lg bg-gray-50 flex items-center justify-center shrink-0 border border-gray-100">
+                      ${iconHtml}
+                  </div>
+                  
+                  <div class="flex-1 min-w-0">
+                      <h4 class="font-bold text-gray-800 text-sm leading-tight mb-1 truncate">${recurso.nombre}</h4>
+                      
+                      <div class="flex flex-wrap items-center gap-3 text-xs text-gray-500 mb-1.5">
+                          <div class="flex items-center gap-1 text-blue-600 font-medium bg-blue-50 px-1.5 py-0.5 rounded">
+                              <iconify-icon icon="mdi:calendar-month"></iconify-icon>
+                              ${fechaFinal}
+                          </div>
+                          <div class="flex items-center gap-1">
+                              <iconify-icon icon="mdi:clock-time-four-outline"></iconify-icon>
+                              ${tramo.hora_inicio} - ${tramo.hora_fin}
+                          </div>
+                      </div>
+
+                      <div>${badgesHtml}</div>
+                  </div>
+              </div>
+
+              <div class="flex flex-col items-end">
+                  <button onclick="handleCancelReservation(this)" data-id="${res.id_reserva}" 
+                          class="cancel-btn-inline w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-100 transition-all"
+                          title="Cancelar reserva">
+                      <iconify-icon icon="mdi:trash-can-outline" class="text-lg"></iconify-icon>
+                  </button>
+              </div>
+          </div>
+          
+          ${notasHtml}
+
+      </div>`;
+    });
+    
+    list.innerHTML = html;
+  }
+}
+
+function onMyReservationsFailure(error) {
+  const errorDiv = document.getElementById('myReservationsError');
+  const errorText = document.getElementById('myReservationsErrorText');
+  if(errorText) errorText.textContent = (error.message || error);
+  if(errorDiv) errorDiv.classList.remove('hidden');
+}
+
+/* ============================================
+   CANCELACIÓN DE RESERVAS CON MODAL
+   ============================================ */
+
+let reservaIdPendienteCancelacion = null;
+
+function handleCancelReservation(cancelBtn) {
+  const reservaId = cancelBtn.dataset.id;
+  
+  // Guardar el ID y el botón para usarlos después
+  reservaIdPendienteCancelacion = reservaId;
+  
+  // Bloquear scroll del fondo
+  document.body.style.overflow = 'hidden';
+  
+  // Mostrar modal de confirmación
+  const modal = document.getElementById('modalConfirmacionCancelacion');
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+}
+
+function cerrarConfirmacionCancelacion() {
+  const modal = document.getElementById('modalConfirmacionCancelacion');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  
+  // Desbloquear scroll (pero solo si "Mis Reservas" sigue abierto)
+  // No desbloqueamos porque "Mis Reservas" sigue abierto
+  
+  reservaIdPendienteCancelacion = null;
+}
+
+function confirmarCancelacionReserva() {
+  if (!reservaIdPendienteCancelacion) return;
+  
+  const reservaId = reservaIdPendienteCancelacion;
+  
+  // Cerrar modal de confirmación
+  cerrarConfirmacionCancelacion();
+  
+  // ✅ MOSTRAR SPINNER EN LA TARJETA
+  const tarjeta = document.getElementById('reserva-item-' + reservaId);
+  if (tarjeta) {
+    // Crear overlay de carga
+    const overlay = document.createElement('div');
+    overlay.className = 'card-loading-overlay';
+    overlay.innerHTML = `
+      <iconify-icon icon="mdi:loading" class="text-4xl text-blue-500 animate-spin mb-2"></iconify-icon>
+      <span class="text-sm font-medium text-gray-600">Cancelando...</span>
+    `;
+    tarjeta.appendChild(overlay);
+  }
+  
+  // Ejecutar cancelación
+  google.script.run
+    .withSuccessHandler(onCancelReservationSuccess)
+    .withFailureHandler(onCancelReservationFailure)
+    .cancelarReservaCliente(reservaId);
+}
+
+function onCancelReservationSuccess(response) {
+  if (response.success) {
+    const canceledId = response.canceledId;
+    
+    // ✅ ANIMAR SALIDA Y LUEGO ELIMINAR
+    const itemToRemove = document.getElementById('reserva-item-' + canceledId);
+    if (itemToRemove) {
+      itemToRemove.classList.add('removing-animation');
+      
+      setTimeout(() => {
+        itemToRemove.remove();
+        
+        // ✅ MOSTRAR EMPTY STATE SI YA NO HAY RESERVAS (con comprobación segura)
+        const myReservationsList = document.getElementById('myReservationsList');
+        const myReservationsEmpty = document.getElementById('myReservationsEmpty');
+        
+        if (myReservationsList && myReservationsEmpty) {  // ← AÑADIDO
+          if (myReservationsList.children.length === 0) {
+            myReservationsEmpty.classList.remove('hidden');
+          }
+        }
+      }, 300);
+    }
+    
+    // Eliminar de reservas globales
+    const index = globalState.reservas.findIndex(r => r.id_reserva === canceledId);
+    if (index > -1) { 
+      globalState.reservas.splice(index, 1); 
+    }
+    
+    // Eliminar de mis reservas activas
+    const myIndex = globalState.misReservasActivas.findIndex(r => r.id_reserva === canceledId);
+    if (myIndex > -1) {
+      globalState.misReservasActivas.splice(myIndex, 1);
+    }
+    
+    // Si estamos viendo tramos, recargar disponibilidad
+    const step2 = document.getElementById('step2');
+    if (step2 && !step2.classList.contains('hidden') && globalState.recursoActual) {  // ← AÑADIDO
+      const recursoId = globalState.recursoActual.id_recurso;
+      google.script.run
+        .withSuccessHandler((result) => {
+          if (result.success) {
+            globalState.disponibilidad = result.disponibilidad;
+            loadTramos();
+          }
+        })
+        .cargarDisponibilidadRecurso(recursoId);
+    }
+    
+    // ✅ MOSTRAR SOLO ÉXITO (sin hideMessages antes)
+    showSuccess("Reserva cancelada con éxito.");
+    setTimeout(hideMessages, 2500);
+  } else {
+    onCancelReservationFailure({ message: response.message });
+  }
+  
+  reservaIdPendienteCancelacion = null;
+}
+
+function onCancelReservationFailure(error) {
+  if (reservaIdPendienteCancelacion) {
+    const tarjeta = document.getElementById('reserva-item-' + reservaIdPendienteCancelacion);
+    if (tarjeta) {
+      const overlay = tarjeta.querySelector('.card-loading-overlay');
+      if (overlay) overlay.remove();
+    }
+  }
+  
+  // Mostrar error
+  showError('Error al cancelar: ' + (error.message || error));
+  setTimeout(hideMessages, 3000);
+  
+  reservaIdPendienteCancelacion = null;
+}
+
+function showInfo(message) {
+  const successDiv = document.getElementById('successMessage');
+  const errorDiv = document.getElementById('errorMessage');
+  
+  if (errorDiv) errorDiv.classList.add('hidden');
+  if (successDiv) {
+    successDiv.textContent = message;
+    successDiv.classList.remove('hidden');
+    successDiv.style.backgroundColor = '#3b82f6'; // Azul para info
+  }
+}
+
+/* =========================================================
+   SISTEMA DE INCIDENCIAS - FRONTEND USUARIO
+   ========================================================= */
+
+let incidenciaRecursoActual = null;
+
+/**
+ * Abrir modal para reportar incidencia
+ */
+function abrirModalReportarIncidencia(idRecurso, nombreRecurso, iconoRecurso) {
+  console.log('📝 Abriendo modal incidencia:', idRecurso);
+  
+  // Guardar datos del recurso
+  incidenciaRecursoActual = {
+    id: idRecurso,
+    nombre: nombreRecurso,
+    icono: iconoRecurso || 'mdi:cube-outline'
+  };
+  
+  // Actualizar UI del modal
+  const modalIcono = document.getElementById('modalIncidenciaIcono');
+  const modalNombre = document.getElementById('modalIncidenciaNombreRecurso');
+  
+  if (modalIcono) {
+    modalIcono.innerHTML = `<iconify-icon icon="${incidenciaRecursoActual.icono}" class="text-2xl"></iconify-icon>`;
+  }
+  
+  if (modalNombre) {
+    modalNombre.textContent = nombreRecurso;
+  }
+  
+  // Resetear campos
+  document.getElementById('incidenciaCategoria').value = 'Avería';
+  document.getElementById('incidenciaPrioridad').value = 'Media';
+  document.getElementById('incidenciaDescripcion').value = '';
+  
+  // Mostrar modal
+  const modal = document.getElementById('modalReportarIncidencia');
+  if (modal) {
+    modal.classList.remove('hidden');
+    
+    // Focus en descripción
+    setTimeout(() => {
+      document.getElementById('incidenciaDescripcion').focus();
+    }, 100);
+  }
+}
+
+/**
+ * Cerrar modal
+ */
+function cerrarModalReportarIncidencia() {
+  const modal = document.getElementById('modalReportarIncidencia');
+  if (modal) {
+    modal.classList.add('hidden');
+    // ✅ Si es un dialog HTML5
+    if (modal.close) {
+      modal.close();
+    }
+  }
+  incidenciaRecursoActual = null;
+  
+  // ✅ NUEVO: Limpiar error al cerrar
+  ocultarErrorIncidencia();
+}
+
+/**
+ * Enviar reporte de incidencia (CON SPINNER)
+ */
+function enviarReporteIncidencia() {
+  const descripcion = document.getElementById('incidenciaDescripcion').value.trim();
+  
+  // ✅ Ocultar error previo
+  ocultarErrorIncidencia();
+  
+  // ✅ Validación con error inline
+  if (!descripcion) {
+    mostrarErrorIncidencia('Por favor, describe el problema');
+    document.getElementById('incidenciaDescripcion').focus();
+    return;
+  }
+  
+  if (descripcion.length < 10) {
+    mostrarErrorIncidencia('La descripción debe tener al menos 10 caracteres');
+    return;
+  }
+  
+  if (!incidenciaRecursoActual) {
+    mostrarErrorIncidencia('Error: No hay recurso seleccionado');
+    setTimeout(() => {
+      cerrarModalReportarIncidencia();
+    }, 2000);
+    return;
+  }
+  
+  // Datos a enviar
+  const datos = {
+    id_recurso: String(incidenciaRecursoActual.id || incidenciaRecursoActual.id_recurso || ''),
+    nombre_recurso: incidenciaRecursoActual.nombre,
+    categoria: document.getElementById('incidenciaCategoria').value,
+    prioridad: document.getElementById('incidenciaPrioridad').value,
+    descripcion: descripcion
+  };
+  
+  console.log('📤 Enviando incidencia:', datos);
+  
+  // ✅ MOSTRAR SPINNER EN EL BOTÓN
+  const btnEnviar = document.getElementById('btnEnviarIncidencia');
+  const textoOriginal = btnEnviar.innerHTML;
+  
+  btnEnviar.disabled = true;
+  btnEnviar.innerHTML = `
+    <iconify-icon icon="mdi:loading" class="animate-spin text-xl"></iconify-icon>
+    <span>Enviando...</span>
+  `;
+  
+  google.script.run
+    .withSuccessHandler(function(response) {
+      // ✅ RESTAURAR BOTÓN
+      btnEnviar.disabled = false;
+      btnEnviar.innerHTML = textoOriginal;
+      
+      if (response.success) {
+        showToast('success', 'Incidencia reportada correctamente');
+        cerrarModalReportarIncidencia();
+        
+        // Opcional: Recargar lista de incidencias si está visible
+        if (typeof cargarIncidencias === 'function') {
+          cargarIncidencias();
+        }
+      } else {
+        mostrarErrorIncidencia(response.error || 'Error al reportar incidencia');
+      }
+    })
+    .withFailureHandler(function(error) {
+      // ✅ RESTAURAR BOTÓN EN CASO DE ERROR
+      btnEnviar.disabled = false;
+      btnEnviar.innerHTML = textoOriginal;
+      
+      mostrarErrorIncidencia('Error de conexión: ' + error.message);
+    })
+    .reportarIncidencia(datos);
+}
+
+/**
+ * Mostrar mensaje de error inline en el modal
+ */
+function mostrarErrorIncidencia(mensaje) {
+  const errorDiv = document.getElementById('incidenciaError');
+  const errorTexto = document.getElementById('incidenciaErrorTexto');
+  
+  if (!errorDiv || !errorTexto) return;
+  
+  errorTexto.textContent = mensaje;
+  errorDiv.classList.remove('hidden');
+  
+  // Scroll suave hasta el error
+  errorDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+/**
+ * Ocultar mensaje de error inline
+ */
+function ocultarErrorIncidencia() {
+  const errorDiv = document.getElementById('incidenciaError');
+  if (errorDiv) {
+    errorDiv.classList.add('hidden');
+  }
+}
+
+
+/**
+ * Abrir modal de incidencia desde el modal de confirmación de reserva
+ */
+function abrirModalReportarIncidenciaDesdeReserva() {
+  // Obtener recurso actual
+  if (!globalState || !globalState.recursoActual) {
+    showToast('warning', 'Selecciona primero un recurso');
+    return;
+  }
+  
+  let recurso = globalState.recursoActual;
+  
+  // ✅ FIX: Si recursoActual es un objeto completo, usarlo directamente
+  // Si es solo un ID (string), buscarlo en el array
+  if (typeof recurso === 'string') {
+    // Es un ID, buscar el objeto
+    recurso = globalState.recursos.find(r => 
+      (r.id_recurso || r.ID_Recurso) === recurso
+    );
+    
+    if (!recurso) {
+      showToast('error', 'No se encontró el recurso');
+      return;
+    }
+  }
+  
+  // ✅ PROBLEMA 2: Cerrar modal de confirmación (dialog)
+  const modalConfirm = document.getElementById('confirmationModal');
+  if (modalConfirm && modalConfirm.close) {
+    modalConfirm.close(); // Cerrar dialog HTML5
+    document.body.style.overflow = ''; // Restaurar scroll
+  }
+  
+  // Abrir modal de incidencia con datos correctos
+  abrirModalReportarIncidencia(
+    recurso.id_recurso || recurso.ID_Recurso,
+    recurso.nombre || recurso.nombre_recurso || 'Recurso',
+    recurso.icono || 'mdi:cube-outline'
+  );
+}
+
+/* =========================================================
+   SECCIÓN: VER INCIDENCIAS (USUARIOS)
+   ========================================================= */
+
+let todasLasIncidencias = [];
+let incidenciasActuales = [];
+
+/**
+ * Mostrar sección de incidencias (con verificación de recursos)
+ */
+function mostrarSeccionIncidencias() {
+  console.log('📋 Abriendo sección de incidencias');
+
+  // Cerrar panel admin si está abierto
+  if (typeof window.closeAdminPanelUI === 'function') {
+    window.closeAdminPanelUI();
+  }
+  
+  // Ocultar todas las vistas
+  document.querySelectorAll('.view-section').forEach(el => {
+    el.classList.add('hidden');
+    el.classList.add('opacity-0');
+  });
+  
+  // Mostrar sección incidencias
+  const seccion = document.getElementById('seccionIncidencias');
+  if (seccion) {
+    seccion.classList.remove('hidden');
+    void seccion.offsetWidth;
+    seccion.classList.remove('opacity-0');
+  }
+  
+  // Ocultar botón de incidencias
+  const btnVerInc = document.getElementById('btnVerIncidencias');
+  if (btnVerInc) btnVerInc.classList.add('hidden');
+  
+  // ✅ ESPERAR A ADMINSTATE SI NO ESTÁ LISTO
+  if (typeof AdminState === 'undefined' || !AdminState.recursos || AdminState.recursos.length === 0) {
+    console.log('⏳ Esperando a que AdminState cargue...');
+    
+    const lista = document.getElementById('listaIncidencias');
+    if (lista) {
+      lista.innerHTML = `
+        <div class="text-center py-12 text-gray-400">
+          <iconify-icon icon="mdi:loading" class="text-4xl animate-spin mb-2"></iconify-icon>
+          <p>Cargando datos...</p>
+        </div>
+      `;
+    }
+    
+    const esperarAdminState = setInterval(() => {
+      if (typeof AdminState !== 'undefined' && AdminState.recursos && AdminState.recursos.length > 0) {
+        clearInterval(esperarAdminState);
+        console.log('✅ AdminState listo, cargando incidencias');
+        cargarOUsarIncidencias();
+      }
+    }, 200);
+    
+  } else {
+    cargarOUsarIncidencias();
+  }
+}
+
+// Función auxiliar para evitar duplicación
+function cargarOUsarIncidencias() {
+  if (!todasLasIncidencias || todasLasIncidencias.length === 0) {
+    cargarIncidencias();
+  } else {
+    actualizarContadorIncidencias();
+    filtrarIncidencias();
+  }
+}
+
+/**
+ * Volver desde incidencias
+ */
+function volverDesdeIncidencias() {
+  console.log('🔙 Volviendo desde incidencias');
+
+  // Asegurar que el panel admin sigue cerrado
+  if (typeof window.closeAdminPanelUI === 'function') {
+    window.closeAdminPanelUI();
+  }
+  
+  // Ocultar sección incidencias
+  const seccion = document.getElementById('seccionIncidencias');
+  if (seccion) {
+    seccion.classList.add('hidden');
+    seccion.classList.add('opacity-0');
+  }
+  
+  // Mostrar vista principal
+  const step1 = document.getElementById('step1_Recursos');
+  if (step1) {
+    step1.classList.remove('hidden');
+    void step1.offsetWidth;
+    step1.classList.remove('opacity-0');
+  }
+  
+  // ✅ SOLO mostrar el botón de incidencias si hay pendientes
+  const btnVerInc = document.getElementById('btnVerIncidencias');
+  if (btnVerInc && hayIncidenciasPendientes()) {
+    btnVerInc.classList.remove('hidden');
+  }
+}
+
+/**
+ * Cargar incidencias desde el servidor
+ */
+function cargarIncidencias() {
+  console.log('🔄 Cargando incidencias...');
+  
+  const lista = document.getElementById('listaIncidencias');
+  if (!lista) return;
+  
+  lista.innerHTML = `
+    <div class="text-center py-12 text-gray-400">
+      <iconify-icon icon="mdi:loading" class="text-4xl animate-spin mb-2"></iconify-icon>
+      <p>Cargando incidencias...</p>
+    </div>
+  `;
+  
+  google.script.run
+    .withSuccessHandler(function(response) {
+      if (response && response.success) {
+        todasLasIncidencias = response.incidencias || [];
+        console.log(`✅ ${todasLasIncidencias.length} incidencias cargadas`);
+        
+        actualizarContadorIncidencias();
+        filtrarIncidencias();
+      } else {
+        lista.innerHTML = `
+          <div class="text-center py-12 text-gray-400">
+            <iconify-icon icon="mdi:information-outline" class="text-4xl mb-2"></iconify-icon>
+            <p>No se pudieron cargar las incidencias</p>
+            <p class="text-xs mt-2">${response ? response.error : 'Respuesta inválida del servidor'}</p>
+          </div>
+        `;
+      }
+    })
+    .withFailureHandler(function(error) {
+      lista.innerHTML = `
+        <div class="text-center py-12 text-red-500">
+          <iconify-icon icon="mdi:alert-circle" class="text-4xl mb-2"></iconify-icon>
+          <p>Error de conexión: ${error.message}</p>
+        </div>
+      `;
+    })
+    .getIncidencias();
+}
+
+/**
+ * Obtener estado actual de un recurso (busca en ambos estados)
+ * @param {string} idRecurso - ID del recurso
+ * @returns {string|null} - Estado del recurso o null si no se encuentra
+ */
+function obtenerEstadoRecurso(idRecurso) {
+  const idBuscado = String(idRecurso).trim();
+  
+  // 1. Buscar en globalState primero (más actualizado en vista usuario)
+  if (globalState && globalState.recursos) {
+    const recurso = globalState.recursos.find(r => 
+      String(r.id_recurso).trim() === idBuscado
+    );
+    if (recurso) return recurso.estado;
+  }
+  
+  // 2. Fallback a AdminState (si existe)
+  if (typeof AdminState !== 'undefined' && AdminState.recursos) {
+    const recursoAdmin = AdminState.recursos.find(r => 
+      String(r.id_recurso).trim() === idBuscado
+    );
+    if (recursoAdmin) return recursoAdmin.estado;
+  }
+  
+  return null;
+}
+
+/**
+ * Verificar si un recurso está en mantenimiento
+ */
+function recursoEnMantenimiento(idRecurso) {
+  const estado = obtenerEstadoRecurso(idRecurso);
+  return estado === 'Mantenimiento';
+}
+
+/* =========================================================
+   LÓGICA DE FILTROS (TABS)
+   ========================================================= */
+
+// 1. Variable global sincronizada con tu HTML (Por defecto 'todas')
+let filtroEstadoActual = 'todas'; 
+
+/**
+ * Función para cambiar el estilo visual y el filtro lógico
+ */
+function cambiarFiltroIncidencia(nuevoEstado, botonClickado) {
+  // A. Actualizar variable lógica
+  filtroEstadoActual = nuevoEstado;
+
+  // B. Gestión de estilos visuales
+  const botones = document.querySelectorAll('.filter-tab');
+  
+  // Clases para cuando un botón está ACTIVO
+  const claseActiva = 'bg-white text-gray-800 shadow-sm ring-1 ring-black/5 font-semibold';
+  // Clases para cuando un botón está INACTIVO
+  const claseInactiva = 'text-gray-500 hover:text-gray-700 hover:bg-white/50 font-medium';
+  // Clases base que todos comparten siempre
+  const claseBase = 'filter-tab flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all cursor-pointer';
+
+  // Reseteamos todos los botones al estado inactivo
+  botones.forEach(btn => {
+    // Nota: Aquí normalizamos el estilo inactivo a gris para mantener la limpieza visual
+    btn.className = `${claseBase} ${claseInactiva}`;
+  });
+
+  // Aplicamos estilo activo AL QUE SE CLICÓ
+  if(botonClickado) {
+    botonClickado.className = `${claseBase} ${claseActiva}`;
+    // Cambiamos cursor a default para indicar que ya está seleccionado
+    botonClickado.classList.remove('cursor-pointer');
+    botonClickado.classList.add('cursor-default');
+  }
+
+  // C. Ejecutar el filtro de datos
+  filtrarIncidencias();
+}
+
+/**
+ * Función de filtrado de datos
+ */
+function filtrarIncidencias() {
+  const filtroEstado = filtroEstadoActual; 
+  
+  const inputBusqueda = document.getElementById('buscadorIncidencias');
+  const busqueda = inputBusqueda ? inputBusqueda.value.toLowerCase() : '';
+  
+  incidenciasActuales = todasLasIncidencias.filter(inc => {
+    // --- 1. Lógica de Estado ---
+    let cumpleEstado = true;
+    
+    if (filtroEstado === 'todas') {
+        cumpleEstado = true;
+    } else if (filtroEstado === 'activas') {
+        cumpleEstado = inc.Estado === 'Pendiente' || inc.Estado === 'En proceso';
+    } else {
+        let estadoBuscado = '';
+        
+        if(filtroEstado === 'pendiente') estadoBuscado = 'Pendiente';
+        else if(filtroEstado === 'en-proceso') estadoBuscado = 'En proceso';
+        else if(filtroEstado === 'resuelta') estadoBuscado = 'Resuelta';
+        
+        cumpleEstado = inc.Estado === estadoBuscado;
+    }
+    
+    // --- 2. Lógica de Búsqueda ---
+    let cumpleBusqueda = true;
+    if (busqueda) {
+      const textoBusqueda = `
+        ${inc.Nombre_Recurso || ''} 
+        ${inc.Descripcion || ''} 
+        ${inc.Categoria || ''} 
+        ${inc.ID_Incidencia || ''}
+      `.toLowerCase();
+      
+      cumpleBusqueda = textoBusqueda.includes(busqueda);
+    }
+    
+    return cumpleEstado && cumpleBusqueda;
+  });
+  
+  // ✅ ORDENAR: Primero por estado (Pendiente > En proceso > Resuelta), luego por fecha (recientes primero)
+  const ordenEstado = { 'Pendiente': 0, 'En proceso': 1, 'Resuelta': 2 };
+  
+  incidenciasActuales.sort((a, b) => {
+    // 1. Por estado
+    const estadoA = ordenEstado[a.Estado] ?? 3;
+    const estadoB = ordenEstado[b.Estado] ?? 3;
+    if (estadoA !== estadoB) return estadoA - estadoB;
+    
+    // 2. Por fecha (más reciente primero)
+    const fechaA = new Date(a.Fecha_Reporte || a.Fecha || 0);
+    const fechaB = new Date(b.Fecha_Reporte || b.Fecha || 0);
+    return fechaB - fechaA;
+  });
+  
+  renderIncidencias();
+}
+
+
+/**
+ * Renderizar lista de incidencias
+ */
+function renderIncidencias() {
+  const lista = document.getElementById('listaIncidencias');
+  const contador = document.getElementById('contadorIncidencias');
+  
+  // 1. Limpiar y actualizar contador
+  lista.innerHTML = '';
+  if (contador) {
+    const total = incidenciasActuales.length;
+    contador.textContent = total === 1 ? '1 incidencia' : `${total} incidencias`;
+  }
+
+  // 2. Estado Vacío
+  if (incidenciasActuales.length === 0) {
+    lista.innerHTML = `
+      <div class="flex flex-col items-center justify-center py-12 text-center text-gray-400">
+        <iconify-icon icon="mdi:checkbox-multiple-marked-outline" class="text-4xl mb-2 opacity-50"></iconify-icon>
+        <p>No se encontraron incidencias.</p>
+      </div>
+    `;
+    return;
+  }
+
+  // 3. Generar HTML
+  lista.innerHTML = incidenciasActuales.map(inc => crearTarjetaIncidencia(inc)).join('');
+}
+
+/**
+ * Crea la tarjeta visual de la incidencia con controles de ADMIN integrados
+ */
+function crearTarjetaIncidencia(inc) {
+  const esAdmin = globalState.isAdmin === true; 
+
+  // ========== BÚSQUEDA MEJORADA ==========
+  let recursoData = null;
+  
+  if (globalState?.recursos?.length > 0) {
+    recursoData = globalState.recursos.find(r => 
+      r.id_recurso === inc.ID_Recurso || r.nombre === inc.Nombre_Recurso
+    );
+  }
+  
+  if (!recursoData && typeof AdminState !== 'undefined' && AdminState?.recursos?.length > 0) {
+    recursoData = AdminState.recursos.find(r => 
+      r.id_recurso === inc.ID_Recurso || r.nombre === inc.Nombre_Recurso
+    );
+  }
+  
+  const recursoEnMantenimiento = recursoData?.estado === 'Mantenimiento';
+  // ========== FIN BÚSQUEDA MEJORADA ==========
+  
+  // A. CONFIGURACIÓN VISUAL
+  const prioridadConfig = {
+    'Crítica': { color: 'text-red-700', bg: 'bg-red-50', border: 'border-red-200', icon: '🔴' },
+    'Alta':    { color: 'text-orange-700', bg: 'bg-orange-50', border: 'border-orange-200', icon: '🟠' },
+    'Media':   { color: 'text-yellow-700', bg: 'bg-yellow-50', border: 'border-yellow-200', icon: '🟡' },
+    'Baja':    { color: 'text-green-700', bg: 'bg-green-50', border: 'border-green-200', icon: '🟢' }
+  };
+  
+  const estadoConfig = {
+    'Pendiente':  { color: 'text-red-700', bg: 'bg-red-100', border: 'border-red-200', label: 'Pendiente' },
+    'En proceso': { color: 'text-blue-700', bg: 'bg-blue-100', border: 'border-blue-200', label: 'En proceso' },
+    'Resuelta':   { color: 'text-green-700', bg: 'bg-green-100', border: 'border-green-200', label: 'Resuelta' }
+  };
+  
+  const prio = prioridadConfig[inc.Prioridad] || prioridadConfig['Media'];
+  const est = estadoConfig[inc.Estado] || estadoConfig['Pendiente'];
+  
+  // B. FECHAS Y DATOS
+  const fecha = new Date(inc.Fecha_Reporte || inc.Fecha);
+  const diffDias = Math.floor((new Date() - fecha) / (1000 * 60 * 60 * 24));
+  const tiempoTexto = diffDias === 0 ? 'Hoy' : `Hace ${diffDias}d`;
+  const nombreUsuario = inc.Email_Usuario ? inc.Email_Usuario.split('@')[0] : (inc.Usuario_Reporta || 'Usuario');
+
+  // --- HTML DE SELECTORES (SOLO ADMIN) ---
+  let selectorPrioridad = `<span class="inline-flex items-center gap-1.5 text-xs font-medium text-gray-600">${prio.icon} ${inc.Prioridad || 'Media'}</span>`;
+  let selectorEstado = `<span class="inline-flex px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider ${est.bg} ${est.color} border ${est.border}">${est.label}</span>`;
+
+  if (esAdmin) {
+    // Selector Prioridad
+    selectorPrioridad = `
+      <select onchange="cambiarPrioridadIncidencia('${inc.ID_Incidencia}', this.value)" onclick="event.stopPropagation()"
+              class="bg-transparent text-xs font-medium text-gray-700 border-none focus:ring-0 cursor-pointer p-0 pr-6 relative z-20">
+        ${Object.keys(prioridadConfig).map(p => `<option value="${p}" ${inc.Prioridad === p ? 'selected' : ''}>${prioridadConfig[p].icon} ${p}</option>`).join('')}
+      </select>
+    `;
+
+    // Selector Estado (El importante)
+    selectorEstado = `
+      <div class="relative inline-block" onclick="event.stopPropagation()">
+        <select onchange="gestionarCambioEstadoIncidencia('${inc.ID_Incidencia}', this.value)" 
+                class="appearance-none pl-2 pr-6 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider cursor-pointer border focus:ring-2 focus:ring-offset-1 focus:ring-blue-400 focus:outline-none ${est.bg} ${est.color} ${est.border}">
+          ${Object.keys(estadoConfig).map(e => `<option value="${e}" ${inc.Estado === e ? 'selected' : ''}>${e.toUpperCase()}</option>`).join('')}
+        </select>
+        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1 ${est.color}">
+          <iconify-icon icon="mdi:chevron-down" class="text-xs"></iconify-icon>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="group bg-white hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0 relative">
+      
+      <div class="cursor-pointer" onclick="toggleDescripcionIncidencia('${inc.ID_Incidencia}')">
+        
+        <div class="hidden sm:grid grid-cols-12 gap-4 px-6 py-4 items-center">
+          <div class="col-span-1 text-xs font-mono text-gray-400">#${inc.ID_Incidencia}</div>
+          
+          <div class="col-span-3">
+            <div class="font-bold text-gray-800 text-sm truncate flex items-center gap-2">
+              ${inc.Nombre_Recurso}
+            </div>
+            <div class="text-xs text-gray-500 flex items-center gap-1"><iconify-icon icon="mdi:tag-outline"></iconify-icon> ${inc.Categoria}
+            ${recursoEnMantenimiento ? `<span title="En Mantenimiento" class="text-[10px] bg-yellow-100 text-yellow-800 px-1.5 py-0.5 rounded border border-yellow-200">⚠️ MANT</span>` : ''}
+            </div>
+          </div>
+          
+          <div class="col-span-2">${selectorEstado}</div>
+          <div class="col-span-2">${selectorPrioridad}</div>
+          
+          <div class="col-span-2 text-sm text-gray-600 truncate flex items-center gap-1"><iconify-icon icon="mdi:account" class="text-gray-300"></iconify-icon> ${nombreUsuario}</div>
+          
+          <div class="col-span-2 flex items-center justify-end gap-3">
+            <span class="text-xs text-gray-400">${tiempoTexto}</span>
+            <iconify-icon id="chevron-${inc.ID_Incidencia}" icon="mdi:chevron-down" class="text-gray-400 text-xl transition-transform duration-200"></iconify-icon>
+          </div>
+        </div>
+
+        <div class="sm:hidden px-4 py-4">
+           <div class="flex justify-between items-start mb-2">
+              <div>
+                  <div class="text-sm font-bold text-gray-800 flex items-center gap-2">
+                      ${inc.Nombre_Recurso}
+                      ${recursoEnMantenimiento ? `⚠️` : ''}
+                  </div>
+                  <div class="text-xs text-gray-500">#${inc.ID_Incidencia}</div>
+              </div>
+              <div onclick="event.stopPropagation()">${selectorEstado}</div>
+           </div>
+           <div class="flex justify-between items-center mt-2">
+              <div onclick="event.stopPropagation()">${selectorPrioridad}</div>
+              <iconify-icon id="chevron-mobile-${inc.ID_Incidencia}" icon="mdi:chevron-down" class="text-lg"></iconify-icon>
+           </div>
+        </div>
+      </div>
+      
+      <div id="desc-${inc.ID_Incidencia}" class="hidden bg-gray-50/80 border-t border-gray-100 shadow-inner">
+        <div class="px-6 py-5">
+          
+          <div class="flex flex-col md:flex-row gap-6">
+            
+            <div class="w-full md:w-[70%] space-y-3">
+               <div>
+                  <p class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Descripción</p>
+                  <p class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">${inc.Descripcion || 'Sin descripción detallada.'}</p>
+               </div>
+               
+               ${inc.Notas_Admin ? `
+                 <div class="p-3 bg-blue-50 rounded border border-blue-100 flex gap-2 items-start group/nota relative">
+                   <iconify-icon icon="mdi:shield-account-outline" class="text-blue-500 mt-0.5 text-base"></iconify-icon>
+                   <div class="text-sm text-blue-800 flex-1">
+                      <span class="font-bold block text-xs uppercase opacity-75 mb-0.5">Nota Admin:</span> 
+                      ${inc.Notas_Admin}
+                   </div>
+                   ${esAdmin ? `
+                   <button onclick="editarIncidencia('${inc.ID_Incidencia}')" class="absolute top-2 right-2 text-blue-300 hover:text-blue-600 opacity-0 group-hover/nota:opacity-100 transition-opacity">
+                     <iconify-icon icon="mdi:pencil"></iconify-icon>
+                   </button>` : ''}
+                 </div>
+               ` : ''}
+            </div>
+
+            ${esAdmin ? `
+              <div class="w-full md:w-[30%] shrink-0 border-t md:border-t-0 md:border-l border-gray-200 pt-4 md:pt-0 md:pl-6 flex flex-col justify-start gap-3">
+                
+                <p class="text-xs font-bold text-gray-400 uppercase tracking-wider hidden md:block">Gestión Recurso</p>
+                
+                <button onclick="toggleMantenimientoRecurso('${inc.ID_Incidencia}', '${inc.ID_Recurso}', ${recursoEnMantenimiento})" 
+                        class="w-full flex items-center justify-between px-3 py-3 rounded-lg border text-xs font-bold transition-all shadow-sm group/btn
+                        ${recursoEnMantenimiento 
+                          ? 'bg-yellow-50 border-yellow-200 text-yellow-800 hover:bg-yellow-100' 
+                          : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'}">
+                  
+                  <div class="flex items-center gap-2">
+                    <div class="p-1.5 rounded-md ${recursoEnMantenimiento ? 'bg-yellow-200 text-yellow-800' : 'bg-gray-100 text-gray-500'}">
+                       <iconify-icon icon="${recursoEnMantenimiento ? 'mdi:alert' : 'mdi:tools'}" class="text-base"></iconify-icon>
+                    </div>
+                    <div class="text-left">
+                       <span class="block">${recursoEnMantenimiento ? 'En Mantenimiento' : 'Recurso Activo'}</span>
+                       <span class="block text-[10px] font-normal opacity-75">${recursoEnMantenimiento ? 'Haz clic para activar' : 'Clic para bloquear'}</span>
+                    </div>
+                  </div>
+
+                  <iconify-icon icon="${recursoEnMantenimiento ? 'mdi:toggle-switch' : 'mdi:toggle-switch-off-outline'}" 
+                                class="text-2xl ${recursoEnMantenimiento ? 'text-yellow-600' : 'text-gray-300'} transition-colors">
+                  </iconify-icon>
+                </button>
+
+                ${!inc.Notas_Admin ? `
+                <button onclick="editarIncidencia('${inc.ID_Incidencia}')" 
+                        class="w-full flex items-center justify-center gap-2 px-3 py-2 bg-white hover:bg-gray-100 text-gray-500 border border-dashed border-gray-300 rounded-lg text-xs font-medium transition-all">
+                  <iconify-icon icon="mdi:comment-plus-outline"></iconify-icon>
+                  Añadir Nota Admin
+                </button>` : ''}
+
+              </div>
+            ` : ''} 
+            
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+
+/* =========================================================
+   LÓGICA DE CONTROL (Admin)
+   ========================================================= */
+
+// 1. GESTIONAR CAMBIO ESTADO (Desde el Select)
+function gestionarCambioEstadoIncidencia(idIncidencia, nuevoEstado) {
+  // A. Si elige "Resuelta", abrimos Modal Personalizado
+  if (nuevoEstado === 'Resuelta') {
+      // Truco: Devolvemos visualmente el select a su estado anterior temporalmente 
+      // hasta que confirme en el modal, para no confundir si cancela.
+      renderIncidencias(); 
+      
+      abrirModalResolucion(idIncidencia);
+      return;
+  }
+
+  // B. Otros estados (Pendiente, En proceso) -> Cambio directo
+  ejecutarCambioEstado(idIncidencia, nuevoEstado, null);
+}
+
+// 2. CAMBIAR PRIORIDAD (Directo)
+function cambiarPrioridadIncidencia(idIncidencia, nuevaPrioridad) {
+  document.body.style.cursor = 'wait';
+  google.script.run
+    .withSuccessHandler(() => {
+       document.body.style.cursor = 'default';
+       // Actualizar local
+       const inc = incidenciasActuales.find(i => i.ID_Incidencia === idIncidencia);
+       if(inc) inc.Prioridad = nuevaPrioridad;
+       renderIncidencias(); // Refrescar color iconos
+       // showToast('success', 'Prioridad actualizada'); // Si tienes toasts
+    })
+    .backend_actualizarIncidencia(idIncidencia, 'PRIORIDAD', nuevaPrioridad);
+}
+
+/**
+ * Toggle Mantenimiento con sincronización dual (globalState + AdminState)
+ */
+function toggleMantenimientoRecurso(idIncidencia, idRecurso, estaEnMantenimiento) {
+  const nuevoEstadoRecurso = estaEnMantenimiento ? 'Activo' : 'Mantenimiento';
+  
+  mostrarModalConfirmacion({
+    titulo: estaEnMantenimiento ? 'Activar Recurso' : 'Bloquear Recurso',
+    mensaje: estaEnMantenimiento 
+      ? '¿Deseas <strong>activar</strong> este recurso y permitir nuevas reservas?' 
+      : '¿Deseas poner este recurso en <strong>mantenimiento</strong>? No se podrán hacer reservas.',
+    icono: estaEnMantenimiento ? 'mdi:check-circle-outline' : 'mdi:tools',
+    tema: estaEnMantenimiento ? 'yellow' : 'green',
+    textoAceptar: estaEnMantenimiento ? 'Activar' : 'Bloquear',
+    info: {
+      icono: estaEnMantenimiento ? '🔧' : '🟢',
+      linea1: `Estado actual: ${estaEnMantenimiento ? 'En Mantenimiento' : 'Activo'}`,
+      linea2: `Nuevo estado: ${nuevoEstadoRecurso}`
+    },
+    onConfirm: () => {
+      ejecutarToggleMantenimiento(idRecurso, nuevoEstadoRecurso);
+    }
+  });
+}
+
+function ejecutarToggleMantenimiento(idRecurso, nuevoEstadoRecurso) {
+  showToast('loading', 'Actualizando recurso...');
+
+  google.script.run
+    .withSuccessHandler((res) => {
+      if (res.exito) {
+        // Actualizar globalState
+        if (globalState && globalState.recursos) {
+          const idx = globalState.recursos.findIndex(r => 
+            String(r.id_recurso).trim() === String(idRecurso).trim()
+          );
+          if (idx !== -1) globalState.recursos[idx].estado = nuevoEstadoRecurso;
+        }
+
+        // Actualizar AdminState
+        if (typeof AdminState !== 'undefined' && AdminState.recursos) {
+          const idxAdmin = AdminState.recursos.findIndex(r => 
+            String(r.id_recurso).trim() === String(idRecurso).trim()
+          );
+          if (idxAdmin !== -1) {
+            AdminState.recursos[idxAdmin].estado = nuevoEstadoRecurso;
+            if (AdminState.recursosOriginales && AdminState.recursosOriginales[idxAdmin]) {
+              AdminState.recursosOriginales[idxAdmin].estado = nuevoEstadoRecurso;
+            }
+          }
+        }
+
+        renderIncidencias();
+
+        if (typeof window.recargarDatosApp === 'function') {
+          window.recargarDatosApp();
+        }
+
+        showToast('success', `Recurso ${nuevoEstadoRecurso === 'Mantenimiento' ? 'bloqueado' : 'activado'} correctamente`);
+        
+      } else {
+        showToast('error', 'Error: ' + (res.error || 'Desconocido'));
+        renderIncidencias();
+      }
+    })
+    .withFailureHandler((err) => {
+      showToast('error', 'Error de conexión: ' + err.message);
+    })
+    .backend_toggleMantenimiento(idRecurso, nuevoEstadoRecurso);
+}
+
+// 4. EJECUTOR FINAL DE ESTADO
+function ejecutarCambioEstado(idIncidencia, nuevoEstado, notaCierre) {
+  document.body.style.cursor = 'wait';
+  
+  // ✅ Determinar acción correcta
+  const accion = nuevoEstado === 'Resuelta' ? 'RESOLVER' : 'ESTADO';
+  const valor = nuevoEstado === 'Resuelta' ? notaCierre : nuevoEstado;
+  
+  google.script.run
+    .withSuccessHandler((res) => {
+       document.body.style.cursor = 'default';
+       if(res.exito) {
+          // Actualizar en incidenciasActuales
+          const index = incidenciasActuales.findIndex(i => i.ID_Incidencia === idIncidencia);
+          if(index !== -1) {
+             incidenciasActuales[index].Estado = nuevoEstado;
+             if(notaCierre) incidenciasActuales[index].Notas_Admin = notaCierre;
+          }
+          
+          // ✅ También actualizar en todasLasIncidencias
+          const indexTodas = todasLasIncidencias.findIndex(i => i.ID_Incidencia === idIncidencia);
+          if(indexTodas !== -1) {
+             todasLasIncidencias[indexTodas].Estado = nuevoEstado;
+             if(notaCierre) todasLasIncidencias[indexTodas].Notas_Admin = notaCierre;
+          }
+          
+          renderIncidencias();
+       } else {
+          alert('Error: ' + res.error);
+       }
+    })
+    .backend_actualizarIncidencia(idIncidencia, accion, valor);
+}
+
+// 5. ========== MODAL RESOLVER INCIDENCIA ==========
+
+function abrirModalResolucion(idIncidencia) {
+  const inc = incidenciasActuales.find(i => i.ID_Incidencia === idIncidencia);
+  if (!inc) return;
+  
+  incidenciaIdActual = idIncidencia;
+  
+  const modal = document.getElementById('modalResolverIncidencia');
+  if (!modal) return;
+  
+  // Configurar contenido
+  document.getElementById('modalResolverSubtitulo').textContent = `#${idIncidencia} - ${inc.Nombre_Recurso}`;
+  document.getElementById('modalResolverTexto').value = '';
+  
+  // Mostrar modal
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  document.body.style.overflow = 'hidden';
+}
+
+function cerrarModalResolver() {
+  const modal = document.getElementById('modalResolverIncidencia');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+    document.body.style.overflow = '';
+  }
+  incidenciaIdActual = null;
+}
+
+function confirmarResolucion() {
+  if (!incidenciaIdActual) return;
+  
+  const nota = document.getElementById('modalResolverTexto').value.trim();
+  
+  // Deshabilitar botón
+  const btn = document.getElementById('modalResolverBtnConfirmar');
+  btn.disabled = true;
+  btn.innerHTML = '<iconify-icon icon="mdi:loading" class="animate-spin"></iconify-icon> Procesando...';
+  
+  ejecutarCambioEstado(incidenciaIdActual, 'Resuelta', nota || null);
+  cerrarModalResolver();
+  
+  // Restaurar botón (por si se vuelve a abrir)
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.innerHTML = '<iconify-icon icon="mdi:check-all"></iconify-icon> Marcar Resuelta';
+  }, 500);
+}
+
+/* =========================================================
+   MODAL CONFIRMACIÓN GENÉRICA
+   ========================================================= */
+
+let callbackConfirmacion = null;
+
+function mostrarModalConfirmacion(config) {
+  const modal = document.getElementById('modalConfirmacionIncidencia');
+  if (!modal) return;
+  
+  // Configurar contenido
+  document.getElementById('modalConfirmTitulo').textContent = config.titulo || 'Confirmar';
+  document.getElementById('modalConfirmMensaje').innerHTML = config.mensaje || '¿Estás seguro?';
+  
+  // Configurar icono y colores
+  const iconContainer = document.getElementById('modalConfirmIconContainer');
+  const icon = document.getElementById('modalConfirmIcon');
+  const btnAceptar = document.getElementById('modalConfirmBtnAceptar');
+  
+  const tema = config.tema || 'blue';
+  const temas = {
+    blue:   { bg: 'bg-blue-50',   text: 'text-blue-600',   btn: 'bg-blue-600 hover:bg-blue-700 text-white' },
+    yellow: { bg: 'bg-yellow-50', text: 'text-yellow-600', btn: 'bg-yellow-500 hover:bg-yellow-600 text-white' },
+    red:    { bg: 'bg-red-50',    text: 'text-red-600',    btn: 'bg-red-600 hover:bg-red-700 text-white' },
+    green:  { bg: 'bg-green-50',  text: 'text-green-600',  btn: 'bg-green-600 hover:bg-green-700 text-white' }
+  };
+  
+  const t = temas[tema];
+  iconContainer.className = `p-2.5 rounded-xl leading-none ${t.bg} ${t.text}`;
+  icon.setAttribute('icon', config.icono || 'mdi:help-circle');
+  btnAceptar.className = `flex-1 px-4 py-2.5 font-semibold rounded-xl transition-colors ${t.btn}`;
+  btnAceptar.textContent = config.textoAceptar || 'Aceptar';
+  
+  // Info box opcional
+  const infoBox = document.getElementById('modalConfirmInfoBox');
+  if (config.info) {
+    infoBox.classList.remove('hidden');
+    infoBox.className = `mt-4 p-3 rounded-lg border ${t.bg}`;
+    document.getElementById('modalConfirmInfoIcon').textContent = config.info.icono || '';
+    document.getElementById('modalConfirmInfoLinea1').textContent = config.info.linea1 || '';
+    document.getElementById('modalConfirmInfoLinea2').textContent = config.info.linea2 || '';
+  } else {
+    infoBox.classList.add('hidden');
+  }
+  
+  // Guardar callback
+  callbackConfirmacion = config.onConfirm;
+  
+  // Mostrar modal
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  document.body.style.overflow = 'hidden';
+}
+
+function cerrarModalConfirmacion() {
+  const modal = document.getElementById('modalConfirmacionIncidencia');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+    document.body.style.overflow = '';
+  }
+  callbackConfirmacion = null;
+}
+
+function ejecutarAccionConfirmacion() {
+  if (callbackConfirmacion) {
+    callbackConfirmacion();
+  }
+  cerrarModalConfirmacion();
+}
+
+/**
+ * Función para abrir/cerrar el acordeón
+ */
+function toggleDescripcionIncidencia(id) {
+  const elemento = document.getElementById(`desc-${id}`);
+  const chevron = document.getElementById(`chevron-${id}`);
+  const chevronMobile = document.getElementById(`chevron-mobile-${id}`);
+  
+  if (elemento) {
+    // Toggle visibilidad
+    const esVisible = !elemento.classList.contains('hidden');
+    
+    if (esVisible) {
+      elemento.classList.add('hidden');
+      if(chevron) chevron.style.transform = 'rotate(0deg)';
+      if(chevronMobile) chevronMobile.style.transform = 'rotate(0deg)';
+    } else {
+      elemento.classList.remove('hidden');
+      if(chevron) chevron.style.transform = 'rotate(180deg)';
+      if(chevronMobile) chevronMobile.style.transform = 'rotate(180deg)';
+    }
+  }
+}
+
+/**
+ * Actualizar contador de incidencias
+ */
+function actualizarContadorIncidencias() {
+  // Verificar que la función y elementos existen
+  if (typeof todasLasIncidencias === 'undefined') {
+    todasLasIncidencias = [];
+  }
+  
+  const pendientes = todasLasIncidencias.filter(i => 
+    i.Estado === 'Pendiente' || i.Estado === 'En proceso'
+  ).length;
+  
+  const total = todasLasIncidencias.length;
+  
+  // Solo actualizar si los elementos existen en el DOM
+  const contador = document.getElementById('contadorIncidencias');
+  if (contador) {
+    if (pendientes > 0) {
+      contador.innerHTML = `<span class="text-orange-600 font-bold">${pendientes} activa${pendientes > 1 ? 's' : ''}</span> de ${total} total${total > 1 ? 'es' : ''}`;
+    } else {
+      contador.textContent = `${total} incidencia${total > 1 ? 's' : ''} (todas resueltas ✅)`;
+    }
+  }
+  
+  const badge = document.getElementById('badgeIncidenciasPendientes');
+  if (badge && pendientes > 0) {
+    badge.textContent = pendientes;
+    badge.classList.remove('hidden');
+  } else if (badge) {
+    badge.classList.add('hidden');
+  }
+  
+  const btnVerInc = document.getElementById('btnVerIncidencias');
+  if (btnVerInc) {
+    if (pendientes > 0) {
+      btnVerInc.classList.remove('hidden');
+    } else {
+      btnVerInc.classList.add('hidden');
+    }
+  }
+  // Ajustar tamaño del header
+  ajustarHeaderSegunIncidencias();
+}
+
+/* =========================================================
+   LÓGICA DE ACCIONES (Resolver / Editar)
+   ========================================================= */
+
+/**
+ * CAMBIAR ESTADO (Botón Verde)
+ */
+
+function cambiarEstadoIncidencia(idIncidencia, nuevoEstado) {
+  // Solo permitimos resolver por ahora con este botón
+  if (nuevoEstado !== 'Resuelta') return;
+
+  if (!confirm(`¿Confirmas que la incidencia ${idIncidencia} está resuelta?\n\nSe enviará un correo al usuario.`)) {
+    return;
+  }
+
+  document.body.style.cursor = 'wait';
+
+  // Llamada al nuevo backend
+  google.script.run
+    .withSuccessHandler(function(res) {
+      document.body.style.cursor = 'default';
+      if (res.exito) {
+        // Actualizar UI Localmente
+        const index = incidenciasActuales.findIndex(i => i.ID_Incidencia === idIncidencia);
+        if (index !== -1) {
+          incidenciasActuales[index].Estado = 'Resuelta';
+        }
+        renderIncidencias(); // Redibujar
+        // alert(res.mensaje); // Opcional: mostrar mensaje
+      } else {
+        alert('❌ Error: ' + res.error);
+      }
+    })
+    .withFailureHandler(function(err) {
+      document.body.style.cursor = 'default';
+      alert('Error de conexión');
+    })
+    .backend_actualizarIncidencia(idIncidencia, 'RESOLVER', null);
+}
+
+
+// ========== MODAL EDITAR NOTA INCIDENCIA ==========
+
+let incidenciaIdActual = null;
+
+function editarIncidencia(idIncidencia) {
+  const inc = incidenciasActuales.find(i => i.ID_Incidencia === idIncidencia);
+  if (!inc) return;
+  
+  incidenciaIdActual = idIncidencia;
+  
+  const modal = document.getElementById('modalNotaIncidencia');
+  if (!modal) return;
+  
+  // Configurar contenido
+  document.getElementById('modalNotaIncidenciaSubtitulo').textContent = `#${idIncidencia} - ${inc.Nombre_Recurso}`;
+  document.getElementById('modalNotaIncidenciaTexto').value = inc.Notas_Admin || '';
+  
+  // Mostrar modal
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  document.body.style.overflow = 'hidden';
+  
+  // Focus en textarea
+  setTimeout(() => {
+    document.getElementById('modalNotaIncidenciaTexto').focus();
+  }, 100);
+}
+
+function cerrarModalNotaIncidencia() {
+  const modal = document.getElementById('modalNotaIncidencia');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+    document.body.style.overflow = '';
+  }
+  incidenciaIdActual = null;
+}
+
+function guardarNotaIncidenciaModal() {
+  if (!incidenciaIdActual) return;
+  
+  const nuevaNota = document.getElementById('modalNotaIncidenciaTexto').value.trim();
+  const inc = incidenciasActuales.find(i => i.ID_Incidencia === incidenciaIdActual);
+  
+  if (inc && nuevaNota === (inc.Notas_Admin || '')) {
+    cerrarModalNotaIncidencia();
+    return;
+  }
+  
+  // Deshabilitar botón
+  const btn = document.getElementById('modalNotaIncidenciaBtnGuardar');
+  btn.disabled = true;
+  btn.innerHTML = '<iconify-icon icon="mdi:loading" class="animate-spin"></iconify-icon> Guardando...';
+  
+  google.script.run
+    .withSuccessHandler(function(res) {
+      btn.disabled = false;
+      btn.innerHTML = '<iconify-icon icon="mdi:check"></iconify-icon> Guardar';
+      
+      if (res.exito) {
+        const index = incidenciasActuales.findIndex(i => i.ID_Incidencia === incidenciaIdActual);
+        if (index !== -1) incidenciasActuales[index].Notas_Admin = nuevaNota;
+        
+        const indexTodas = todasLasIncidencias.findIndex(i => i.ID_Incidencia === incidenciaIdActual);
+        if (indexTodas !== -1) todasLasIncidencias[indexTodas].Notas_Admin = nuevaNota;
+        
+        cerrarModalNotaIncidencia();
+        renderIncidencias();
+        showToast('success', 'Nota guardada correctamente');
+      } else {
+        showToast('error', res.error || 'Error al guardar');
+      }
+    })
+    .withFailureHandler(function(err) {
+      btn.disabled = false;
+      btn.innerHTML = '<iconify-icon icon="mdi:check"></iconify-icon> Guardar';
+      showToast('error', 'Error de conexión');
+    })
+    .backend_actualizarIncidencia(incidenciaIdActual, 'EDITAR_NOTA', nuevaNota);
+}
+
+/**
+ * Ajusta el tamaño del header según incidencias y rol de usuario
+ */
+function ajustarHeaderSegunIncidencias() {
+  const numIncidencias = todasLasIncidencias.filter(i => 
+    i.Estado === 'Pendiente' || i.Estado === 'En proceso'
+  ).length;
+  
+  const esAdmin = globalState && globalState.isAdmin === true;
+  
+  const btnIncidencias = document.getElementById('btnVerIncidencias');
+  const headerLogo = document.getElementById('headerLogo') || document.getElementById('headerLogoPlaceholder');
+  const headerTitle = document.getElementById('headerTitle');
+  const headerBranding = document.getElementById('headerBranding');
+  const myReservationsBtn = document.getElementById('myReservationsButton');
+  
+  // ========== LÓGICA PRINCIPAL ==========
+  
+  // Si hay incidencias, mostrar botón
+  if (numIncidencias > 0 && btnIncidencias) {
+    btnIncidencias.classList.remove('hidden');
+    
+    // SOLO compactar si ES ADMIN
+    if (esAdmin) {
+      // --- MODO COMPACTO (Admin con incidencias) ---
+      
+      // Logo/placeholder
+      if (headerLogo) {
+        headerLogo.classList.remove('h-10', 'w-10');
+        headerLogo.classList.add('h-9', 'w-9', 'md:h-10', 'md:w-10');
+      }
+      
+      // Título
+      if (headerTitle) {
+        headerTitle.classList.remove('text-lg');
+        headerTitle.classList.add('text-base', 'md:text-lg', 'truncate', 'max-w-[160px]', 'sm:max-w-none');
+      }
+      
+      // Branding container
+      if (headerBranding) {
+        headerBranding.classList.remove('gap-4');
+        headerBranding.classList.add('gap-3', 'md:gap-4');
+      }
+      
+      // Botón incidencias
+      btnIncidencias.classList.remove('h-10', 'px-4');
+      btnIncidencias.classList.add('h-9', 'w-9', 'md:w-auto', 'md:h-10', 'md:px-4', 'justify-center', 'md:justify-start');
+      
+      const spanIncidencias = btnIncidencias.querySelector('span:not([id])');
+      if (spanIncidencias) {
+        spanIncidencias.classList.remove('hidden', 'sm:inline');
+        spanIncidencias.classList.add('hidden', 'md:inline');
+      }
+      
+      // Botón Mis Reservas
+      if (myReservationsBtn) {
+        myReservationsBtn.classList.remove('h-10', 'px-3', 'min-[480px]:px-4');
+        myReservationsBtn.classList.add('h-9', 'w-9', 'md:w-auto', 'md:h-10', 'md:px-4', 'justify-center', 'md:justify-start');
+        
+        const spanReservas = myReservationsBtn.querySelector('span');
+        if (spanReservas) {
+          spanReservas.classList.remove('hidden', 'min-[480px]:inline');
+          spanReservas.classList.add('hidden', 'md:inline');
+        }
+        
+        // Ajustar icono
+        const iconReservas = myReservationsBtn.querySelector('iconify-icon');
+        if (iconReservas) {
+          iconReservas.classList.remove('text-xl', 'min-[480px]:text-lg');
+          iconReservas.classList.add('text-xl', 'md:text-lg');
+        }
+      }
+      
+      // Botones Admin
+      const btnAdmin = document.getElementById('btnIrAdmin');
+      const btnVolver = document.getElementById('btnVolverApp');
+      
+      if (btnAdmin) {
+        btnAdmin.classList.remove('h-10', 'px-3', 'min-[480px]:px-4');
+        btnAdmin.classList.add('h-9', 'w-9', 'md:w-auto', 'md:h-10', 'md:px-4', 'justify-center', 'md:justify-start');
+        
+        const spanAdmin = btnAdmin.querySelector('span');
+        if (spanAdmin) {
+          spanAdmin.classList.remove('hidden', 'min-[480px]:inline');
+          spanAdmin.classList.add('hidden', 'md:inline');
+        }
+        
+        const iconAdmin = btnAdmin.querySelector('iconify-icon');
+        if (iconAdmin) {
+          iconAdmin.classList.remove('text-xl', 'min-[480px]:text-lg');
+          iconAdmin.classList.add('text-xl', 'md:text-lg');
+        }
+      }
+      
+      if (btnVolver) {
+        btnVolver.classList.remove('h-10', 'px-3', 'min-[480px]:px-4');
+        btnVolver.classList.add('h-9', 'w-9', 'md:w-auto', 'md:h-10', 'md:px-4', 'justify-center', 'md:justify-start');
+        
+        const spanVolver = btnVolver.querySelector('span');
+        if (spanVolver) {
+          spanVolver.classList.remove('hidden', 'min-[480px]:inline');
+          spanVolver.classList.add('hidden', 'md:inline');
+        }
+        
+        const iconVolver = btnVolver.querySelector('iconify-icon');
+        if (iconVolver) {
+          iconVolver.classList.remove('text-xl', 'min-[480px]:text-lg');
+          iconVolver.classList.add('text-xl', 'md:text-lg');
+        }
+      }
+    }
+    // Si NO es admin, mantener header GRANDE aunque haya incidencias
+    
+  } else if (btnIncidencias) {
+    // Sin incidencias: ocultar botón
+    btnIncidencias.classList.add('hidden');
+  }
+  
+  console.log(`📐 Header ajustado: ${numIncidencias} incidencias, Admin: ${esAdmin}`);
+}
+
+/**
+ * Helper: ¿Hay incidencias pendientes?
+ */
+function hayIncidenciasPendientes() {
+  return todasLasIncidencias.some(i => 
+    i.Estado === 'Pendiente' || i.Estado === 'En proceso'
+  );
+}
+
+
+/* =========================================================
+   EVENT LISTENERS
+   ========================================================= */
+
+function setupEventListeners() {
+  if (step1) step1.addEventListener('click', (e) => {
+    const recursoBtn = e.target.closest('.recurso-btn');
+    if (recursoBtn) handleRecursoClick(recursoBtn);
+  });
+  
+  if (calendarGrid) calendarGrid.addEventListener('click', (e) => {
+    const dayBtn = e.target.closest('button[data-day]');
+    if (dayBtn && !dayBtn.disabled) {
+      handleDayClick(dayBtn.dataset.day);
+    }
+  });
+  
+  if (tramosContainer) tramosContainer.addEventListener('click', (e) => {
+    const tramoBtn = e.target.closest('.tramo-btn');
+    if (tramoBtn && !tramoBtn.disabled) handleTramoClick(tramoBtn);
+  });
+  
+  if (myReservationsList) myReservationsList.addEventListener('click', (e) => {
+    const cancelBtn = e.target.closest('.cancel-btn-inline');
+    if (cancelBtn && !cancelBtn.disabled) handleCancelReservation(cancelBtn);
+  });
+  
+  if (backButton) backButton.addEventListener('click', () => {
+    switchView(step2, step1);
+    globalState.recursoActual = null;
+    globalState.disponibilidad = [];
+    hideMessages();
+  });
+  
+  if (prevMonthBtn) prevMonthBtn.addEventListener('click', () => {
+    globalState.fechaActual.setMonth(globalState.fechaActual.getMonth() - 1);
+    renderCalendar(globalState.fechaActual.getFullYear(), globalState.fechaActual.getMonth());
+    debounceCalendarNavigation(() => loadTramos());
+  });
+  
+  if (nextMonthBtn) nextMonthBtn.addEventListener('click', () => {
+    globalState.fechaActual.setMonth(globalState.fechaActual.getMonth() + 1);
+    renderCalendar(globalState.fechaActual.getFullYear(), globalState.fechaActual.getMonth());
+    debounceCalendarNavigation(() => loadTramos());
+  });
+  
+  // Cerrar modal de confirmación y DESBLOQUEAR scroll
+  if (cancelModalButton) {
+    cancelModalButton.addEventListener('click', () => {
+      modal.close();
+      document.body.style.overflow = ''; // ← DESBLOQUEAR
+    });
+  }
+  if (confirmModalButton) confirmModalButton.addEventListener('click', handleConfirmReservation);
+  if (myReservationsButton) myReservationsButton.addEventListener('click', openMyReservationsModal);
+  if (closeMyReservationsButton) {
+  closeMyReservationsButton.addEventListener('click', () => {
+    const modal = document.getElementById('myReservationsModal');
+    modal.classList.add('hidden');
+    document.body.style.overflow = ''; // ← DESBLOQUEAR
+    });
+  }
+  // Opcional: Cerrar al hacer clic fuera (en el fondo oscuro)
+  document.getElementById('myReservationsModal').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) { // Solo si clickas en el fondo, no en la tarjeta
+     e.currentTarget.classList.add('hidden');
+     e.currentTarget.classList.remove('flex');
+     document.body.style.overflow = ''; // ← DESBLOQUEAR SCROLL
+    }
+  });
+
+  // Cerrar modales al hacer clic fuera
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        modal.close();
+        document.body.style.overflow = ''; // ← DESBLOQUEAR SCROLL
+      }
+    });
+  }
+  
+  // Botón de panel admin
+  if (adminPanelButton) {
+    adminPanelButton.addEventListener('click', () => {
+      const url = ScriptApp.getService().getUrl() + '?page=admin';
+      window.open(url, '_blank');
+    });
+  }
+}
+
+</script>

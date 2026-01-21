@@ -1,0 +1,949 @@
+<style>
+/* ============================================
+   SISTEMA DE RESERVAS - ESTILOS LIMPIOS 🧼
+   ============================================ */
+
+/* === ESTILOS BASE === */
+* { box-sizing: border-box; }
+body { margin: 0; padding: 0; }
+
+/* --- Loading Spinner --- */
+#loadingSpinner {
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background-color: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(4px);
+  display: none;
+  justify-content: center; align-items: center;
+  z-index: 9999;
+}
+
+.spinner {
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #2563EB; /* Azul moderno */
+  border-radius: 50%;
+  width: 50px; height: 50px;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* --- Transiciones --- */
+.view-section {
+  transition: opacity 0.3s ease-in-out;
+}
+
+/* === UTILIDADES SCROLLBAR (Para la lista de tramos) === */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #e5e7eb;
+  border-radius: 20px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #d1d5db;
+}
+
+/* === COMPONENTES === */
+
+/* --- Modales --- */
+dialog {
+  padding: 0;
+  border: none;
+  border-radius: 16px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  max-width: 90vw;
+}
+
+dialog::backdrop {
+  background-color: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+}
+
+/* === TRAMOS (Estos siguen siendo útiles para estados específicos) === */
+.tramo-btn-no-permitido {
+  background-color: #f9fafb; /* Gray-50 */
+  color: #9ca3af; /* Gray-400 */
+  cursor: not-allowed;
+}
+
+.tramo-btn-reservado {
+  background-color: #fff1f2; /* Rose-50 */
+  color: #e11d48; /* Rose-600 */
+  border-color: #fecdd3; /* Rose-200 */
+  cursor: not-allowed;
+}
+
+.tramo-btn-disponible {
+  background-color: white;
+  /* El resto lo maneja Tailwind en el HTML */
+}
+
+/* === CALENDARIO === */
+.today {
+  background-color: #eff6ff !important; /* Blue-50 */
+  color: #2563eb !important; /* Blue-600 */
+  font-weight: 700;
+  border: 1px solid #bfdbfe !important; /* Blue-200 */
+}
+
+/* === ANIMACIONES === */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Animación para los Toasts */
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Overlay de carga para tarjetas */
+.card-loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(4px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  border-radius: 12px;
+  animation: fadeInCards 0.2s ease;
+}
+
+@keyframes fadeInCards {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fadeOutScale {
+  from { 
+    opacity: 1; 
+    transform: scale(1);
+  }
+  to { 
+    opacity: 0; 
+    transform: scale(0.95);
+  }
+}
+
+.removing-animation {
+  animation: fadeOutScale 0.3s ease forwards;
+}
+
+/* ========================================
+   ADMIN PANEL - ESTILOS CON ICONIFY
+   ======================================== */
+
+/* Botones de orden de recursos */
+.orden-btn {
+  padding: 0.25rem 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: #374151;
+  min-width: 32px;
+}
+
+.orden-btn:hover:not(:disabled) {
+  background: #3b82f6;
+  border-color: #2563eb;
+  color: white;
+  transform: scale(1.1);
+}
+
+.orden-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  background: #f9fafb;
+}
+
+/* Animación sutil para botón guardar */
+@keyframes bounce-subtle {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+.animate-bounce-subtle {
+  animation: bounce-subtle 2s ease-in-out infinite;
+}
+
+/* Botones de filtro de tipo de recurso */
+.tipo-filter-btn {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #6b7280;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.tipo-filter-btn:hover {
+  color: #3b82f6;
+  background-color: #f3f4f6;
+}
+
+.tipo-filter-btn.active {
+  color: #3b82f6;
+  border-bottom-color: #3b82f6;
+  background-color: #eff6ff;
+  font-weight: 600;
+}
+
+/* Tabs de categorías de iconos */
+.iconify-category-tab {
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #6b7280;
+  background-color: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.iconify-category-tab:hover {
+  color: #3b82f6;
+  background-color: #f3f4f6;
+}
+
+.iconify-category-tab.active {
+  color: #3b82f6;
+  border-bottom-color: #3b82f6;
+  background-color: #eff6ff;
+}
+
+/* Botones de iconos */
+.iconify-icon-btn {
+  cursor: pointer;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60px;
+}
+
+.iconify-icon-btn.selected {
+  background-color: #dbeafe !important;
+  border-color: #3b82f6 !important;
+  transform: scale(1.05);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.iconify-icon-btn:hover {
+  transform: scale(1.05);
+}
+
+.iconify-icon-btn:active {
+  transform: scale(0.98);
+}
+
+/* Grid de iconos con scroll personalizado */
+#iconifyGrid {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e0 #f7fafc;
+}
+
+#iconifyGrid::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+#iconifyGrid::-webkit-scrollbar-track {
+  background: #f7fafc;
+  border-radius: 4px;
+}
+
+#iconifyGrid::-webkit-scrollbar-thumb {
+  background: #cbd5e0;
+  border-radius: 4px;
+}
+
+#iconifyGrid::-webkit-scrollbar-thumb:hover {
+  background: #a0aec0;
+}
+
+/* Resultados de búsqueda */
+#iconifySearchResults {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e0 #f7fafc;
+}
+
+#iconifySearchResults::-webkit-scrollbar {
+  width: 6px;
+}
+
+#iconifySearchResults::-webkit-scrollbar-track {
+  background: #f7fafc;
+}
+
+#iconifySearchResults::-webkit-scrollbar-thumb {
+  background: #cbd5e0;
+  border-radius: 3px;
+}
+
+/* Animaciones */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Loading overlay */
+.loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(2px);
+}
+
+/* Spinner */
+.spinner {
+  border: 3px solid #f3f3f3;
+  border-top: 3px solid #3b82f6;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Confirm dialog */
+.confirm-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9997;
+  backdrop-filter: blur(2px);
+  animation: fadeIn 0.2s ease-out;
+}
+
+.confirm-dialog {
+  background: white;
+  padding: 2rem;
+  border-radius: 0.75rem;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  max-width: 400px;
+  width: 90%;
+  animation: scaleIn 0.2s ease-out;
+  z-index: 9998;
+}
+
+@keyframes scaleIn {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Sub-tabs del admin */
+.admin-subtab {
+  padding: 0.75rem 1.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #6b7280;
+  background-color: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.admin-subtab:hover {
+  color: #3b82f6;
+  background-color: #f3f4f6;
+}
+
+.admin-subtab.active {
+  color: #3b82f6;
+  border-bottom-color: #3b82f6;
+  font-weight: 600;
+}
+
+/* Secciones del admin */
+.admin-section {
+  display: none;
+}
+
+.admin-section.active {
+  display: block;
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Empty state */
+.empty-state {
+  padding: 3rem 1rem;
+}
+
+.empty-state-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .toast {
+    right: 1rem;
+    left: 1rem;
+    min-width: auto;
+  }
+  
+  .iconify-category-tab {
+    font-size: 0.75rem;
+    padding: 0.5rem 0.75rem;
+  }
+  
+  .iconify-icon-btn {
+    min-height: 50px;
+  }
+  
+  #iconifyGrid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+/* Dialog (modal) personalizado */
+dialog {
+  border: none;
+  border-radius: 0.75rem;
+  padding: 0;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  max-width: 95vw;
+  max-height: 90vh;
+  overflow: auto;
+}
+
+dialog::backdrop {
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+}
+
+dialog[open] {
+  animation: scaleIn 0.2s ease-out;
+}
+
+/* Tab content del panel principal */
+.tab-content {
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Animación sutil para botón flotante */
+@keyframes bounce-subtle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+.animate-bounce-subtle {
+  animation: bounce-subtle 2s infinite;
+}
+
+/* ============================================
+   TOGGLES ESTILO iOS (SOLO ANIMACIÓN DE DESLIZAMIENTO)
+   ============================================ */
+
+.ios-toggle {
+  position: relative;
+  display: inline-block;
+  width: 50px;
+  height: 28px;
+  flex-shrink: 0; /* No se encoge nunca */
+}
+
+.ios-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.ios-toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ef4444;
+  transition: background-color 0.3s ease;
+  border-radius: 28px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+/* Círculo deslizante con animación suave */
+.ios-toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 22px;
+  width: 22px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.ios-toggle input:checked + .ios-toggle-slider {
+  background-color: #22c55e;
+}
+
+.ios-toggle input:checked + .ios-toggle-slider:before {
+  transform: translateX(22px);
+}
+
+/* Icono dentro del toggle (sin animación) */
+.ios-toggle-slider:after {
+  content: '✕';
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 14px;
+  font-weight: bold;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0.9;
+}
+
+.ios-toggle input:checked + .ios-toggle-slider:after {
+  content: '✓';
+  left: 7px;
+  right: auto;
+  opacity: 1;
+}
+
+/* SIN efectos hover - solo cursor pointer */
+.ios-toggle-slider:hover {
+  /* Sin cambios visuales */
+}
+
+/* Icono de motivo discreto */
+.motivo-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.motivo-icon:hover {
+  background-color: none;
+}
+
+/* Tooltip personalizado */
+.motivo-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-8px);
+  background-color: rgba(31, 41, 55, 0.95);
+  color: white;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 1000;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+}
+
+.motivo-tooltip:after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: rgba(31, 41, 55, 0.95);
+}
+
+.motivo-icon:hover .motivo-tooltip {
+  opacity: 1;
+}
+
+/* Celdas con altura fija */
+.disp-cell {
+  height: 60px;
+  vertical-align: middle;
+}
+
+/* Animación sutil para botón flotante */
+@keyframes bounce-subtle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+.animate-bounce-subtle {
+  animation: bounce-subtle 2s infinite;
+}
+
+/* ============================================
+   GESTIÓN DE CURSOS - TABLA EDITABLE
+   ============================================ */
+
+.curso-row {
+  transition: background-color 0.2s ease;
+}
+
+.curso-row:hover {
+  background-color: #f9fafb;
+}
+
+.curso-row.editing {
+  background-color: #eff6ff;
+}
+
+.curso-row.deleted {
+  background-color: #fee2e2;
+  opacity: 0.6;
+}
+
+.curso-input {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  transition: all 0.2s ease;
+}
+
+.curso-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  ring: 2px;
+  ring-color: #3b82f6;
+  ring-opacity: 0.5;
+}
+
+.curso-input.error {
+  border-color: #ef4444;
+  background-color: #fef2f2;
+}
+
+.curso-cell {
+  padding: 1rem 1.5rem;
+  vertical-align: middle;
+}
+
+.curso-cell-readonly {
+  color: #374151;
+  font-size: 0.875rem;
+}
+
+/* Botones de acción de cursos */
+.curso-action-btn {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 0.5rem;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.curso-btn-edit {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.curso-btn-edit:hover {
+  background-color: #bfdbfe;
+  border-color: #3b82f6;
+}
+
+.curso-btn-delete {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.curso-btn-delete:hover {
+  background-color: #fecaca;
+  border-color: #ef4444;
+}
+
+.curso-btn-save {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.curso-btn-save:hover {
+  background-color: #a7f3d0;
+  border-color: #10b981;
+}
+
+.curso-btn-cancel {
+  background-color: #f3f4f6;
+  color: #374151;
+}
+
+.curso-btn-cancel:hover {
+  background-color: #e5e7eb;
+  border-color: #9ca3af;
+}
+
+.curso-btn-restore {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.curso-btn-restore:hover {
+  background-color: #bfdbfe;
+  border-color: #3b82f6;
+}
+
+/* Animación sutil para nueva fila */
+@keyframes slideInRow {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.curso-row.new {
+  animation: slideInRow 0.3s ease-out;
+}
+
+/* Botones de modo visualización */
+.modo-viz-btn {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #6b7280;
+  background: transparent;
+  border: none;
+  border-right: 1px solid #e5e7eb;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.modo-viz-btn:last-child {
+  border-right: none;
+}
+
+.modo-viz-btn:first-child {
+  border-radius: 0.5rem 0 0 0.5rem;
+}
+
+.modo-viz-btn:last-child {
+  border-radius: 0 0.5rem 0.5rem 0;
+}
+
+.modo-viz-btn:hover {
+  background-color: #f3f4f6;
+}
+
+.modo-viz-btn.active {
+  background-color: #3b82f6;
+  color: white;
+  font-weight: 600;
+}
+
+/* ========================================
+   MEJORAS UX: MENÚ FLOTANTE Y TABLAS
+   ======================================== */
+
+/* Barra de acciones flotante (Sticky Footer) */
+.floating-action-bar {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%) translateY(100px); /* Oculto por defecto */
+  background: rgba(255, 255, 255, 0.95);
+  padding: 0.75rem 1.5rem;
+  border-radius: 9999px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  z-index: 50;
+  border: 1px solid #e5e7eb;
+  backdrop-filter: blur(4px);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.floating-action-bar.visible {
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Contenedor Centrado para Tablas Estrechas (Tramos) */
+.table-container-compact {
+  max-width: 800px; /* Limitamos el ancho máximo */
+  margin: 0 auto;   /* Centramos el contenedor */
+}
+
+/* Ajustes para celdas más compactas */
+.cell-compact {
+  padding-top: 0.5rem !important;
+  padding-bottom: 0.5rem !important;
+}
+
+/* ========================================
+   MEJORA UX: TARJETA FLOTANTE DE GUARDADO
+   ======================================== */
+
+.save-card-container {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  z-index: 50;
+  /* Oculto por defecto con transformación */
+  transform: translateY(150%);
+  opacity: 0;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.save-card-container.visible {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.save-card {
+  background-color: white;
+  border-radius: 0.5rem; /* rounded-lg */
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); /* shadow-2xl */
+  border: 2px solid #3b82f6; /* border-blue-500 */
+  padding: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* ========================================
+   MEJORA DEL ESTILO EN EL DRAG AND DROP
+   ======================================== */
+
+/* Estilo para la fila que estamos arrastrando (semi-transparente) */
+  .dragging {
+    opacity: 0.4;
+    background-color: #eff6ff; /* Azul muy clarito */
+  }
+
+  /* LA LÍNEA GUÍA: Borde superior grueso y azul */
+  .drop-target {
+    border-top: 3px solid #2563eb !important; /* Azul fuerte */
+    background-color: #dbeafe !important; /* Fondo azulado */
+    transition: all 0.2s ease;
+  }
+  
+  /* Asegurar que la tabla respete los bordes al arrastrar */
+  table {
+    border-collapse: separate; 
+    border-spacing: 0;
+  }
+
+  /* ========================================
+   MEJORA DEL ESTILO DEL MENÚ ADMIN
+   ======================================== */
+
+  /* 1. ELIMINAR BORDE AZUL DE FOCO (Global) */
+  button:focus, .admin-subtab:focus {
+    outline: none !important;
+    box-shadow: none !important;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* 2. ESTILO DE LA PESTAÑA ACTIVA (Diseño Cápsula) */
+  .admin-subtab.active {
+    background-color: #ffffff !important;   /* Fondo Blanco */
+    color: #2563EB !important;              /* Texto Azul (blue-600) */
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1) !important; /* Sombra */
+  }
+  
+  /* 3. ESTILO DE LA PESTAÑA INACTIVA */
+  .admin-subtab {
+    color: #6B7280; /* Texto Gris (gray-500) */
+  }
+  .admin-subtab:hover:not(.active) {
+    background-color: rgba(229, 231, 235, 0.5); /* Gris clarito al pasar ratón */
+    color: #374151; /* Gris más oscuro */
+  }
+
+</style>

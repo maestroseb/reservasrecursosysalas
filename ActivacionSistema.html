@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      /* Reset básico para evitar bordes blancos feos */
+      body { 
+        font-family: 'Inter', sans-serif; 
+        margin: 0; 
+        padding: 0; 
+        background-color: #f9fafb; /* bg-gray-50 */
+      }
+      /* Centrado absoluto */
+      .main-container {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+      .loader {
+        border: 3px solid #f3f3f3; 
+        border-top: 3px solid #4f46e5; 
+        border-radius: 50%;
+        width: 24px; 
+        height: 24px; 
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+
+    <div class="main-container">
+      <div class="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center border border-gray-100">
+        
+        <div id="iconContainer" class="mb-6 bg-indigo-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto text-indigo-600 transition-all duration-500">
+          <iconify-icon icon="mdi:tools" width="36"></iconify-icon>
+        </div>
+
+        <h1 id="mainTitle" class="text-xl font-bold text-gray-800 mb-2 uppercase tracking-wide">
+          Configuración Inicial
+        </h1>
+        <h2 class="text-lg text-indigo-600 font-semibold mb-4">
+          Sistema de Reservas
+        </h2>
+        
+        <div id="mainDesc" class="text-gray-500 mb-8 text-sm leading-relaxed space-y-2">
+          <p>Esta hoja de cálculo está vacía o sin configurar.</p>
+          <p>Al hacer clic, el sistema:</p>
+          <ul class="text-left bg-gray-50 p-3 rounded-lg text-xs space-y-1 mt-2 mx-4 border border-gray-200">
+            <li class="flex items-center gap-2"><iconify-icon icon="mdi:table-plus" class="text-indigo-500"></iconify-icon> Creará las pestañas (Usuarios, Reservas...)</li>
+            <li class="flex items-center gap-2"><iconify-icon icon="mdi:database-import" class="text-indigo-500"></iconify-icon> Insertará datos de ejemplo</li>
+            <li class="flex items-center gap-2"><iconify-icon icon="mdi:account-key" class="text-indigo-500"></iconify-icon> Te configurará a ti como <strong>Admin</strong></li>
+          </ul>
+        </div>
+
+        <button id="btnInstalar" onclick="iniciarInstalacion()" 
+                class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-xl transition-all shadow-lg shadow-indigo-200 active:scale-95 flex items-center justify-center gap-2">
+          <span>Inicializar Sistema</span>
+        </button>
+
+        <a id="btnEntrar" href="<?= ScriptApp.getService().getUrl() ?>" 
+           class="hidden w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 px-6 rounded-xl transition-all shadow-lg shadow-emerald-200 active:scale-95 flex items-center justify-center gap-2">
+          <iconify-icon icon="mdi:rocket-launch"></iconify-icon>
+          <span>ABRIR APLICACIÓN</span>
+        </a>
+
+        <div id="statusArea" class="hidden mt-6">
+          <div class="flex flex-col items-center justify-center gap-2 text-indigo-600 font-medium">
+            <div class="loader"></div>
+            <span id="statusText" class="text-sm">Construyendo estructura...</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <script>
+      function iniciarInstalacion() {
+        const btn = document.getElementById('btnInstalar');
+        const status = document.getElementById('statusArea');
+        const desc = document.getElementById('mainDesc');
+        
+        btn.classList.add('hidden');
+        desc.style.display = 'none'; // Ocultamos texto para limpiar
+        status.classList.remove('hidden');
+
+        google.script.run
+          .withSuccessHandler(finalizarSetup)
+          .withFailureHandler(mostrarError)
+          .ejecutarSetupVinculado(); // Llamamos a la nueva función
+      }
+
+      function finalizarSetup(res) {
+        if(!res.success) { mostrarError(res.error); return; }
+
+        // Elementos UI
+        const statusText = document.getElementById('statusText');
+        const loader = document.querySelector('.loader');
+        const iconContainer = document.getElementById('iconContainer');
+        const btnEntrar = document.getElementById('btnEntrar');
+        const mainTitle = document.getElementById('mainTitle');
+
+        // Transformación a ÉXITO
+        statusText.style.display = 'none';
+        loader.style.display = 'none';
+        
+        iconContainer.innerHTML = '<iconify-icon icon="mdi:check-circle-outline" width="40"></iconify-icon>';
+        iconContainer.className = "mb-4 bg-emerald-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto text-emerald-600 animate-bounce";
+        
+        mainTitle.innerText = "¡Sistema Configurado!";
+        mainTitle.className = "text-xl font-bold text-emerald-700 mb-2";
+
+        btnEntrar.classList.remove('hidden');
+        
+        // Autorrecarga tras 2 segundos por si el usuario no pulsa nada
+        setTimeout(() => {
+           window.top.location.href = res.url; 
+        }, 2000);
+      }
+
+      function mostrarError(err) {
+        const status = document.getElementById('statusArea');
+        status.innerHTML = `
+          <div class="text-red-500 bg-red-50 p-4 rounded-lg text-sm text-left border border-red-100">
+            <strong class="block mb-1">❌ Error en la instalación:</strong>
+            ${err}
+            <button onclick="location.reload()" class="mt-3 w-full bg-white border border-red-200 py-2 rounded text-red-700 font-bold hover:bg-red-50">Reintentar</button>
+          </div>
+        `;
+      }
+    </script>
+  </body>
+</html>
