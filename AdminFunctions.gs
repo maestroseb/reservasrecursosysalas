@@ -1,4 +1,4 @@
-/**
+/** 
  * ADMIN FUNCTIONS
  * Funciones exclusivas para administradores del sistema
  */
