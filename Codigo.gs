@@ -1,4 +1,4 @@
-/**
+/** 
  * SISTEMA DE RESERVAS - CÓDIGO PRINCIPAL
  * Versión 1.3 - Modular y Optimizado con Panel Admin Integrado
  * 
