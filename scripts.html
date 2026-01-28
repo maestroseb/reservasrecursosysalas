@@ -1698,9 +1698,9 @@ function poblarSelectorRecursos() {
   // Limpiar opciones anteriores
   select.innerHTML = '<option value="">-- Selecciona un recurso --</option>';
 
-  // Agrupar por categoría
-  const salas = globalState.recursos.filter(r => (r.categoria || '').toLowerCase() === 'sala');
-  const dispositivos = globalState.recursos.filter(r => (r.categoria || '').toLowerCase() !== 'sala');
+  // Agrupar por tipo (igual que en renderRecursos)
+  const salas = globalState.recursos.filter(r => (r.tipo || '').toLowerCase() === 'sala');
+  const dispositivos = globalState.recursos.filter(r => (r.tipo || '').toLowerCase() !== 'sala');
 
   // Añadir salas
   if (salas.length > 0) {
@@ -2003,9 +2003,7 @@ function mostrarSeccionIncidencias() {
     seccion.classList.remove('opacity-0');
   }
   
-  // Ocultar botón de incidencias
-  const btnVerInc = document.getElementById('btnVerIncidencias');
-  if (btnVerInc) btnVerInc.classList.add('hidden');
+  // El botón de incidencias permanece visible (ya no se oculta)
   
   // ✅ ESPERAR A ADMINSTATE SI NO ESTÁ LISTO
   if (typeof AdminState === 'undefined' || !AdminState.recursos || AdminState.recursos.length === 0) {
@@ -2068,12 +2066,6 @@ function volverDesdeIncidencias() {
     step1.classList.remove('hidden');
     void step1.offsetWidth;
     step1.classList.remove('opacity-0');
-  }
-  
-  // ✅ SOLO mostrar el botón de incidencias si hay pendientes
-  const btnVerInc = document.getElementById('btnVerIncidencias');
-  if (btnVerInc && hayIncidenciasPendientes()) {
-    btnVerInc.classList.remove('hidden');
   }
 }
 
@@ -2791,24 +2783,14 @@ function actualizarContadorIncidencias() {
     }
   }
   
-  const badge = document.getElementById('badgeIncidenciasPendientes');
+  // Actualizar badge del botón global de incidencias
+  const badge = document.getElementById('badgeIncidenciasGlobal');
   if (badge && pendientes > 0) {
     badge.textContent = pendientes;
     badge.classList.remove('hidden');
   } else if (badge) {
     badge.classList.add('hidden');
   }
-  
-  const btnVerInc = document.getElementById('btnVerIncidencias');
-  if (btnVerInc) {
-    if (pendientes > 0) {
-      btnVerInc.classList.remove('hidden');
-    } else {
-      btnVerInc.classList.add('hidden');
-    }
-  }
-  // Ajustar tamaño del header
-  ajustarHeaderSegunIncidencias();
 }
 
 /* =========================================================
@@ -2938,23 +2920,22 @@ function guardarNotaIncidenciaModal() {
  * Ajusta el tamaño del header según incidencias y rol de usuario
  */
 function ajustarHeaderSegunIncidencias() {
-  const numIncidencias = todasLasIncidencias.filter(i => 
+  const numIncidencias = todasLasIncidencias.filter(i =>
     i.Estado === 'Pendiente' || i.Estado === 'En proceso'
   ).length;
-  
+
   const esAdmin = globalState && globalState.isAdmin === true;
-  
-  const btnIncidencias = document.getElementById('btnVerIncidencias');
+
+  const btnIncidencias = document.getElementById('btnIncidenciasGlobal');
   const headerLogo = document.getElementById('headerLogo') || document.getElementById('headerLogoPlaceholder');
   const headerTitle = document.getElementById('headerTitle');
   const headerBranding = document.getElementById('headerBranding');
   const myReservationsBtn = document.getElementById('myReservationsButton');
-  
+
   // ========== LÓGICA PRINCIPAL ==========
-  
-  // Si hay incidencias, mostrar botón
-  if (numIncidencias > 0 && btnIncidencias) {
-    btnIncidencias.classList.remove('hidden');
+
+  // Si hay incidencias pendientes y es admin, ajustar layout
+  if (numIncidencias > 0 && esAdmin && btnIncidencias) {
     
     // SOLO compactar si ES ADMIN
     if (esAdmin) {
@@ -3046,12 +3027,8 @@ function ajustarHeaderSegunIncidencias() {
       }
     }
     // Si NO es admin, mantener header GRANDE aunque haya incidencias
-    
-  } else if (btnIncidencias) {
-    // Sin incidencias: ocultar botón
-    btnIncidencias.classList.add('hidden');
   }
-  
+
   console.log(`📐 Header ajustado: ${numIncidencias} incidencias, Admin: ${esAdmin}`);
 }
 
