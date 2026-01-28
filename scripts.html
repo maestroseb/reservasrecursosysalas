@@ -726,12 +726,36 @@ function loadTramos() {
 
           if (esAgrupado) {
             disponibles = capacidadTotal - totalReservado;
+
+            // Obtener nombres de quienes han reservado en este tramo
+            let nombresReservadores = '';
+            if (totalReservado > 0) {
+              const reservasTramo = globalState.reservas.filter(r =>
+                String(r.id_recurso) === String(recursoId) &&
+                r.fecha === fechaISO &&
+                String(r.id_tramo) === tramoId &&
+                r.estado.toLowerCase() === 'confirmada'
+              );
+
+              const miEmail = globalState.userEmail ? globalState.userEmail.toLowerCase() : '';
+              const nombres = reservasTramo.map(r => {
+                if (!r.email_usuario) return null;
+                const email = r.email_usuario.toLowerCase();
+                if (email === miEmail) return 'Tú';
+                return globalState.usuariosMap[email] || email;
+              }).filter(Boolean);
+
+              if (nombres.length > 0) {
+                nombresReservadores = ' · ' + nombres.join(', ');
+              }
+            }
+
             if (disponibles <= 0) {
-              mensaje = "Completo";
+              mensaje = "Completo" + nombresReservadores;
               buttonClass = "tramo-btn-reservado";
               isDisabled = true;
             } else {
-              mensaje = disponibles + ' disponibles';
+              mensaje = disponibles + ' disponibles' + nombresReservadores;
               isDisabled = false;
               buttonClass = "tramo-btn-disponible";
               tramosCount++;
