@@ -1617,43 +1617,162 @@ let incidenciaRecursoActual = null;
 
 /**
  * Abrir modal para reportar incidencia
+ * @param {string} idRecurso - ID del recurso (opcional, si no se pasa se muestra selector)
+ * @param {string} nombreRecurso - Nombre del recurso
+ * @param {string} iconoRecurso - Icono del recurso
  */
 function abrirModalReportarIncidencia(idRecurso, nombreRecurso, iconoRecurso) {
   console.log('📝 Abriendo modal incidencia:', idRecurso);
-  
-  // Guardar datos del recurso
-  incidenciaRecursoActual = {
-    id: idRecurso,
-    nombre: nombreRecurso,
-    icono: iconoRecurso || 'mdi:cube-outline'
-  };
-  
-  // Actualizar UI del modal
+
+  const selectorRecurso = document.getElementById('selectorRecursoIncidencia');
   const modalIcono = document.getElementById('modalIncidenciaIcono');
   const modalNombre = document.getElementById('modalIncidenciaNombreRecurso');
-  
-  if (modalIcono) {
-    modalIcono.innerHTML = `<iconify-icon icon="${incidenciaRecursoActual.icono}" class="text-2xl"></iconify-icon>`;
+
+  // Si hay recurso preseleccionado
+  if (idRecurso && nombreRecurso) {
+    incidenciaRecursoActual = {
+      id: idRecurso,
+      nombre: nombreRecurso,
+      icono: iconoRecurso || 'mdi:cube-outline'
+    };
+
+    // Ocultar selector de recurso
+    if (selectorRecurso) selectorRecurso.classList.add('hidden');
+
+    // Actualizar UI del modal
+    if (modalIcono) {
+      modalIcono.innerHTML = `<iconify-icon icon="${incidenciaRecursoActual.icono}" class="text-2xl"></iconify-icon>`;
+    }
+    if (modalNombre) {
+      modalNombre.textContent = nombreRecurso;
+    }
+  } else {
+    // Sin recurso preseleccionado - mostrar selector
+    incidenciaRecursoActual = null;
+
+    // Mostrar selector y poblar opciones
+    if (selectorRecurso) {
+      selectorRecurso.classList.remove('hidden');
+      poblarSelectorRecursos();
+    }
+
+    // Actualizar UI del modal para modo genérico
+    if (modalIcono) {
+      modalIcono.innerHTML = `<iconify-icon icon="mdi:alert-circle-outline" class="text-2xl"></iconify-icon>`;
+    }
+    if (modalNombre) {
+      modalNombre.textContent = 'Selecciona un recurso';
+    }
   }
-  
-  if (modalNombre) {
-    modalNombre.textContent = nombreRecurso;
-  }
-  
+
   // Resetear campos
   document.getElementById('incidenciaCategoria').value = 'Avería';
   document.getElementById('incidenciaPrioridad').value = 'Media';
   document.getElementById('incidenciaDescripcion').value = '';
-  
+  const selectRecurso = document.getElementById('incidenciaRecursoSelect');
+  if (selectRecurso) selectRecurso.value = '';
+
   // Mostrar modal
   const modal = document.getElementById('modalReportarIncidencia');
   if (modal) {
     modal.classList.remove('hidden');
-    
-    // Focus en descripción
+
+    // Focus en el campo apropiado
     setTimeout(() => {
-      document.getElementById('incidenciaDescripcion').focus();
+      if (!idRecurso && selectorRecurso && !selectorRecurso.classList.contains('hidden')) {
+        document.getElementById('incidenciaRecursoSelect').focus();
+      } else {
+        document.getElementById('incidenciaDescripcion').focus();
+      }
     }, 100);
+  }
+}
+
+/**
+ * Poblar el selector de recursos con todos los recursos disponibles
+ */
+function poblarSelectorRecursos() {
+  const select = document.getElementById('incidenciaRecursoSelect');
+  if (!select || !globalState.recursos) return;
+
+  // Limpiar opciones anteriores
+  select.innerHTML = '<option value="">-- Selecciona un recurso --</option>';
+
+  // Agrupar por categoría
+  const salas = globalState.recursos.filter(r => (r.categoria || '').toLowerCase() === 'sala');
+  const dispositivos = globalState.recursos.filter(r => (r.categoria || '').toLowerCase() !== 'sala');
+
+  // Añadir salas
+  if (salas.length > 0) {
+    const optgroupSalas = document.createElement('optgroup');
+    optgroupSalas.label = '🚪 Salas y Espacios';
+    salas.forEach(r => {
+      const option = document.createElement('option');
+      option.value = JSON.stringify({ id: r.id_recurso, nombre: r.nombre, icono: r.icono });
+      option.textContent = r.nombre;
+      optgroupSalas.appendChild(option);
+    });
+    select.appendChild(optgroupSalas);
+  }
+
+  // Añadir dispositivos
+  if (dispositivos.length > 0) {
+    const optgroupDisp = document.createElement('optgroup');
+    optgroupDisp.label = '💻 Dispositivos y Carritos';
+    dispositivos.forEach(r => {
+      const option = document.createElement('option');
+      option.value = JSON.stringify({ id: r.id_recurso, nombre: r.nombre, icono: r.icono });
+      option.textContent = r.nombre;
+      optgroupDisp.appendChild(option);
+    });
+    select.appendChild(optgroupDisp);
+  }
+}
+
+/**
+ * Abrir panel de incidencias desde el botón global
+ */
+function abrirPanelIncidenciasGlobal() {
+  console.log('📋 Abriendo panel de incidencias global');
+  mostrarSeccionIncidencias();
+}
+
+/**
+ * Abrir modal para nueva incidencia (sin recurso preseleccionado)
+ */
+function abrirModalNuevaIncidencia() {
+  console.log('➕ Abriendo modal nueva incidencia');
+  abrirModalReportarIncidencia(null, null, null);
+}
+
+/**
+ * Actualizar header del modal cuando se selecciona un recurso del dropdown
+ */
+function actualizarHeaderModalIncidencia(selectElement) {
+  const modalIcono = document.getElementById('modalIncidenciaIcono');
+  const modalNombre = document.getElementById('modalIncidenciaNombreRecurso');
+
+  if (!selectElement.value) {
+    // Sin selección
+    if (modalIcono) {
+      modalIcono.innerHTML = `<iconify-icon icon="mdi:alert-circle-outline" class="text-2xl"></iconify-icon>`;
+    }
+    if (modalNombre) {
+      modalNombre.textContent = 'Selecciona un recurso';
+    }
+    return;
+  }
+
+  try {
+    const recursoData = JSON.parse(selectElement.value);
+    if (modalIcono && recursoData.icono) {
+      modalIcono.innerHTML = `<iconify-icon icon="${recursoData.icono}" class="text-2xl"></iconify-icon>`;
+    }
+    if (modalNombre && recursoData.nombre) {
+      modalNombre.textContent = recursoData.nombre;
+    }
+  } catch (e) {
+    console.warn('Error parseando recurso:', e);
   }
 }
 
@@ -1670,7 +1789,13 @@ function cerrarModalReportarIncidencia() {
     }
   }
   incidenciaRecursoActual = null;
-  
+
+  // Ocultar selector de recurso y limpiar
+  const selectorRecurso = document.getElementById('selectorRecursoIncidencia');
+  if (selectorRecurso) selectorRecurso.classList.add('hidden');
+  const selectRecurso = document.getElementById('incidenciaRecursoSelect');
+  if (selectRecurso) selectRecurso.value = '';
+
   // ✅ NUEVO: Limpiar error al cerrar
   ocultarErrorIncidencia();
 }
@@ -1680,22 +1805,47 @@ function cerrarModalReportarIncidencia() {
  */
 function enviarReporteIncidencia() {
   const descripcion = document.getElementById('incidenciaDescripcion').value.trim();
-  
+
   // ✅ Ocultar error previo
   ocultarErrorIncidencia();
-  
+
+  // ✅ Si no hay recurso preseleccionado, obtenerlo del selector
+  const selectorRecurso = document.getElementById('selectorRecursoIncidencia');
+  const selectRecurso = document.getElementById('incidenciaRecursoSelect');
+
+  if (!incidenciaRecursoActual && selectorRecurso && !selectorRecurso.classList.contains('hidden')) {
+    // Obtener recurso del selector
+    const valorSeleccionado = selectRecurso.value;
+    if (!valorSeleccionado) {
+      mostrarErrorIncidencia('Por favor, selecciona un recurso');
+      selectRecurso.focus();
+      return;
+    }
+    try {
+      const recursoData = JSON.parse(valorSeleccionado);
+      incidenciaRecursoActual = {
+        id: recursoData.id,
+        nombre: recursoData.nombre,
+        icono: recursoData.icono || 'mdi:cube-outline'
+      };
+    } catch (e) {
+      mostrarErrorIncidencia('Error al procesar el recurso seleccionado');
+      return;
+    }
+  }
+
   // ✅ Validación con error inline
   if (!descripcion) {
     mostrarErrorIncidencia('Por favor, describe el problema');
     document.getElementById('incidenciaDescripcion').focus();
     return;
   }
-  
+
   if (descripcion.length < 10) {
     mostrarErrorIncidencia('La descripción debe tener al menos 10 caracteres');
     return;
   }
-  
+
   if (!incidenciaRecursoActual) {
     mostrarErrorIncidencia('Error: No hay recurso seleccionado');
     setTimeout(() => {
@@ -1703,7 +1853,7 @@ function enviarReporteIncidencia() {
     }, 2000);
     return;
   }
-  
+
   // Datos a enviar
   const datos = {
     id_recurso: String(incidenciaRecursoActual.id || incidenciaRecursoActual.id_recurso || ''),
