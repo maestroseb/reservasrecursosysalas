@@ -1,0 +1,1052 @@
+/* ============================================
+   SISTEMA DE RESERVAS RECURRENTES - BACKEND
+   ============================================ */
+
+/**
+ * Nombre de la hoja de solicitudes recurrentes
+ */
+const SHEET_SOLICITUDES_RECURRENTES = 'SolicitudesRecurrentes';
+
+/**
+ * Columnas de la hoja SolicitudesRecurrentes
+ */
+const COLS_SOLICITUDES = {
+  ID_SOLICITUD: 0,
+  ID_RECURSO: 1,
+  NOMBRE_RECURSO: 2,
+  EMAIL_USUARIO: 3,
+  NOMBRE_USUARIO: 4,
+  DIAS_SEMANA: 5,
+  ID_TRAMO: 6,
+  NOMBRE_TRAMO: 7,
+  FECHA_INICIO: 8,
+  FECHA_FIN: 9,
+  MOTIVO: 10,
+  ESTADO: 11,
+  FECHA_SOLICITUD: 12,
+  FECHA_RESOLUCION: 13,
+  ADMIN_RESOLUTOR: 14,
+  NOTAS_ADMIN: 15
+};
+
+/**
+ * Headers de la hoja SolicitudesRecurrentes
+ */
+const HEADERS_SOLICITUDES = [
+  'ID_Solicitud',
+  'ID_Recurso',
+  'Nombre_Recurso',
+  'Email_Usuario',
+  'Nombre_Usuario',
+  'Dias_Semana',
+  'ID_Tramo',
+  'Nombre_Tramo',
+  'Fecha_Inicio',
+  'Fecha_Fin',
+  'Motivo',
+  'Estado',
+  'Fecha_Solicitud',
+  'Fecha_Resolucion',
+  'Admin_Resolutor',
+  'Notas_Admin'
+];
+
+/* ============================================
+   GESTIÓN DE LA HOJA
+   ============================================ */
+
+/**
+ * Obtiene o crea la hoja de solicitudes recurrentes
+ */
+function getOrCreateSheetSolicitudesRecurrentes() {
+  const ss = getDB();
+  let sheet = ss.getSheetByName(SHEET_SOLICITUDES_RECURRENTES);
+
+  if (!sheet) {
+    Logger.log('📝 Creando hoja SolicitudesRecurrentes...');
+    sheet = ss.insertSheet(SHEET_SOLICITUDES_RECURRENTES);
+
+    // Añadir headers
+    sheet.getRange(1, 1, 1, HEADERS_SOLICITUDES.length).setValues([HEADERS_SOLICITUDES]);
+
+    // Formato de headers
+    const headerRange = sheet.getRange(1, 1, 1, HEADERS_SOLICITUDES.length);
+    headerRange.setFontWeight('bold');
+    headerRange.setBackground('#f3f4f6');
+
+    // Congelar primera fila
+    sheet.setFrozenRows(1);
+
+    // Ajustar anchos de columna
+    sheet.setColumnWidth(1, 120);  // ID
+    sheet.setColumnWidth(3, 150);  // Nombre Recurso
+    sheet.setColumnWidth(5, 150);  // Nombre Usuario
+    sheet.setColumnWidth(11, 200); // Motivo
+
+    Logger.log('✅ Hoja SolicitudesRecurrentes creada correctamente');
+  }
+
+  return sheet;
+}
+
+/* ============================================
+   CREAR SOLICITUD (USUARIO)
+   ============================================ */
+
+/**
+ * Crea una nueva solicitud de reserva recurrente
+ * @param {Object} datos - Datos de la solicitud
+ * @returns {Object} - Resultado de la operación
+ */
+function crearSolicitudRecurrente(datos) {
+  try {
+    Logger.log('📝 Creando solicitud recurrente: ' + JSON.stringify(datos));
+
+    // Validaciones
+    if (!datos.id_recurso) throw new Error('Recurso no especificado');
+    if (!datos.dias_semana || datos.dias_semana.length === 0) throw new Error('Selecciona al menos un día');
+    if (!datos.id_tramo) throw new Error('Tramo no especificado');
+    if (!datos.fecha_fin) throw new Error('Fecha fin no especificada');
+    if (!datos.motivo || datos.motivo.trim().length < 10) throw new Error('El motivo debe tener al menos 10 caracteres');
+
+    const userEmail = Session.getActiveUser().getEmail();
+    if (!userEmail) throw new Error('No se pudo obtener el email del usuario');
+
+    // Obtener datos adicionales
+    const ss = getDB();
+    const recursos = sheetToObjects(ss.getSheetByName(SHEETS.RECURSOS));
+    const recurso = recursos.find(r => String(r.id_recurso) === String(datos.id_recurso));
+    if (!recurso) throw new Error('Recurso no encontrado');
+
+    const tramos = sheetToObjects(ss.getSheetByName(SHEETS.TRAMOS));
+    const tramo = tramos.find(t => String(t.id_tramo) === String(datos.id_tramo));
+    if (!tramo) throw new Error('Tramo no encontrado');
+
+    // Obtener nombre del usuario
+    const usuarios = sheetToObjects(ss.getSheetByName(SHEETS.USUARIOS));
+    const usuario = usuarios.find(u => u.email_usuario && u.email_usuario.toLowerCase() === userEmail.toLowerCase());
+    const nombreUsuario = usuario ? (usuario.nombre_completo || userEmail) : userEmail;
+
+    // Generar ID único
+    const idSolicitud = 'SOL-' + Utilities.getUuid().substring(0, 8).toUpperCase();
+
+    // Formatear días de semana
+    const diasStr = Array.isArray(datos.dias_semana) ? datos.dias_semana.join(',') : datos.dias_semana;
+
+    // Fecha de inicio (hoy o la especificada)
+    const fechaInicio = datos.fecha_inicio ? new Date(datos.fecha_inicio) : new Date();
+    const fechaFin = new Date(datos.fecha_fin);
+
+    // Crear fila
+    const sheet = getOrCreateSheetSolicitudesRecurrentes();
+    const nuevaFila = [
+      idSolicitud,
+      datos.id_recurso,
+      recurso.nombre,
+      userEmail,
+      nombreUsuario,
+      diasStr,
+      datos.id_tramo,
+      tramo.nombre_tramo,
+      fechaInicio,
+      fechaFin,
+      datos.motivo.trim(),
+      'Pendiente',
+      new Date(),
+      '',
+      '',
+      ''
+    ];
+
+    sheet.appendRow(nuevaFila);
+
+    // Enviar email al admin
+    enviarEmailNuevaSolicitudRecurrente({
+      id: idSolicitud,
+      recurso: recurso.nombre,
+      usuario: nombreUsuario,
+      email: userEmail,
+      dias: diasStr,
+      tramo: tramo.nombre_tramo,
+      fechaInicio: fechaInicio,
+      fechaFin: fechaFin,
+      motivo: datos.motivo
+    });
+
+    Logger.log('✅ Solicitud recurrente creada: ' + idSolicitud);
+
+    return {
+      success: true,
+      id_solicitud: idSolicitud,
+      message: 'Solicitud enviada correctamente. Recibirás un email cuando sea revisada.'
+    };
+
+  } catch (error) {
+    Logger.log('❌ Error en crearSolicitudRecurrente: ' + error.message);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/* ============================================
+   OBTENER SOLICITUDES
+   ============================================ */
+
+/**
+ * Obtiene todas las solicitudes recurrentes (para admin)
+ * @param {string} filtroEstado - Opcional: 'Pendiente', 'Aprobada', 'Rechazada', 'todas'
+ */
+function getSolicitudesRecurrentes(filtroEstado) {
+  try {
+    const sheet = getOrCreateSheetSolicitudesRecurrentes();
+    if (sheet.getLastRow() < 2) return { success: true, solicitudes: [] };
+
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS_SOLICITUDES.length).getValues();
+
+    let solicitudes = data.map(row => ({
+      id_solicitud: row[COLS_SOLICITUDES.ID_SOLICITUD],
+      id_recurso: row[COLS_SOLICITUDES.ID_RECURSO],
+      nombre_recurso: row[COLS_SOLICITUDES.NOMBRE_RECURSO],
+      email_usuario: row[COLS_SOLICITUDES.EMAIL_USUARIO],
+      nombre_usuario: row[COLS_SOLICITUDES.NOMBRE_USUARIO],
+      dias_semana: row[COLS_SOLICITUDES.DIAS_SEMANA],
+      id_tramo: row[COLS_SOLICITUDES.ID_TRAMO],
+      nombre_tramo: row[COLS_SOLICITUDES.NOMBRE_TRAMO],
+      fecha_inicio: row[COLS_SOLICITUDES.FECHA_INICIO],
+      fecha_fin: row[COLS_SOLICITUDES.FECHA_FIN],
+      motivo: row[COLS_SOLICITUDES.MOTIVO],
+      estado: row[COLS_SOLICITUDES.ESTADO],
+      fecha_solicitud: row[COLS_SOLICITUDES.FECHA_SOLICITUD],
+      fecha_resolucion: row[COLS_SOLICITUDES.FECHA_RESOLUCION],
+      admin_resolutor: row[COLS_SOLICITUDES.ADMIN_RESOLUTOR],
+      notas_admin: row[COLS_SOLICITUDES.NOTAS_ADMIN]
+    })).filter(s => s.id_solicitud); // Filtrar filas vacías
+
+    // Filtrar por estado si se especifica
+    if (filtroEstado && filtroEstado !== 'todas') {
+      solicitudes = solicitudes.filter(s => s.estado === filtroEstado);
+    }
+
+    // Ordenar por fecha de solicitud (más recientes primero)
+    solicitudes.sort((a, b) => new Date(b.fecha_solicitud) - new Date(a.fecha_solicitud));
+
+    return { success: true, solicitudes: solicitudes };
+
+  } catch (error) {
+    Logger.log('❌ Error en getSolicitudesRecurrentes: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Obtiene las solicitudes del usuario actual
+ */
+function getMisSolicitudesRecurrentes() {
+  try {
+    const userEmail = Session.getActiveUser().getEmail();
+    const result = getSolicitudesRecurrentes('todas');
+
+    if (!result.success) return result;
+
+    const misSolicitudes = result.solicitudes.filter(
+      s => s.email_usuario.toLowerCase() === userEmail.toLowerCase()
+    );
+
+    return { success: true, solicitudes: misSolicitudes };
+
+  } catch (error) {
+    Logger.log('❌ Error en getMisSolicitudesRecurrentes: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/* ============================================
+   APROBAR / RECHAZAR SOLICITUD (ADMIN)
+   ============================================ */
+
+/**
+ * Aprueba una solicitud y genera las reservas
+ * @param {string} idSolicitud - ID de la solicitud
+ * @param {string} notasAdmin - Notas opcionales del admin
+ */
+function aprobarSolicitudRecurrente(idSolicitud, notasAdmin) {
+  try {
+    Logger.log('✅ Aprobando solicitud: ' + idSolicitud);
+
+    const adminEmail = Session.getActiveUser().getEmail();
+    const sheet = getOrCreateSheetSolicitudesRecurrentes();
+    const data = sheet.getDataRange().getValues();
+
+    // Buscar la solicitud
+    let filaIndex = -1;
+    let solicitud = null;
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][COLS_SOLICITUDES.ID_SOLICITUD] === idSolicitud) {
+        filaIndex = i + 1; // +1 porque getRange es 1-indexed
+        solicitud = {
+          id_solicitud: data[i][COLS_SOLICITUDES.ID_SOLICITUD],
+          id_recurso: data[i][COLS_SOLICITUDES.ID_RECURSO],
+          nombre_recurso: data[i][COLS_SOLICITUDES.NOMBRE_RECURSO],
+          email_usuario: data[i][COLS_SOLICITUDES.EMAIL_USUARIO],
+          nombre_usuario: data[i][COLS_SOLICITUDES.NOMBRE_USUARIO],
+          dias_semana: data[i][COLS_SOLICITUDES.DIAS_SEMANA],
+          id_tramo: data[i][COLS_SOLICITUDES.ID_TRAMO],
+          nombre_tramo: data[i][COLS_SOLICITUDES.NOMBRE_TRAMO],
+          fecha_inicio: data[i][COLS_SOLICITUDES.FECHA_INICIO],
+          fecha_fin: data[i][COLS_SOLICITUDES.FECHA_FIN],
+          motivo: data[i][COLS_SOLICITUDES.MOTIVO],
+          estado: data[i][COLS_SOLICITUDES.ESTADO]
+        };
+        break;
+      }
+    }
+
+    if (!solicitud) throw new Error('Solicitud no encontrada');
+    if (solicitud.estado !== 'Pendiente') throw new Error('Esta solicitud ya fue procesada');
+
+    // Generar las reservas
+    const resultado = generarReservasDesdeRecurrente(solicitud);
+
+    if (!resultado.success) {
+      throw new Error(resultado.error || 'Error al generar reservas');
+    }
+
+    // Actualizar estado de la solicitud
+    sheet.getRange(filaIndex, COLS_SOLICITUDES.ESTADO + 1).setValue('Aprobada');
+    sheet.getRange(filaIndex, COLS_SOLICITUDES.FECHA_RESOLUCION + 1).setValue(new Date());
+    sheet.getRange(filaIndex, COLS_SOLICITUDES.ADMIN_RESOLUTOR + 1).setValue(adminEmail);
+    sheet.getRange(filaIndex, COLS_SOLICITUDES.NOTAS_ADMIN + 1).setValue(notasAdmin || '');
+
+    // Purgar caché
+    if (typeof purgarCache === 'function') purgarCache();
+
+    // Enviar email al usuario
+    enviarEmailSolicitudAprobada({
+      email: solicitud.email_usuario,
+      nombre: solicitud.nombre_usuario,
+      recurso: solicitud.nombre_recurso,
+      dias: solicitud.dias_semana,
+      tramo: solicitud.nombre_tramo,
+      fechaFin: solicitud.fecha_fin,
+      reservasCreadas: resultado.reservasCreadas,
+      fechasSaltadas: resultado.fechasSaltadas,
+      notas: notasAdmin
+    });
+
+    Logger.log(`✅ Solicitud ${idSolicitud} aprobada. ${resultado.reservasCreadas} reservas creadas.`);
+
+    return {
+      success: true,
+      message: `Solicitud aprobada. Se han creado ${resultado.reservasCreadas} reservas.`,
+      reservasCreadas: resultado.reservasCreadas,
+      fechasSaltadas: resultado.fechasSaltadas
+    };
+
+  } catch (error) {
+    Logger.log('❌ Error en aprobarSolicitudRecurrente: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Rechaza una solicitud
+ * @param {string} idSolicitud - ID de la solicitud
+ * @param {string} motivoRechazo - Motivo del rechazo
+ */
+function rechazarSolicitudRecurrente(idSolicitud, motivoRechazo) {
+  try {
+    Logger.log('❌ Rechazando solicitud: ' + idSolicitud);
+
+    if (!motivoRechazo || motivoRechazo.trim().length < 5) {
+      throw new Error('Indica un motivo para el rechazo');
+    }
+
+    const adminEmail = Session.getActiveUser().getEmail();
+    const sheet = getOrCreateSheetSolicitudesRecurrentes();
+    const data = sheet.getDataRange().getValues();
+
+    // Buscar la solicitud
+    let filaIndex = -1;
+    let solicitud = null;
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][COLS_SOLICITUDES.ID_SOLICITUD] === idSolicitud) {
+        filaIndex = i + 1;
+        solicitud = {
+          email_usuario: data[i][COLS_SOLICITUDES.EMAIL_USUARIO],
+          nombre_usuario: data[i][COLS_SOLICITUDES.NOMBRE_USUARIO],
+          nombre_recurso: data[i][COLS_SOLICITUDES.NOMBRE_RECURSO],
+          dias_semana: data[i][COLS_SOLICITUDES.DIAS_SEMANA],
+          nombre_tramo: data[i][COLS_SOLICITUDES.NOMBRE_TRAMO],
+          estado: data[i][COLS_SOLICITUDES.ESTADO]
+        };
+        break;
+      }
+    }
+
+    if (!solicitud) throw new Error('Solicitud no encontrada');
+    if (solicitud.estado !== 'Pendiente') throw new Error('Esta solicitud ya fue procesada');
+
+    // Actualizar estado
+    sheet.getRange(filaIndex, COLS_SOLICITUDES.ESTADO + 1).setValue('Rechazada');
+    sheet.getRange(filaIndex, COLS_SOLICITUDES.FECHA_RESOLUCION + 1).setValue(new Date());
+    sheet.getRange(filaIndex, COLS_SOLICITUDES.ADMIN_RESOLUTOR + 1).setValue(adminEmail);
+    sheet.getRange(filaIndex, COLS_SOLICITUDES.NOTAS_ADMIN + 1).setValue(motivoRechazo);
+
+    // Enviar email al usuario
+    enviarEmailSolicitudRechazada({
+      email: solicitud.email_usuario,
+      nombre: solicitud.nombre_usuario,
+      recurso: solicitud.nombre_recurso,
+      dias: solicitud.dias_semana,
+      tramo: solicitud.nombre_tramo,
+      motivo: motivoRechazo
+    });
+
+    Logger.log('✅ Solicitud ' + idSolicitud + ' rechazada');
+
+    return { success: true, message: 'Solicitud rechazada' };
+
+  } catch (error) {
+    Logger.log('❌ Error en rechazarSolicitudRecurrente: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/* ============================================
+   GENERAR RESERVAS DESDE SOLICITUD APROBADA
+   ============================================ */
+
+/**
+ * Genera las reservas individuales a partir de una solicitud aprobada
+ * @param {Object} solicitud - Datos de la solicitud
+ */
+function generarReservasDesdeRecurrente(solicitud) {
+  try {
+    const ss = getDB();
+    const sheetReservas = ss.getSheetByName(SHEETS.RESERVAS);
+
+    // Mapeo de días: L=1, M=2, X=3, J=4, V=5, S=6, D=0
+    const mapaDias = { 'L': 1, 'M': 2, 'X': 3, 'J': 4, 'V': 5, 'S': 6, 'D': 0 };
+    const diasSeleccionados = solicitud.dias_semana.split(',').map(d => mapaDias[d.trim().toUpperCase()]);
+
+    const fechaInicio = new Date(solicitud.fecha_inicio);
+    const fechaFin = new Date(solicitud.fecha_fin);
+
+    // Obtener reservas existentes para verificar disponibilidad
+    const reservasExistentes = getActiveReservations();
+
+    // Obtener headers de la hoja de reservas para mapear columnas
+    const headersReservas = sheetReservas.getRange(1, 1, 1, sheetReservas.getLastColumn()).getValues()[0];
+    const headerMap = {};
+    headersReservas.forEach((h, i) => {
+      headerMap[h.toString().toLowerCase().replace(/ /g, '_')] = i;
+    });
+
+    let reservasCreadas = 0;
+    let fechasSaltadas = [];
+    const nuevasReservas = [];
+
+    // Iterar desde fecha inicio hasta fecha fin
+    let fechaActual = new Date(fechaInicio);
+    fechaActual.setHours(0, 0, 0, 0);
+
+    while (fechaActual <= fechaFin) {
+      const diaSemana = fechaActual.getDay(); // 0=Domingo, 1=Lunes, etc.
+
+      if (diasSeleccionados.includes(diaSemana)) {
+        const fechaISO = Utilities.formatDate(fechaActual, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+        // Verificar si ya hay una reserva para ese recurso/fecha/tramo
+        const yaReservado = reservasExistentes.some(r =>
+          String(r.id_recurso) === String(solicitud.id_recurso) &&
+          r.fecha === fechaISO &&
+          String(r.id_tramo) === String(solicitud.id_tramo)
+        );
+
+        if (yaReservado) {
+          fechasSaltadas.push(fechaISO);
+        } else {
+          // Generar ID único para la reserva
+          const idReserva = 'RES-' + Utilities.getUuid().substring(0, 8).toUpperCase();
+
+          // Crear fila de reserva
+          const numCols = sheetReservas.getLastColumn();
+          const nuevaFila = new Array(numCols).fill('');
+
+          if (headerMap['id_reserva'] !== undefined) nuevaFila[headerMap['id_reserva']] = idReserva;
+          if (headerMap['id_recurso'] !== undefined) nuevaFila[headerMap['id_recurso']] = solicitud.id_recurso;
+          if (headerMap['email_usuario'] !== undefined) nuevaFila[headerMap['email_usuario']] = solicitud.email_usuario;
+          if (headerMap['fecha'] !== undefined) nuevaFila[headerMap['fecha']] = fechaActual;
+          if (headerMap['curso'] !== undefined) nuevaFila[headerMap['curso']] = '';
+          if (headerMap['id_tramo'] !== undefined) nuevaFila[headerMap['id_tramo']] = solicitud.id_tramo;
+          if (headerMap['cantidad'] !== undefined) nuevaFila[headerMap['cantidad']] = 1;
+          if (headerMap['estado'] !== undefined) nuevaFila[headerMap['estado']] = 'Confirmada';
+          if (headerMap['notas'] !== undefined) nuevaFila[headerMap['notas']] = 'Reserva recurrente: ' + solicitud.id_solicitud;
+          if (headerMap['id_solicitud_recurrente'] !== undefined) nuevaFila[headerMap['id_solicitud_recurrente']] = solicitud.id_solicitud;
+
+          nuevasReservas.push(nuevaFila);
+          reservasCreadas++;
+        }
+      }
+
+      // Avanzar al siguiente día
+      fechaActual.setDate(fechaActual.getDate() + 1);
+    }
+
+    // Insertar todas las reservas de una vez
+    if (nuevasReservas.length > 0) {
+      sheetReservas.getRange(
+        sheetReservas.getLastRow() + 1,
+        1,
+        nuevasReservas.length,
+        nuevasReservas[0].length
+      ).setValues(nuevasReservas);
+    }
+
+    Logger.log(`✅ Generadas ${reservasCreadas} reservas. Saltadas: ${fechasSaltadas.length}`);
+
+    return {
+      success: true,
+      reservasCreadas: reservasCreadas,
+      fechasSaltadas: fechasSaltadas
+    };
+
+  } catch (error) {
+    Logger.log('❌ Error en generarReservasDesdeRecurrente: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/* ============================================
+   CANCELAR RESERVAS RECURRENTES
+   ============================================ */
+
+/**
+ * Cancela todas las reservas de un grupo recurrente
+ * @param {string} idSolicitud - ID de la solicitud recurrente
+ */
+function cancelarGrupoRecurrente(idSolicitud) {
+  try {
+    Logger.log('🗑️ Cancelando grupo recurrente: ' + idSolicitud);
+
+    const userEmail = Session.getActiveUser().getEmail();
+    const ss = getDB();
+    const sheetReservas = ss.getSheetByName(SHEETS.RESERVAS);
+
+    // Obtener headers
+    const headers = sheetReservas.getRange(1, 1, 1, sheetReservas.getLastColumn()).getValues()[0];
+    const colIdSolicitud = headers.findIndex(h => h.toString().toLowerCase().includes('id_solicitud_recurrente'));
+    const colEmail = headers.findIndex(h => h.toString().toLowerCase().includes('email_usuario'));
+    const colEstado = headers.findIndex(h => h.toString().toLowerCase() === 'estado');
+    const colFecha = headers.findIndex(h => h.toString().toLowerCase() === 'fecha');
+
+    if (colIdSolicitud === -1) {
+      throw new Error('La columna id_solicitud_recurrente no existe en la hoja de reservas');
+    }
+
+    const data = sheetReservas.getDataRange().getValues();
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+
+    let canceladas = 0;
+
+    // Buscar y cancelar reservas futuras del grupo
+    for (let i = data.length - 1; i >= 1; i--) {
+      const idSolReserva = data[i][colIdSolicitud];
+      const emailReserva = data[i][colEmail];
+      const estadoReserva = data[i][colEstado];
+      const fechaReserva = new Date(data[i][colFecha]);
+
+      if (String(idSolReserva) === String(idSolicitud) &&
+          estadoReserva === 'Confirmada' &&
+          fechaReserva >= hoy) {
+
+        // Verificar que el usuario es el dueño o es admin
+        const esAdmin = checkIfAdmin(userEmail);
+        if (emailReserva.toLowerCase() !== userEmail.toLowerCase() && !esAdmin) {
+          continue; // Saltar reservas de otros usuarios si no es admin
+        }
+
+        // Cancelar la reserva
+        sheetReservas.getRange(i + 1, colEstado + 1).setValue('Cancelada');
+        canceladas++;
+      }
+    }
+
+    // Purgar caché
+    if (typeof purgarCache === 'function') purgarCache();
+
+    Logger.log(`✅ Canceladas ${canceladas} reservas del grupo ${idSolicitud}`);
+
+    return {
+      success: true,
+      message: `Se han cancelado ${canceladas} reservas futuras`,
+      canceladas: canceladas
+    };
+
+  } catch (error) {
+    Logger.log('❌ Error en cancelarGrupoRecurrente: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Obtiene las reservas de un grupo recurrente
+ * @param {string} idSolicitud - ID de la solicitud recurrente
+ */
+function getReservasDeGrupoRecurrente(idSolicitud) {
+  try {
+    const ss = getDB();
+    const sheetReservas = ss.getSheetByName(SHEETS.RESERVAS);
+
+    const headers = sheetReservas.getRange(1, 1, 1, sheetReservas.getLastColumn()).getValues()[0];
+    const colIdSolicitud = headers.findIndex(h => h.toString().toLowerCase().includes('id_solicitud_recurrente'));
+
+    if (colIdSolicitud === -1) {
+      return { success: true, reservas: [] };
+    }
+
+    const data = sheetReservas.getDataRange().getValues();
+    const reservas = [];
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][colIdSolicitud]) === String(idSolicitud)) {
+        const fechaReserva = new Date(data[i][headers.findIndex(h => h.toString().toLowerCase() === 'fecha')]);
+        const estado = data[i][headers.findIndex(h => h.toString().toLowerCase() === 'estado')];
+
+        if (estado === 'Confirmada' && fechaReserva >= hoy) {
+          reservas.push({
+            id_reserva: data[i][headers.findIndex(h => h.toString().toLowerCase() === 'id_reserva')],
+            fecha: Utilities.formatDate(fechaReserva, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+            id_tramo: data[i][headers.findIndex(h => h.toString().toLowerCase() === 'id_tramo')],
+            estado: estado
+          });
+        }
+      }
+    }
+
+    // Ordenar por fecha
+    reservas.sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+
+    return { success: true, reservas: reservas };
+
+  } catch (error) {
+    Logger.log('❌ Error en getReservasDeGrupoRecurrente: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/* ============================================
+   CREAR RESERVA RECURRENTE DIRECTAMENTE (ADMIN)
+   ============================================ */
+
+/**
+ * Crea una reserva recurrente directamente sin pasar por solicitud (solo admin)
+ * @param {Object} datos - Datos de la reserva
+ */
+function crearRecurrenteDirecta(datos) {
+  try {
+    const adminEmail = Session.getActiveUser().getEmail();
+
+    // Verificar que es admin
+    if (!checkIfAdmin(adminEmail)) {
+      throw new Error('No tienes permisos para esta acción');
+    }
+
+    Logger.log('📝 Admin creando reserva recurrente directa: ' + JSON.stringify(datos));
+
+    // Crear una solicitud ya aprobada
+    const ss = getDB();
+    const recursos = sheetToObjects(ss.getSheetByName(SHEETS.RECURSOS));
+    const recurso = recursos.find(r => String(r.id_recurso) === String(datos.id_recurso));
+    if (!recurso) throw new Error('Recurso no encontrado');
+
+    const tramos = sheetToObjects(ss.getSheetByName(SHEETS.TRAMOS));
+    const tramo = tramos.find(t => String(t.id_tramo) === String(datos.id_tramo));
+    if (!tramo) throw new Error('Tramo no encontrado');
+
+    // Email del usuario beneficiario (puede ser otro usuario o el admin)
+    const emailBeneficiario = datos.email_usuario || adminEmail;
+
+    // Obtener nombre del beneficiario
+    const usuarios = sheetToObjects(ss.getSheetByName(SHEETS.USUARIOS));
+    const usuario = usuarios.find(u => u.email_usuario && u.email_usuario.toLowerCase() === emailBeneficiario.toLowerCase());
+    const nombreBeneficiario = usuario ? (usuario.nombre_completo || emailBeneficiario) : emailBeneficiario;
+
+    // Generar ID
+    const idSolicitud = 'SOL-' + Utilities.getUuid().substring(0, 8).toUpperCase();
+
+    const diasStr = Array.isArray(datos.dias_semana) ? datos.dias_semana.join(',') : datos.dias_semana;
+    const fechaInicio = datos.fecha_inicio ? new Date(datos.fecha_inicio) : new Date();
+    const fechaFin = new Date(datos.fecha_fin);
+
+    // Crear solicitud ya aprobada
+    const sheet = getOrCreateSheetSolicitudesRecurrentes();
+    const nuevaFila = [
+      idSolicitud,
+      datos.id_recurso,
+      recurso.nombre,
+      emailBeneficiario,
+      nombreBeneficiario,
+      diasStr,
+      datos.id_tramo,
+      tramo.nombre_tramo,
+      fechaInicio,
+      fechaFin,
+      datos.motivo || 'Creada directamente por administrador',
+      'Aprobada',
+      new Date(),
+      new Date(),
+      adminEmail,
+      'Creación directa'
+    ];
+
+    sheet.appendRow(nuevaFila);
+
+    // Generar las reservas
+    const solicitud = {
+      id_solicitud: idSolicitud,
+      id_recurso: datos.id_recurso,
+      email_usuario: emailBeneficiario,
+      dias_semana: diasStr,
+      id_tramo: datos.id_tramo,
+      fecha_inicio: fechaInicio,
+      fecha_fin: fechaFin
+    };
+
+    const resultado = generarReservasDesdeRecurrente(solicitud);
+
+    if (!resultado.success) {
+      throw new Error(resultado.error);
+    }
+
+    // Purgar caché
+    if (typeof purgarCache === 'function') purgarCache();
+
+    Logger.log(`✅ Reserva recurrente directa creada: ${resultado.reservasCreadas} reservas`);
+
+    return {
+      success: true,
+      id_solicitud: idSolicitud,
+      reservasCreadas: resultado.reservasCreadas,
+      fechasSaltadas: resultado.fechasSaltadas,
+      message: `Reserva recurrente creada. ${resultado.reservasCreadas} reservas generadas.`
+    };
+
+  } catch (error) {
+    Logger.log('❌ Error en crearRecurrenteDirecta: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/* ============================================
+   OBTENER RESERVAS RECURRENTES DEL USUARIO
+   ============================================ */
+
+/**
+ * Obtiene las reservas recurrentes activas del usuario actual
+ * (agrupadas por solicitud)
+ */
+function getMisReservasRecurrentes() {
+  try {
+    const userEmail = Session.getActiveUser().getEmail();
+    const ss = getDB();
+    const sheetReservas = ss.getSheetByName(SHEETS.RESERVAS);
+
+    // Obtener headers
+    const headers = sheetReservas.getRange(1, 1, 1, sheetReservas.getLastColumn()).getValues()[0];
+    const headerMap = {};
+    headers.forEach((h, i) => { headerMap[h.toString().toLowerCase()] = i; });
+
+    const colIdSolicitud = headers.findIndex(h => h.toString().toLowerCase().includes('id_solicitud_recurrente'));
+
+    if (colIdSolicitud === -1) {
+      return { success: true, grupos: [] };
+    }
+
+    const data = sheetReservas.getDataRange().getValues();
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+
+    // Agrupar por id_solicitud_recurrente
+    const grupos = {};
+
+    for (let i = 1; i < data.length; i++) {
+      const email = data[i][headerMap['email_usuario']];
+      const estado = data[i][headerMap['estado']];
+      const idSolRecurrente = data[i][colIdSolicitud];
+      const fecha = new Date(data[i][headerMap['fecha']]);
+
+      if (!idSolRecurrente ||
+          email.toLowerCase() !== userEmail.toLowerCase() ||
+          estado !== 'Confirmada' ||
+          fecha < hoy) {
+        continue;
+      }
+
+      if (!grupos[idSolRecurrente]) {
+        grupos[idSolRecurrente] = {
+          id_solicitud: idSolRecurrente,
+          id_recurso: data[i][headerMap['id_recurso']],
+          id_tramo: data[i][headerMap['id_tramo']],
+          reservas: []
+        };
+      }
+
+      grupos[idSolRecurrente].reservas.push({
+        id_reserva: data[i][headerMap['id_reserva']],
+        fecha: Utilities.formatDate(fecha, Session.getScriptTimeZone(), 'yyyy-MM-dd')
+      });
+    }
+
+    // Convertir a array y ordenar reservas dentro de cada grupo
+    const gruposArray = Object.values(grupos).map(g => {
+      g.reservas.sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+      g.proximaFecha = g.reservas[0]?.fecha;
+      g.totalRestantes = g.reservas.length;
+      return g;
+    });
+
+    // Ordenar grupos por próxima fecha
+    gruposArray.sort((a, b) => new Date(a.proximaFecha) - new Date(b.proximaFecha));
+
+    return { success: true, grupos: gruposArray };
+
+  } catch (error) {
+    Logger.log('❌ Error en getMisReservasRecurrentes: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/* ============================================
+   EMAILS DE NOTIFICACIÓN
+   ============================================ */
+
+/**
+ * Email al admin cuando hay nueva solicitud
+ */
+function enviarEmailNuevaSolicitudRecurrente(datos) {
+  try {
+    const adminEmail = getConfigValue('email_admin', '');
+    if (!adminEmail) {
+      Logger.log('⚠️ No hay email de admin configurado');
+      return;
+    }
+
+    const diasLegibles = datos.dias.split(',').map(d => {
+      const mapa = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes', 'S': 'Sábado', 'D': 'Domingo' };
+      return mapa[d.trim().toUpperCase()] || d;
+    }).join(', ');
+
+    const fechaFinFormateada = Utilities.formatDate(new Date(datos.fechaFin), Session.getScriptTimeZone(), 'dd/MM/yyyy');
+
+    const asunto = `🔄 Nueva solicitud de reserva recurrente - ${datos.recurso}`;
+    const cuerpo = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #f59e0b; margin-top: 0;">🔄 Nueva Solicitud de Reserva Recurrente</h2>
+
+        <p><strong>${datos.usuario}</strong> (${datos.email}) ha solicitado una reserva recurrente:</p>
+
+        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+          <tr style="background: #f3f4f6;">
+            <td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Recurso</strong></td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;">${datos.recurso}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Días</strong></td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;">${diasLegibles}</td>
+          </tr>
+          <tr style="background: #f3f4f6;">
+            <td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Tramo</strong></td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;">${datos.tramo}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Hasta</strong></td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;">${fechaFinFormateada}</td>
+          </tr>
+          <tr style="background: #f3f4f6;">
+            <td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Motivo</strong></td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;">${datos.motivo}</td>
+          </tr>
+        </table>
+
+        <p style="color: #6b7280;">Accede al panel de administración para aprobar o rechazar esta solicitud.</p>
+      </div>
+    `;
+
+    MailApp.sendEmail({
+      to: adminEmail,
+      subject: asunto,
+      htmlBody: cuerpo
+    });
+
+    Logger.log('📧 Email de nueva solicitud enviado a: ' + adminEmail);
+
+  } catch (error) {
+    Logger.log('❌ Error enviando email de solicitud: ' + error.message);
+  }
+}
+
+/**
+ * Email al usuario cuando se aprueba su solicitud
+ */
+function enviarEmailSolicitudAprobada(datos) {
+  try {
+    const diasLegibles = datos.dias.split(',').map(d => {
+      const mapa = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes', 'S': 'Sábado', 'D': 'Domingo' };
+      return mapa[d.trim().toUpperCase()] || d;
+    }).join(', ');
+
+    const fechaFinFormateada = Utilities.formatDate(new Date(datos.fechaFin), Session.getScriptTimeZone(), 'dd/MM/yyyy');
+
+    const asunto = `✅ Solicitud de reserva recurrente aprobada - ${datos.recurso}`;
+    const cuerpo = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #10b981; margin-top: 0;">✅ Solicitud Aprobada</h2>
+
+        <p>Hola ${datos.nombre},</p>
+
+        <p>Tu solicitud de reserva recurrente ha sido <strong style="color: #10b981;">aprobada</strong>.</p>
+
+        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+          <tr style="background: #f3f4f6;">
+            <td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Recurso</strong></td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;">${datos.recurso}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Días</strong></td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;">${diasLegibles}</td>
+          </tr>
+          <tr style="background: #f3f4f6;">
+            <td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Tramo</strong></td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;">${datos.tramo}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Hasta</strong></td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;">${fechaFinFormateada}</td>
+          </tr>
+          <tr style="background: #f3f4f6;">
+            <td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Reservas creadas</strong></td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;">${datos.reservasCreadas}</td>
+          </tr>
+        </table>
+
+        ${datos.fechasSaltadas && datos.fechasSaltadas.length > 0 ? `
+          <p style="color: #f59e0b;">⚠️ Algunas fechas ya estaban reservadas y se han saltado: ${datos.fechasSaltadas.join(', ')}</p>
+        ` : ''}
+
+        ${datos.notas ? `<p><strong>Notas del administrador:</strong> ${datos.notas}</p>` : ''}
+
+        <p style="color: #6b7280;">Puedes ver y gestionar tus reservas desde "Mis Reservas".</p>
+      </div>
+    `;
+
+    MailApp.sendEmail({
+      to: datos.email,
+      subject: asunto,
+      htmlBody: cuerpo
+    });
+
+    Logger.log('📧 Email de aprobación enviado a: ' + datos.email);
+
+  } catch (error) {
+    Logger.log('❌ Error enviando email de aprobación: ' + error.message);
+  }
+}
+
+/**
+ * Email al usuario cuando se rechaza su solicitud
+ */
+function enviarEmailSolicitudRechazada(datos) {
+  try {
+    const asunto = `❌ Solicitud de reserva recurrente rechazada - ${datos.recurso}`;
+    const cuerpo = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #ef4444; margin-top: 0;">❌ Solicitud Rechazada</h2>
+
+        <p>Hola ${datos.nombre},</p>
+
+        <p>Lamentamos informarte que tu solicitud de reserva recurrente ha sido <strong style="color: #ef4444;">rechazada</strong>.</p>
+
+        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+          <tr style="background: #f3f4f6;">
+            <td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Recurso</strong></td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;">${datos.recurso}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Días solicitados</strong></td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;">${datos.dias}</td>
+          </tr>
+          <tr style="background: #f3f4f6;">
+            <td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Tramo</strong></td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;">${datos.tramo}</td>
+          </tr>
+        </table>
+
+        <p><strong>Motivo del rechazo:</strong></p>
+        <p style="background: #fef2f2; padding: 15px; border-radius: 8px; border-left: 4px solid #ef4444;">
+          ${datos.motivo}
+        </p>
+
+        <p style="color: #6b7280;">Si tienes dudas, contacta con el administrador.</p>
+      </div>
+    `;
+
+    MailApp.sendEmail({
+      to: datos.email,
+      subject: asunto,
+      htmlBody: cuerpo
+    });
+
+    Logger.log('📧 Email de rechazo enviado a: ' + datos.email);
+
+  } catch (error) {
+    Logger.log('❌ Error enviando email de rechazo: ' + error.message);
+  }
+}
+
+/* ============================================
+   UTILIDADES
+   ============================================ */
+
+/**
+ * Verifica si un usuario es administrador
+ */
+function checkIfAdmin(email) {
+  try {
+    const ss = getDB();
+    const sheetUsuarios = ss.getSheetByName(SHEETS.USUARIOS);
+    const usuarios = sheetToObjects(sheetUsuarios);
+
+    const usuario = usuarios.find(u =>
+      u.email_usuario && u.email_usuario.toLowerCase() === email.toLowerCase()
+    );
+
+    if (!usuario) return false;
+
+    const adminValue = String(usuario.admin || '').toLowerCase();
+    return adminValue === 'si' || adminValue === 'sí' || adminValue === 'yes' || adminValue === 'true' || adminValue === '1';
+
+  } catch (error) {
+    Logger.log('Error verificando admin: ' + error.message);
+    return false;
+  }
+}
+
+/**
+ * Contar solicitudes pendientes (para badge)
+ */
+function contarSolicitudesPendientes() {
+  try {
+    const result = getSolicitudesRecurrentes('Pendiente');
+    return result.success ? result.solicitudes.length : 0;
+  } catch (error) {
+    return 0;
+  }
+}

@@ -1610,6 +1610,220 @@ function showInfo(message) {
 }
 
 /* =========================================================
+   SISTEMA DE RESERVAS RECURRENTES - FRONTEND USUARIO
+   ========================================================= */
+
+/**
+ * Abrir modal de solicitud de reserva recurrente
+ */
+function abrirModalSolicitudRecurrente() {
+  console.log('🔄 Abriendo modal de solicitud recurrente');
+
+  if (!globalState.recursoActual) {
+    showToast('warning', 'Selecciona primero un recurso');
+    return;
+  }
+
+  const recurso = globalState.recursoActual;
+  const modal = document.getElementById('modalSolicitudRecurrente');
+  const nombreRecurso = document.getElementById('modalRecurrenteNombreRecurso');
+
+  // Mostrar nombre del recurso
+  if (nombreRecurso) {
+    nombreRecurso.textContent = recurso.nombre || 'Recurso';
+  }
+
+  // Poblar selector de tramos
+  poblarSelectorTramosRecurrente();
+
+  // Resetear formulario
+  document.querySelectorAll('input[name="diasSemana"]').forEach(cb => cb.checked = false);
+  document.getElementById('recurrenteTramoSelect').value = '';
+  document.querySelector('input[name="tipoFechaFin"][value="finCurso"]').checked = true;
+  document.getElementById('fechaFinContainer').classList.add('hidden');
+  document.getElementById('recurrenteFechaFin').value = '';
+  document.getElementById('recurrenteMotivo').value = '';
+  ocultarErrorRecurrente();
+
+  // Configurar fecha mínima
+  const hoy = new Date();
+  const fechaMinima = hoy.toISOString().split('T')[0];
+  document.getElementById('recurrenteFechaFin').min = fechaMinima;
+
+  // Listener para mostrar/ocultar campo de fecha
+  document.querySelectorAll('input[name="tipoFechaFin"]').forEach(radio => {
+    radio.addEventListener('change', function() {
+      const container = document.getElementById('fechaFinContainer');
+      if (this.value === 'fecha') {
+        container.classList.remove('hidden');
+      } else {
+        container.classList.add('hidden');
+      }
+    });
+  });
+
+  // Mostrar modal
+  if (modal) {
+    modal.classList.remove('hidden');
+  }
+}
+
+/**
+ * Cerrar modal de solicitud recurrente
+ */
+function cerrarModalSolicitudRecurrente() {
+  const modal = document.getElementById('modalSolicitudRecurrente');
+  if (modal) {
+    modal.classList.add('hidden');
+  }
+  ocultarErrorRecurrente();
+}
+
+/**
+ * Poblar selector de tramos para solicitud recurrente
+ */
+function poblarSelectorTramosRecurrente() {
+  const select = document.getElementById('recurrenteTramoSelect');
+  if (!select || !globalState.tramos) return;
+
+  select.innerHTML = '<option value="">-- Selecciona un tramo --</option>';
+
+  globalState.tramos.forEach(tramo => {
+    const option = document.createElement('option');
+    option.value = tramo.id_tramo;
+    option.textContent = `${tramo.nombre_tramo} (${tramo.hora_inicio} - ${tramo.hora_fin})`;
+    select.appendChild(option);
+  });
+}
+
+/**
+ * Calcular fecha de fin de curso (30 de junio del año actual o siguiente)
+ */
+function calcularFinDeCurso() {
+  const hoy = new Date();
+  const mes = hoy.getMonth(); // 0-11
+  const anio = hoy.getFullYear();
+
+  // Si estamos entre septiembre y diciembre, fin de curso es junio del año siguiente
+  // Si estamos entre enero y junio, fin de curso es junio de este año
+  if (mes >= 8) { // Septiembre (8) a Diciembre (11)
+    return new Date(anio + 1, 5, 30); // 30 de junio del año siguiente
+  } else {
+    return new Date(anio, 5, 30); // 30 de junio de este año
+  }
+}
+
+/**
+ * Enviar solicitud de reserva recurrente
+ */
+function enviarSolicitudRecurrente() {
+  console.log('📤 Enviando solicitud recurrente');
+
+  ocultarErrorRecurrente();
+
+  // Obtener días seleccionados
+  const diasSeleccionados = [];
+  document.querySelectorAll('input[name="diasSemana"]:checked').forEach(cb => {
+    diasSeleccionados.push(cb.value);
+  });
+
+  if (diasSeleccionados.length === 0) {
+    mostrarErrorRecurrente('Selecciona al menos un día de la semana');
+    return;
+  }
+
+  // Obtener tramo
+  const tramoId = document.getElementById('recurrenteTramoSelect').value;
+  if (!tramoId) {
+    mostrarErrorRecurrente('Selecciona un tramo horario');
+    return;
+  }
+
+  // Obtener fecha fin
+  const tipoFechaFin = document.querySelector('input[name="tipoFechaFin"]:checked').value;
+  let fechaFin;
+
+  if (tipoFechaFin === 'finCurso') {
+    fechaFin = calcularFinDeCurso();
+  } else {
+    const fechaInput = document.getElementById('recurrenteFechaFin').value;
+    if (!fechaInput) {
+      mostrarErrorRecurrente('Selecciona una fecha de finalización');
+      return;
+    }
+    fechaFin = new Date(fechaInput);
+  }
+
+  // Obtener motivo
+  const motivo = document.getElementById('recurrenteMotivo').value.trim();
+  if (!motivo || motivo.length < 10) {
+    mostrarErrorRecurrente('El motivo debe tener al menos 10 caracteres');
+    return;
+  }
+
+  // Preparar datos
+  const datos = {
+    id_recurso: globalState.recursoActual.id_recurso,
+    dias_semana: diasSeleccionados,
+    id_tramo: tramoId,
+    fecha_fin: fechaFin.toISOString().split('T')[0],
+    motivo: motivo
+  };
+
+  console.log('📋 Datos de solicitud:', datos);
+
+  // Mostrar spinner
+  const btnEnviar = document.getElementById('btnEnviarSolicitudRecurrente');
+  const textoOriginal = btnEnviar.innerHTML;
+  btnEnviar.disabled = true;
+  btnEnviar.innerHTML = `
+    <iconify-icon icon="mdi:loading" class="animate-spin text-xl"></iconify-icon>
+    <span>Enviando...</span>
+  `;
+
+  google.script.run
+    .withSuccessHandler(function(response) {
+      btnEnviar.disabled = false;
+      btnEnviar.innerHTML = textoOriginal;
+
+      if (response.success) {
+        showToast('success', response.message || 'Solicitud enviada correctamente');
+        cerrarModalSolicitudRecurrente();
+      } else {
+        mostrarErrorRecurrente(response.error || 'Error al enviar la solicitud');
+      }
+    })
+    .withFailureHandler(function(error) {
+      btnEnviar.disabled = false;
+      btnEnviar.innerHTML = textoOriginal;
+      mostrarErrorRecurrente('Error de conexión: ' + error.message);
+    })
+    .crearSolicitudRecurrente(datos);
+}
+
+/**
+ * Mostrar error en modal de solicitud recurrente
+ */
+function mostrarErrorRecurrente(mensaje) {
+  const errorDiv = document.getElementById('recurrenteError');
+  const errorTexto = document.getElementById('recurrenteErrorTexto');
+  if (errorDiv && errorTexto) {
+    errorTexto.textContent = mensaje;
+    errorDiv.classList.remove('hidden');
+  }
+}
+
+/**
+ * Ocultar error en modal de solicitud recurrente
+ */
+function ocultarErrorRecurrente() {
+  const errorDiv = document.getElementById('recurrenteError');
+  if (errorDiv) {
+    errorDiv.classList.add('hidden');
+  }
+}
+
+/* =========================================================
    SISTEMA DE INCIDENCIAS - FRONTEND USUARIO
    ========================================================= */
 

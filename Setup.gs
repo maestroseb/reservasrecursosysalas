@@ -13,7 +13,7 @@ const DB_SCHEMA = {
   'Usuarios': { headers: ['Nombre_Completo', 'Email_Usuario', 'Activo', 'Admin', 'Especialidad'], color: '#dc2626' },
   'Config':   { headers: ['CLAVE', 'VALOR', 'DESCRIPCION'], color: '#64748b' },
   'Incidencias':   { headers: ['ID_Incidencia',	'ID_Recurso',	'Nombre_Recurso',	'Email_Usuario',	'Fecha_Reporte',	'Categoria',	'Prioridad',	'Descripcion',	'Estado',	'Notas_Admin',	'Fecha_Resolucion'], color: '#64748b' },
-  'Reservas': { headers: ['ID_Reserva', 'ID_Recurso', 'Email_Usuario', 'Fecha', 'Curso', 'ID_Tramo', 'Cantidad', 'Estado', 'Notas', 'Timestamp'], color: '#059669' }
+  'Reservas': { headers: ['ID_Reserva', 'ID_Recurso', 'Email_Usuario', 'Fecha', 'Curso', 'ID_Tramo', 'Cantidad', 'Estado', 'Notas', 'Timestamp', 'ID_Solicitud_Recurrente'], color: '#059669' }
 };
 
 // ==========================================
