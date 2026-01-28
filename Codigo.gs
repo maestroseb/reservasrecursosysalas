@@ -1829,7 +1829,10 @@ function getAppConfig() {
     const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
     data.forEach(r => {
       if (r[0] === 'nombre_centro') config.appName = r[1];
-      if (r[0] === 'url_logo') config.logoUrl = r[1];
+      if (r[0] === 'url_logo') {
+        // Convertir URL de Drive al formato de imagen pública si es necesario
+        config.logoUrl = convertirUrlLogoParaMostrar(r[1]);
+      }
     });
   }
   return config;
@@ -1868,5 +1871,133 @@ function purgarCache() {
   });
 
   Logger.log('Cachés de disponibilidad purgadas.');
+}
+
+/* ============================================
+   FUNCIONES PARA MANEJO DE IMÁGENES DE DRIVE
+   ============================================ */
+
+/**
+ * Extrae el ID de archivo de una URL de Google Drive
+ * Soporta varios formatos:
+ * - https://drive.google.com/file/d/ID/view
+ * - https://drive.google.com/open?id=ID
+ * - https://drive.google.com/uc?id=ID
+ * @param {string} url - URL de Google Drive
+ * @returns {string|null} - ID del archivo o null si no es URL de Drive
+ */
+function extraerIdDeDriveUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+
+  // Patrón 1: /file/d/ID/
+  let match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (match) return match[1];
+
+  // Patrón 2: ?id=ID o &id=ID
+  match = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (match) return match[1];
+
+  // Patrón 3: /d/ID/ (formato corto)
+  match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (match) return match[1];
+
+  return null;
+}
+
+/**
+ * Convierte una URL de Google Drive al formato de imagen pública
+ * @param {string} url - URL original (puede ser de Drive o URL directa)
+ * @returns {string} - URL convertida para mostrar imagen
+ */
+function convertirUrlLogoParaMostrar(url) {
+  if (!url || typeof url !== 'string') return '';
+
+  // Si ya es una URL de lh3.googleusercontent.com, devolverla tal cual
+  if (url.includes('lh3.googleusercontent.com')) return url;
+
+  // Intentar extraer ID de Drive
+  const driveId = extraerIdDeDriveUrl(url);
+  if (driveId) {
+    return 'https://lh3.googleusercontent.com/d/' + driveId;
+  }
+
+  // Si no es de Drive, devolver la URL original
+  return url;
+}
+
+/**
+ * Intenta hacer pública una imagen de Google Drive
+ * @param {string} url - URL de Google Drive
+ * @returns {Object} - { success: boolean, message: string, convertedUrl: string }
+ */
+function procesarUrlLogoDrive(url) {
+  try {
+    if (!url || typeof url !== 'string') {
+      return { success: false, message: 'URL vacía', convertedUrl: '' };
+    }
+
+    const driveId = extraerIdDeDriveUrl(url);
+
+    // Si no es URL de Drive, simplemente devolver éxito con la URL original
+    if (!driveId) {
+      return {
+        success: true,
+        message: 'URL directa (no es de Drive)',
+        convertedUrl: url,
+        isDrive: false
+      };
+    }
+
+    const convertedUrl = 'https://lh3.googleusercontent.com/d/' + driveId;
+
+    // Intentar hacer el archivo público
+    try {
+      const file = DriveApp.getFileById(driveId);
+
+      // Verificar si ya tiene acceso público
+      const access = file.getSharingAccess();
+
+      if (access !== DriveApp.Access.ANYONE && access !== DriveApp.Access.ANYONE_WITH_LINK) {
+        // Hacer el archivo público (solo lectura)
+        file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        Logger.log('✅ Permisos actualizados para imagen: ' + driveId);
+
+        return {
+          success: true,
+          message: 'Imagen de Drive configurada como pública correctamente',
+          convertedUrl: convertedUrl,
+          isDrive: true,
+          permissionsChanged: true
+        };
+      } else {
+        return {
+          success: true,
+          message: 'La imagen de Drive ya era pública',
+          convertedUrl: convertedUrl,
+          isDrive: true,
+          permissionsChanged: false
+        };
+      }
+    } catch (permError) {
+      // No tiene permisos para modificar el archivo
+      Logger.log('⚠️ No se pudieron cambiar permisos: ' + permError.message);
+      return {
+        success: true,
+        message: 'URL de Drive detectada, pero no se pudieron cambiar los permisos automáticamente. Asegúrate de que la imagen sea pública.',
+        convertedUrl: convertedUrl,
+        isDrive: true,
+        permissionsChanged: false,
+        warning: true
+      };
+    }
+
+  } catch (error) {
+    Logger.log('❌ Error procesando URL de logo: ' + error.message);
+    return {
+      success: false,
+      message: 'Error: ' + error.message,
+      convertedUrl: url
+    };
+  }
 }
 

@@ -2717,6 +2717,18 @@ function validarConfiguracion() {
   if (urlLogo && !/^https?:\/\/.+/.test(urlLogo)) {
     errores.push('URL del logo debe empezar con http:// o https://');
   }
+  // Validar que si es URL de Drive, tenga un formato reconocible
+  if (urlLogo && urlLogo.includes('drive.google.com')) {
+    const drivePatterns = [
+      /\/file\/d\/([a-zA-Z0-9_-]+)/,
+      /[?&]id=([a-zA-Z0-9_-]+)/,
+      /\/d\/([a-zA-Z0-9_-]+)/
+    ];
+    const isValidDriveUrl = drivePatterns.some(p => p.test(urlLogo));
+    if (!isValidDriveUrl) {
+      errores.push('URL de Google Drive no reconocida. Usa el enlace "Compartir" del archivo.');
+    }
+  }
   
   return errores;
 }
@@ -2728,20 +2740,50 @@ function guardarConfiguracion() {
     showToast('warning', `Revisa: ${errores.slice(0, 2).join('. ')}`);
     return;
   }
-  
+
   showLoading();
   const newConfig = construirConfigDesdeInputs();
 
+  // Verificar si hay URL de logo de Drive para procesar permisos
+  const urlLogoConfig = newConfig.find(c => c.clave === 'url_logo');
+  const urlLogo = urlLogoConfig ? urlLogoConfig.valor : '';
+  const esDriveUrl = urlLogo && urlLogo.includes('drive.google.com');
+
+  if (esDriveUrl) {
+    // Primero procesar la URL de Drive para cambiar permisos
+    google.script.run
+      .withSuccessHandler(driveResult => {
+        if (driveResult.warning) {
+          showToast('warning', driveResult.message, 5000);
+        } else if (driveResult.isDrive && driveResult.permissionsChanged) {
+          showToast('info', 'Permisos de imagen actualizados automáticamente');
+        }
+        // Continuar guardando la configuración
+        finalizarGuardadoConfiguracion(newConfig);
+      })
+      .withFailureHandler(err => {
+        // Aunque falle el procesamiento de Drive, intentar guardar la config
+        console.warn('Error procesando URL de Drive:', err);
+        finalizarGuardadoConfiguracion(newConfig);
+      })
+      .procesarUrlLogoDrive(urlLogo);
+  } else {
+    // No es URL de Drive, guardar directamente
+    finalizarGuardadoConfiguracion(newConfig);
+  }
+}
+
+function finalizarGuardadoConfiguracion(newConfig) {
   google.script.run
     .withSuccessHandler(res => {
       hideLoading();
       if(res.success) {
         showToast('success', 'Configuración guardada');
-        
+
         AdminState.config = newConfig;
         ConfigState.configOriginal = JSON.parse(JSON.stringify(newConfig));
         ConfigState.cambiosPendientes = false;
-        
+
         SaveBarManager.hide();
       } else {
         showToast('error', res.error);
