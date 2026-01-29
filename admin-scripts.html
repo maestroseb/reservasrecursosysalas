@@ -3665,7 +3665,7 @@ async function aprobarTodasPendientes() {
   );
 
   if (pendientes.length === 0) {
-    mostrarToast('No hay solicitudes pendientes para aprobar', 'info');
+    showToast('info', 'No hay solicitudes pendientes para aprobar');
     return;
   }
 
@@ -3707,9 +3707,9 @@ async function aprobarTodasPendientes() {
   btn.innerHTML = textoOriginal;
 
   if (errores === 0) {
-    mostrarToast(`${aprobadas} solicitud(es) aprobada(s). ${totalReservas} reservas generadas.`, 'success');
+    showToast('success', `${aprobadas} solicitud(es) aprobada(s). ${totalReservas} reservas generadas.`);
   } else {
-    mostrarToast(`Aprobadas: ${aprobadas}, Errores: ${errores}. Revisa los detalles.`, 'warning');
+    showToast('warning', `Aprobadas: ${aprobadas}, Errores: ${errores}. Revisa los detalles.`);
   }
 
   await cargarSolicitudesRecurrentes();
@@ -3722,7 +3722,7 @@ async function aprobarTodasPendientes() {
 function cancelarRecurrenciaAprobada(idSolicitud) {
   const solicitud = AdminState.solicitudesRecurrentes.find(s => s.id_solicitud === idSolicitud);
   if (!solicitud) {
-    mostrarToast('Solicitud no encontrada', 'error');
+    showToast('error', 'Solicitud no encontrada');
     return;
   }
 
@@ -3730,7 +3730,7 @@ function cancelarRecurrenciaAprobada(idSolicitud) {
     '¿Cancelar recurrencia?',
     `Se cancelarán todas las reservas futuras de <strong>"${escaparHTML(solicitud.nombre_recurso)}"</strong> para el usuario <strong>${escaparHTML(solicitud.nombre_usuario)}</strong>.`,
     async () => {
-      mostrarToast('Cancelando recurrencia...', 'info');
+      showToast('info', 'Cancelando recurrencia...');
 
       try {
         const result = await new Promise((resolve, reject) => {
@@ -3741,15 +3741,15 @@ function cancelarRecurrenciaAprobada(idSolicitud) {
         });
 
         if (result && result.success) {
-          mostrarToast(result.message || 'Recurrencia cancelada', 'success');
+          showToast('success', result.message || 'Recurrencia cancelada');
           await cargarSolicitudesRecurrentes();
           adminHaCambiadoDatos = true;
         } else {
-          mostrarToast(result?.error || 'Error al cancelar', 'error');
+          showToast('error', result?.error || 'Error al cancelar');
         }
       } catch (error) {
         console.error('Error cancelando recurrencia:', error);
-        mostrarToast('Error: ' + (error.message || error), 'error');
+        showToast('error', 'Error: ' + (error.message || error));
       }
     }
   );
@@ -3898,7 +3898,7 @@ function renderizarSolicitudesRecurrentes() {
 function abrirModalGestionarSolicitud(idSolicitud) {
   const solicitud = AdminState.solicitudesRecurrentes.find(s => s.id_solicitud === idSolicitud);
   if (!solicitud) {
-    mostrarToast('Solicitud no encontrada', 'error');
+    showToast('error', 'Solicitud no encontrada');
     return;
   }
 
@@ -3944,7 +3944,7 @@ async function aprobarSolicitudRecurrente() {
   const btnAprobar = document.getElementById('btnAprobarSolicitud');
   const btnRechazar = document.getElementById('btnRechazarSolicitud');
   if (!btnAprobar) {
-    mostrarToast('Error interno: botón no encontrado', 'error');
+    showToast('error', 'Error interno: botón no encontrado');
     return;
   }
 
@@ -3967,16 +3967,16 @@ async function aprobarSolicitudRecurrente() {
     if (btnRechazar) btnRechazar.disabled = false;
 
     if (result && result.success) {
-      mostrarToast(`Solicitud aprobada. Se crearon ${result.reservasCreadas || 0} reservas.`, 'success');
+      showToast('success', `Solicitud aprobada. Se crearon ${result.reservasCreadas || 0} reservas.`);
       cerrarModalGestionarSolicitud();
       await cargarSolicitudesRecurrentes();
       adminHaCambiadoDatos = true;
     } else {
-      mostrarToast(result?.error || 'Error al aprobar', 'error');
+      showToast('error', result?.error || 'Error al aprobar');
     }
   } catch (error) {
     console.error('Error al aprobar:', error);
-    mostrarToast('Error al aprobar la solicitud: ' + (error.message || error), 'error');
+    showToast('error', 'Error al aprobar la solicitud: ' + (error.message || error));
     btnAprobar.disabled = false;
     btnAprobar.innerHTML = textoOriginal;
     if (btnRechazar) btnRechazar.disabled = false;
@@ -3991,13 +3991,13 @@ async function rechazarSolicitudRecurrente() {
   const motivo = document.getElementById('gestionarSolicitudMotivo').value.trim();
 
   if (!motivo) {
-    mostrarToast('Debes indicar un motivo para rechazar', 'error');
+    showToast('error', 'Debes indicar un motivo para rechazar');
     return;
   }
 
   const btnRechazar = document.getElementById('btnRechazarSolicitud');
   if (!btnRechazar) {
-    mostrarToast('Error interno: botón no encontrado', 'error');
+    showToast('error', 'Error interno: botón no encontrado');
     return;
   }
 
@@ -4014,17 +4014,17 @@ async function rechazarSolicitudRecurrente() {
     });
 
     if (result && result.success) {
-      mostrarToast('Solicitud rechazada correctamente', 'success');
+      showToast('success', 'Solicitud rechazada correctamente');
       cerrarModalGestionarSolicitud();
       await cargarSolicitudesRecurrentes();
     } else {
-      mostrarToast(result?.error || 'Error al rechazar', 'error');
+      showToast('error', result?.error || 'Error al rechazar');
       btnRechazar.disabled = false;
       btnRechazar.innerHTML = textoOriginal;
     }
   } catch (error) {
     console.error('Error al rechazar:', error);
-    mostrarToast('Error al rechazar la solicitud: ' + (error.message || error), 'error');
+    showToast('error', 'Error al rechazar la solicitud: ' + (error.message || error));
     btnRechazar.disabled = false;
     btnRechazar.innerHTML = textoOriginal;
   }
@@ -4036,7 +4036,7 @@ async function rechazarSolicitudRecurrente() {
 function verDetalleSolicitud(idSolicitud) {
   const solicitud = AdminState.solicitudesRecurrentes.find(s => s.id_solicitud === idSolicitud);
   if (!solicitud) {
-    mostrarToast('Solicitud no encontrada', 'error');
+    showToast('error', 'Solicitud no encontrada');
     return;
   }
 
@@ -4265,7 +4265,7 @@ async function guardarRecurrenteDirecta() {
   let fechaFin = '';
   if (tipoFin === 'fecha') {
     fechaFin = document.getElementById('recDirectaFechaFin').value;
-    if (!fechaFin) return mostrarToast('Indica la fecha de fin', 'error');
+    if (!fechaFin) return showToast('error', 'Indica la fecha de fin');
   } else {
     // Fin de curso - usar fecha de la config o 30 junio
     const config = AdminState.config || [];
@@ -4274,9 +4274,9 @@ async function guardarRecurrenteDirecta() {
   }
 
   // Validaciones
-  if (!recurso) return mostrarToast('Selecciona un recurso', 'error');
-  if (!usuario) return mostrarToast('Selecciona un usuario', 'error');
-  if (seleccionesArray.length === 0) return mostrarToast('Selecciona al menos un tramo en el calendario', 'error');
+  if (!recurso) return showToast('error', 'Selecciona un recurso');
+  if (!usuario) return showToast('error', 'Selecciona un usuario');
+  if (seleccionesArray.length === 0) return showToast('error', 'Selecciona al menos un tramo en el calendario');
 
   const btn = document.getElementById('btnGuardarRecurrenteDirecta');
   const textoOriginal = btn.innerHTML;
@@ -4304,16 +4304,16 @@ async function guardarRecurrenteDirecta() {
     btn.innerHTML = textoOriginal;
 
     if (result && result.success) {
-      mostrarToast(`Reservas generadas: ${result.reservasCreadas || result.reservasGeneradas || 0}`, 'success');
+      showToast('success', `Reservas generadas: ${result.reservasCreadas || result.reservasGeneradas || 0}`);
       cerrarModalRecurrenteDirecta();
       await cargarSolicitudesRecurrentes();
       adminHaCambiadoDatos = true;
     } else {
-      mostrarToast(result?.error || 'Error al crear reservas', 'error');
+      showToast('error', result?.error || 'Error al crear reservas');
     }
   } catch (error) {
     console.error('Error al crear recurrente directa:', error);
-    mostrarToast('Error: ' + (error.message || error), 'error');
+    showToast('error', 'Error: ' + (error.message || error));
     btn.disabled = false;
     btn.innerHTML = textoOriginal;
   }
