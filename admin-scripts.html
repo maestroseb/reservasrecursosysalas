@@ -3550,6 +3550,7 @@ function fixMenusFlotantes() {
    ========================================================= */
 
 let filtroEstadoRecurrente = 'pendiente';
+let busquedaRecurrente = '';
 
 /**
  * Carga las solicitudes recurrentes desde el servidor
@@ -3628,19 +3629,110 @@ function filtrarSolicitudesRecurrentes(estado) {
 }
 
 /**
+ * Busca solicitudes por texto
+ */
+function buscarSolicitudesRecurrentes(texto) {
+  busquedaRecurrente = texto.toLowerCase().trim();
+  renderizarSolicitudesRecurrentes();
+}
+
+/**
+ * Aprueba todas las solicitudes pendientes
+ */
+async function aprobarTodasPendientes() {
+  const pendientes = AdminState.solicitudesRecurrentes.filter(s =>
+    (s.estado || '').toLowerCase() === 'pendiente'
+  );
+
+  if (pendientes.length === 0) {
+    mostrarToast('No hay solicitudes pendientes para aprobar', 'info');
+    return;
+  }
+
+  if (!confirm(`¿Aprobar ${pendientes.length} solicitud(es) pendiente(s)?\n\nEsto generará todas las reservas correspondientes.`)) {
+    return;
+  }
+
+  const btn = document.getElementById('btnAprobarTodasPendientes');
+  const textoOriginal = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>Procesando...';
+
+  let aprobadas = 0;
+  let errores = 0;
+  let totalReservas = 0;
+
+  for (const sol of pendientes) {
+    try {
+      const result = await new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)
+          .aprobarSolicitudRecurrente(sol.id_solicitud, 'Aprobación masiva');
+      });
+
+      if (result && result.success) {
+        aprobadas++;
+        totalReservas += result.reservasGeneradas || 0;
+      } else {
+        errores++;
+      }
+    } catch (e) {
+      console.error('Error aprobando:', sol.id_solicitud, e);
+      errores++;
+    }
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = textoOriginal;
+
+  if (errores === 0) {
+    mostrarToast(`${aprobadas} solicitud(es) aprobada(s). ${totalReservas} reservas generadas.`, 'success');
+  } else {
+    mostrarToast(`Aprobadas: ${aprobadas}, Errores: ${errores}. Revisa los detalles.`, 'warning');
+  }
+
+  await cargarSolicitudesRecurrentes();
+  adminHaCambiadoDatos = true;
+}
+
+/**
  * Renderiza las solicitudes recurrentes según el filtro activo
  */
 function renderizarSolicitudesRecurrentes() {
   const container = document.getElementById('listaSolicitudesRecurrentes');
   if (!container) return;
 
-  let solicitudes = AdminState.solicitudesRecurrentes;
+  let solicitudes = [...AdminState.solicitudesRecurrentes];
 
-  // Aplicar filtro
+  // Aplicar filtro de estado
   if (filtroEstadoRecurrente !== 'todas') {
     solicitudes = solicitudes.filter(s =>
       (s.estado || '').toLowerCase() === filtroEstadoRecurrente.toLowerCase()
     );
+  }
+
+  // Aplicar filtro de búsqueda
+  if (busquedaRecurrente) {
+    solicitudes = solicitudes.filter(s => {
+      const texto = [
+        s.nombre_recurso,
+        s.nombre_usuario,
+        s.email_usuario,
+        s.motivo,
+        s.nombre_tramo
+      ].filter(Boolean).join(' ').toLowerCase();
+      return texto.includes(busquedaRecurrente);
+    });
+  }
+
+  // Actualizar visibilidad del botón "Aprobar todas"
+  const btnAprobarTodas = document.getElementById('btnAprobarTodasPendientes');
+  if (btnAprobarTodas) {
+    const pendientesCount = AdminState.solicitudesRecurrentes.filter(s =>
+      (s.estado || '').toLowerCase() === 'pendiente'
+    ).length;
+    btnAprobarTodas.style.display = pendientesCount > 0 ? 'flex' : 'none';
   }
 
   if (solicitudes.length === 0) {
@@ -3653,7 +3745,7 @@ function renderizarSolicitudesRecurrentes() {
     container.innerHTML = `
       <div class="text-center py-8 text-gray-500">
         <iconify-icon icon="mdi:calendar-check" class="text-4xl mb-2"></iconify-icon>
-        <p>${mensajes[filtroEstadoRecurrente] || 'No hay solicitudes'}</p>
+        <p>${busquedaRecurrente ? 'No se encontraron resultados para la búsqueda' : (mensajes[filtroEstadoRecurrente] || 'No hay solicitudes')}</p>
       </div>
     `;
     return;
@@ -3662,48 +3754,71 @@ function renderizarSolicitudesRecurrentes() {
   // Ordenar por fecha (más recientes primero)
   solicitudes.sort((a, b) => new Date(b.fecha_solicitud) - new Date(a.fecha_solicitud));
 
+  // Función para obtener el icono del recurso
+  const getIconoRecurso = (idRecurso) => {
+    const recurso = AdminState.recursos?.find(r => r.id === idRecurso);
+    return recurso?.icono || 'mdi:calendar';
+  };
+
   container.innerHTML = solicitudes.map(sol => {
-    const estadoClasses = {
-      'pendiente': 'bg-amber-100 text-amber-800',
-      'aprobada': 'bg-green-100 text-green-800',
-      'rechazada': 'bg-red-100 text-red-800'
+    const estadoConfig = {
+      'pendiente': { bg: 'bg-amber-100', text: 'text-amber-800', icon: 'mdi:clock-outline' },
+      'aprobada': { bg: 'bg-green-100', text: 'text-green-800', icon: 'mdi:check-circle' },
+      'rechazada': { bg: 'bg-red-100', text: 'text-red-800', icon: 'mdi:close-circle' }
     };
-    const estadoClass = estadoClasses[(sol.estado || '').toLowerCase()] || 'bg-gray-100 text-gray-800';
+    const config = estadoConfig[(sol.estado || '').toLowerCase()] || { bg: 'bg-gray-100', text: 'text-gray-800', icon: 'mdi:help-circle' };
 
-    const diasMap = { 'L': 'Lun', 'M': 'Mar', 'X': 'Mié', 'J': 'Jue', 'V': 'Vie' };
-    const diasFormateados = (sol.dias_semana || '').split(',').map(d => diasMap[d.trim()] || d).join(', ');
+    const diasMap = { 'L': 'L', 'M': 'M', 'X': 'X', 'J': 'J', 'V': 'V' };
+    const diasFormateados = (sol.dias_semana || '').split(',').map(d => diasMap[d.trim()] || d).join('·');
 
-    const fechaInicio = sol.fecha_inicio ? new Date(sol.fecha_inicio).toLocaleDateString('es-ES') : 'No especificada';
-    const fechaFin = sol.fecha_fin ? new Date(sol.fecha_fin).toLocaleDateString('es-ES') : 'No especificada';
+    const fechaInicio = sol.fecha_inicio ? new Date(sol.fecha_inicio).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }) : '-';
+    const fechaFin = sol.fecha_fin ? new Date(sol.fecha_fin).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }) : '-';
+
+    const icono = getIconoRecurso(sol.id_recurso);
+    const esPendiente = (sol.estado || '').toLowerCase() === 'pendiente';
 
     return `
-      <div class="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-        <div class="flex items-start justify-between gap-4">
+      <div class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow">
+        <div class="flex items-center gap-3">
+          <!-- Icono del recurso -->
+          <div class="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+            <iconify-icon icon="${escaparHTML(icono)}" class="text-xl text-blue-600"></iconify-icon>
+          </div>
+
+          <!-- Info principal -->
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-2">
-              <span class="font-semibold text-gray-900">${escaparHTML(sol.nombre_recurso)}</span>
-              <span class="px-2 py-0.5 text-xs font-medium rounded-full ${estadoClass}">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-semibold text-gray-900 truncate">${escaparHTML(sol.nombre_recurso)}</span>
+              <span class="px-1.5 py-0.5 text-xs font-medium rounded ${config.bg} ${config.text} flex items-center gap-0.5">
+                <iconify-icon icon="${config.icon}" class="text-xs"></iconify-icon>
                 ${escaparHTML(sol.estado)}
               </span>
             </div>
-            <div class="text-sm text-gray-600 space-y-1">
-              <p><span class="font-medium">Solicitante:</span> ${escaparHTML(sol.nombre_usuario)} (${escaparHTML(sol.email_usuario)})</p>
-              <p><span class="font-medium">Días:</span> ${escaparHTML(diasFormateados)} · <span class="font-medium">Tramo:</span> ${escaparHTML(sol.nombre_tramo)}</p>
-              <p><span class="font-medium">Período:</span> ${fechaInicio} → ${fechaFin}</p>
-              <p><span class="font-medium">Motivo:</span> ${escaparHTML(sol.motivo || 'No especificado')}</p>
-              ${sol.notas_admin ? `<p class="text-blue-600"><span class="font-medium">Notas admin:</span> ${escaparHTML(sol.notas_admin)}</p>` : ''}
+            <div class="text-xs text-gray-500 flex items-center gap-2 mt-0.5 flex-wrap">
+              <span class="flex items-center gap-1">
+                <iconify-icon icon="mdi:account" class="text-sm"></iconify-icon>
+                ${escaparHTML(sol.nombre_usuario)}
+              </span>
+              <span class="text-gray-300">|</span>
+              <span class="font-medium">${escaparHTML(diasFormateados)}</span>
+              <span class="text-gray-300">|</span>
+              <span>${escaparHTML(sol.nombre_tramo)}</span>
+              <span class="text-gray-300">|</span>
+              <span>${fechaInicio} → ${fechaFin}</span>
             </div>
           </div>
-          <div class="flex flex-col gap-2">
-            ${(sol.estado || '').toLowerCase() === 'pendiente' ? `
+
+          <!-- Botones -->
+          <div class="flex items-center gap-1 flex-shrink-0">
+            ${esPendiente ? `
               <button onclick="abrirModalGestionarSolicitud('${sol.id_solicitud}')"
-                class="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
+                class="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
                 Gestionar
               </button>
             ` : ''}
             <button onclick="verDetalleSolicitud('${sol.id_solicitud}')"
-              class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors">
-              Ver detalle
+              class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Ver detalle">
+              <iconify-icon icon="mdi:information-outline" class="text-lg"></iconify-icon>
             </button>
           </div>
         </div>
@@ -3755,7 +3870,12 @@ async function aprobarSolicitudRecurrente() {
   const idSolicitud = document.getElementById('gestionarSolicitudId').value;
   const notas = document.getElementById('gestionarSolicitudNotas').value.trim();
 
-  const btnAprobar = document.querySelector('#modalGestionarSolicitud button[onclick="aprobarSolicitudRecurrente()"]');
+  const btnAprobar = document.getElementById('btnAprobarSolicitud');
+  if (!btnAprobar) {
+    mostrarToast('Error interno: botón no encontrado', 'error');
+    return;
+  }
+
   const textoOriginal = btnAprobar.innerHTML;
   btnAprobar.disabled = true;
   btnAprobar.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>Aprobando...';
@@ -3763,23 +3883,24 @@ async function aprobarSolicitudRecurrente() {
   try {
     const result = await new Promise((resolve, reject) => {
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((res) => resolve(res || { success: false, error: 'Respuesta vacía del servidor' }))
         .withFailureHandler(reject)
         .aprobarSolicitudRecurrente(idSolicitud, notas);
     });
 
-    if (result.success) {
+    if (result && result.success) {
       mostrarToast(`Solicitud aprobada. Se generaron ${result.reservasGeneradas || 0} reservas.`, 'success');
       cerrarModalGestionarSolicitud();
-      cargarSolicitudesRecurrentes();
+      await cargarSolicitudesRecurrentes();
       adminHaCambiadoDatos = true;
     } else {
-      mostrarToast(result.error || 'Error al aprobar', 'error');
+      mostrarToast(result?.error || 'Error al aprobar', 'error');
+      btnAprobar.disabled = false;
+      btnAprobar.innerHTML = textoOriginal;
     }
   } catch (error) {
     console.error('Error al aprobar:', error);
-    mostrarToast('Error al aprobar la solicitud: ' + error.message, 'error');
-  } finally {
+    mostrarToast('Error al aprobar la solicitud: ' + (error.message || error), 'error');
     btnAprobar.disabled = false;
     btnAprobar.innerHTML = textoOriginal;
   }
@@ -3797,7 +3918,12 @@ async function rechazarSolicitudRecurrente() {
     return;
   }
 
-  const btnRechazar = document.querySelector('#modalGestionarSolicitud button[onclick="rechazarSolicitudRecurrente()"]');
+  const btnRechazar = document.getElementById('btnRechazarSolicitud');
+  if (!btnRechazar) {
+    mostrarToast('Error interno: botón no encontrado', 'error');
+    return;
+  }
+
   const textoOriginal = btnRechazar.innerHTML;
   btnRechazar.disabled = true;
   btnRechazar.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>Rechazando...';
@@ -3805,22 +3931,23 @@ async function rechazarSolicitudRecurrente() {
   try {
     const result = await new Promise((resolve, reject) => {
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((res) => resolve(res || { success: false, error: 'Respuesta vacía del servidor' }))
         .withFailureHandler(reject)
         .rechazarSolicitudRecurrente(idSolicitud, motivo);
     });
 
-    if (result.success) {
+    if (result && result.success) {
       mostrarToast('Solicitud rechazada correctamente', 'success');
       cerrarModalGestionarSolicitud();
-      cargarSolicitudesRecurrentes();
+      await cargarSolicitudesRecurrentes();
     } else {
-      mostrarToast(result.error || 'Error al rechazar', 'error');
+      mostrarToast(result?.error || 'Error al rechazar', 'error');
+      btnRechazar.disabled = false;
+      btnRechazar.innerHTML = textoOriginal;
     }
   } catch (error) {
     console.error('Error al rechazar:', error);
-    mostrarToast('Error al rechazar la solicitud: ' + error.message, 'error');
-  } finally {
+    mostrarToast('Error al rechazar la solicitud: ' + (error.message || error), 'error');
     btnRechazar.disabled = false;
     btnRechazar.innerHTML = textoOriginal;
   }

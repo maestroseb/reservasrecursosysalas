@@ -418,6 +418,23 @@
         </button>
       </div>
 
+      <!-- Buscador y botón aprobar todas -->
+      <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-4">
+        <div class="flex flex-col sm:flex-row gap-3">
+          <div class="relative flex-1">
+            <iconify-icon icon="mdi:magnify" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-lg"></iconify-icon>
+            <input type="text" id="buscadorRecurrentes" placeholder="Buscar por recurso, usuario o motivo..."
+              oninput="buscarSolicitudesRecurrentes(this.value)"
+              class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm">
+          </div>
+          <button onclick="aprobarTodasPendientes()" id="btnAprobarTodasPendientes"
+            class="px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium flex items-center justify-center gap-2 transition-colors whitespace-nowrap">
+            <iconify-icon icon="mdi:check-all" class="text-lg"></iconify-icon>
+            <span>Aprobar todas pendientes</span>
+          </button>
+        </div>
+      </div>
+
       <!-- Filtros -->
       <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-6">
         <div class="flex flex-wrap gap-2">
