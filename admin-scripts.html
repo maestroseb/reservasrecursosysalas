@@ -495,6 +495,10 @@ function renderTablaReservas() {
       return true;
     });
 
+  // Debug: mostrar cuántas reservas recurrentes hay
+  const totalRecurrentes = AdminState.reservas.filter(r => !!(r.ID_Solicitud_Recurrente || r.id_solicitud_recurrente)).length;
+  console.log(`📊 Total reservas: ${AdminState.reservas.length}, Recurrentes: ${totalRecurrentes}, Filtro: ${AdminState.filtroReservasTipo}, Resultado: ${lista.length}`);
+
   // --- C. ORDENACIÓN MULTINIVEL ---
   lista.sort((a, b) => {
     const aFecha = a.Fecha || '';
@@ -3715,38 +3719,40 @@ async function aprobarTodasPendientes() {
 /**
  * Cancela una recurrencia aprobada
  */
-async function cancelarRecurrenciaAprobada(idSolicitud) {
+function cancelarRecurrenciaAprobada(idSolicitud) {
   const solicitud = AdminState.solicitudesRecurrentes.find(s => s.id_solicitud === idSolicitud);
   if (!solicitud) {
     mostrarToast('Solicitud no encontrada', 'error');
     return;
   }
 
-  if (!confirm(`¿Cancelar la recurrencia de "${solicitud.nombre_recurso}"?\n\nEsto cancelará todas las reservas futuras generadas por esta recurrencia.`)) {
-    return;
-  }
+  mostrarConfirmacion(
+    '¿Cancelar recurrencia?',
+    `Se cancelarán todas las reservas futuras de <strong>"${escaparHTML(solicitud.nombre_recurso)}"</strong> para el usuario <strong>${escaparHTML(solicitud.nombre_usuario)}</strong>.`,
+    async () => {
+      mostrarToast('Cancelando recurrencia...', 'info');
 
-  mostrarToast('Cancelando recurrencia...', 'info');
+      try {
+        const result = await new Promise((resolve, reject) => {
+          google.script.run
+            .withSuccessHandler((res) => resolve(res || { success: false, error: 'Respuesta vacía' }))
+            .withFailureHandler(reject)
+            .cancelarRecurrenciaAprobada(idSolicitud);
+        });
 
-  try {
-    const result = await new Promise((resolve, reject) => {
-      google.script.run
-        .withSuccessHandler((res) => resolve(res || { success: false, error: 'Respuesta vacía' }))
-        .withFailureHandler(reject)
-        .cancelarRecurrenciaAprobada(idSolicitud);
-    });
-
-    if (result && result.success) {
-      mostrarToast(result.message || 'Recurrencia cancelada', 'success');
-      await cargarSolicitudesRecurrentes();
-      adminHaCambiadoDatos = true;
-    } else {
-      mostrarToast(result?.error || 'Error al cancelar', 'error');
+        if (result && result.success) {
+          mostrarToast(result.message || 'Recurrencia cancelada', 'success');
+          await cargarSolicitudesRecurrentes();
+          adminHaCambiadoDatos = true;
+        } else {
+          mostrarToast(result?.error || 'Error al cancelar', 'error');
+        }
+      } catch (error) {
+        console.error('Error cancelando recurrencia:', error);
+        mostrarToast('Error: ' + (error.message || error), 'error');
+      }
     }
-  } catch (error) {
-    console.error('Error cancelando recurrencia:', error);
-    mostrarToast('Error: ' + (error.message || error), 'error');
-  }
+  );
 }
 
 /**
@@ -4107,14 +4113,17 @@ function abrirModalRecurrenteDirecta() {
     }
   });
 
-  // Poblar selector de usuarios
+  // Poblar selector de usuarios (campos: Nombre, Email, Activo, Admin)
   const selectUsuario = document.getElementById('recDirectaUsuario');
   selectUsuario.innerHTML = '<option value="">Selecciona un usuario</option>';
-  const usuariosActivos = (AdminState.usuarios || []).filter(u =>
-    u.activo === true || u.activo === 'TRUE' || u.activo === 'true'
-  );
+  const usuariosActivos = (AdminState.usuarios || []).filter(u => {
+    const activo = u.Activo ?? u.activo;
+    return activo === true || activo === 'TRUE' || activo === 'true' || activo === 'Sí' || activo === 'Si';
+  });
   usuariosActivos.forEach(u => {
-    selectUsuario.innerHTML += `<option value="${u.email_usuario}">${escaparHTML(u.nombre_completo || u.email_usuario)}</option>`;
+    const email = u.Email || u.email_usuario || u.email || '';
+    const nombre = u.Nombre || u.nombre_completo || u.nombre || email;
+    selectUsuario.innerHTML += `<option value="${escaparHTML(email)}">${escaparHTML(nombre)} (${escaparHTML(email)})</option>`;
   });
 
   // Generar matriz del calendario

@@ -1170,7 +1170,7 @@
             <iconify-icon icon="mdi:calendar-end"></iconify-icon>
             Hasta cuándo * <span class="text-xs font-normal text-gray-400">(desde hoy)</span>
           </label>
-          <div class="flex gap-2 flex-wrap mb-2">
+          <div class="flex items-center gap-2 flex-wrap">
             <label class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 cursor-pointer transition-all text-sm">
               <input type="radio" name="recDirectaTipoFin" value="finCurso" checked class="accent-blue-600">
               <span class="font-medium">Fin de curso</span>
@@ -1179,10 +1179,10 @@
               <input type="radio" name="recDirectaTipoFin" value="fecha" class="accent-blue-600">
               <span class="font-medium">Fecha concreta</span>
             </label>
-          </div>
-          <div id="recDirectaFechaFinContainer" class="hidden">
-            <input type="date" id="recDirectaFechaFin"
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm">
+            <div id="recDirectaFechaFinContainer" class="hidden">
+              <input type="date" id="recDirectaFechaFin"
+                class="px-3 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm">
+            </div>
           </div>
         </div>
 

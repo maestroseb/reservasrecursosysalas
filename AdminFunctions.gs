@@ -28,6 +28,13 @@ function getAdminData() {
       return { success: false, error: "No tienes permisos de administrador." };
     }
 
+    // Ejecutar migración de ID_Solicitud_Recurrente si es necesario
+    try {
+      migrarIdSolicitudRecurrente();
+    } catch (migErr) {
+      Logger.log('⚠️ Error en migración (no crítico): ' + migErr.message);
+    }
+
     const ss = getDB();
 
     // 1. RECURSOS
@@ -1286,6 +1293,85 @@ function saveBatchConfig(configList) {
     return { success: true };
     
   } catch (e) { return { success: false, error: e.toString() }; }
+}
+
+/* ============================================
+   MIGRACIÓN: ID_Solicitud_Recurrente
+   ============================================ */
+
+/**
+ * Migra las reservas recurrentes existentes para añadir el ID_Solicitud_Recurrente
+ * basándose en el campo Notas que contiene "Reserva recurrente: [ID]"
+ */
+function migrarIdSolicitudRecurrente() {
+  try {
+    const ss = getDB();
+    const sheet = ss.getSheetByName(SHEETS.RESERVAS);
+    if (!sheet || sheet.getLastRow() < 2) {
+      return { success: true, message: 'No hay reservas que migrar', migradas: 0 };
+    }
+
+    // Obtener headers
+    const lastCol = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    const headerMap = {};
+    headers.forEach((h, i) => {
+      headerMap[h.toString().toLowerCase().trim()] = i;
+    });
+
+    // Verificar si existe la columna ID_Solicitud_Recurrente
+    let colIdSolicitud = headerMap['id_solicitud_recurrente'];
+    if (colIdSolicitud === undefined) {
+      // Crear la columna
+      const nuevaCol = lastCol + 1;
+      sheet.getRange(1, nuevaCol).setValue('ID_Solicitud_Recurrente');
+      colIdSolicitud = nuevaCol - 1; // índice 0-based
+      Logger.log('✅ Columna ID_Solicitud_Recurrente creada');
+    }
+
+    const colNotas = headerMap['notas'];
+    if (colNotas === undefined) {
+      return { success: false, error: 'No se encontró la columna Notas' };
+    }
+
+    // Leer todos los datos
+    const numFilas = sheet.getLastRow() - 1;
+    const data = sheet.getRange(2, 1, numFilas, sheet.getLastColumn()).getValues();
+
+    let migradas = 0;
+    const updates = [];
+
+    data.forEach((row, idx) => {
+      const notas = String(row[colNotas] || '');
+      const idSolicitudActual = String(row[colIdSolicitud] || '').trim();
+
+      // Si ya tiene valor, saltar
+      if (idSolicitudActual) return;
+
+      // Buscar patrón "Reserva recurrente: XXXXX"
+      const match = notas.match(/Reserva recurrente:\s*([A-Za-z0-9_-]+)/i);
+      if (match && match[1]) {
+        const idSolicitud = match[1].trim();
+        updates.push({
+          fila: idx + 2, // +2 porque empezamos en fila 2
+          valor: idSolicitud
+        });
+        migradas++;
+      }
+    });
+
+    // Aplicar actualizaciones
+    updates.forEach(u => {
+      sheet.getRange(u.fila, colIdSolicitud + 1).setValue(u.valor);
+    });
+
+    Logger.log(`✅ Migración completada: ${migradas} reservas actualizadas`);
+    return { success: true, message: `Migración completada`, migradas: migradas };
+
+  } catch (error) {
+    Logger.log('❌ Error en migración: ' + error.message);
+    return { success: false, error: error.message };
+  }
 }
 
 /* ============================================

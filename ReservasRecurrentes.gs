@@ -589,6 +589,17 @@ function generarReservasDesdeRecurrente(solicitud) {
     const ss = getDB();
     const sheetReservas = ss.getSheetByName(SHEETS.RESERVAS);
 
+    // --- VERIFICAR Y CREAR COLUMNA ID_Solicitud_Recurrente SI NO EXISTE ---
+    const headersActuales = sheetReservas.getRange(1, 1, 1, sheetReservas.getLastColumn()).getValues()[0];
+    const headersLower = headersActuales.map(h => h.toString().toLowerCase().trim());
+
+    if (!headersLower.includes('id_solicitud_recurrente')) {
+      // La columna no existe, crearla
+      const nuevaCol = sheetReservas.getLastColumn() + 1;
+      sheetReservas.getRange(1, nuevaCol).setValue('ID_Solicitud_Recurrente');
+      Logger.log('✅ Columna ID_Solicitud_Recurrente creada en posición ' + nuevaCol);
+    }
+
     // Mapeo de días: L=1, M=2, X=3, J=4, V=5, S=6, D=0
     const mapaDiasNum = { 'L': 1, 'M': 2, 'X': 3, 'J': 4, 'V': 5, 'S': 6, 'D': 0 };
     const mapaDiasLetra = { 1: 'L', 2: 'M', 3: 'X', 4: 'J', 5: 'V', 6: 'S', 0: 'D' };
