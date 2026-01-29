@@ -474,6 +474,105 @@ function rechazarSolicitudRecurrente(idSolicitud, motivoRechazo) {
   }
 }
 
+/**
+ * Cancela una recurrencia aprobada (admin)
+ * Cambia el estado a Cancelada y cancela todas las reservas futuras
+ * @param {string} idSolicitud - ID de la solicitud
+ */
+function cancelarRecurrenciaAprobada(idSolicitud) {
+  try {
+    Logger.log('🚫 Cancelando recurrencia aprobada: ' + idSolicitud);
+
+    const adminEmail = Session.getActiveUser().getEmail();
+    if (!checkIfAdmin(adminEmail)) {
+      throw new Error('No tienes permisos para esta acción');
+    }
+
+    const sheet = getOrCreateSheetSolicitudesRecurrentes();
+    const data = sheet.getDataRange().getValues();
+
+    // Buscar la solicitud
+    let filaIndex = -1;
+    let solicitud = null;
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][COLS_SOLICITUDES.ID_SOLICITUD] === idSolicitud) {
+        filaIndex = i + 1;
+        solicitud = {
+          email_usuario: data[i][COLS_SOLICITUDES.EMAIL_USUARIO],
+          nombre_usuario: data[i][COLS_SOLICITUDES.NOMBRE_USUARIO],
+          nombre_recurso: data[i][COLS_SOLICITUDES.NOMBRE_RECURSO],
+          estado: data[i][COLS_SOLICITUDES.ESTADO]
+        };
+        break;
+      }
+    }
+
+    if (!solicitud) throw new Error('Solicitud no encontrada');
+    if (solicitud.estado !== 'Aprobada') throw new Error('Solo se pueden cancelar solicitudes aprobadas');
+
+    // Actualizar estado a Cancelada
+    sheet.getRange(filaIndex, COLS_SOLICITUDES.ESTADO + 1).setValue('Cancelada');
+    sheet.getRange(filaIndex, COLS_SOLICITUDES.PROCESADO_POR + 1).setValue(adminEmail);
+    sheet.getRange(filaIndex, COLS_SOLICITUDES.FECHA_PROCESADO + 1).setValue(new Date());
+    sheet.getRange(filaIndex, COLS_SOLICITUDES.NOTAS_ADMIN + 1).setValue('Cancelada por administrador');
+
+    // Cancelar reservas futuras
+    const resultCancelar = cancelarGrupoRecurrente(idSolicitud);
+
+    // Purgar caché
+    if (typeof purgarCache === 'function') purgarCache();
+
+    Logger.log(`✅ Recurrencia cancelada: ${resultCancelar.canceladas || 0} reservas eliminadas`);
+
+    // Notificar al usuario
+    try {
+      enviarEmailCancelacionRecurrente(solicitud, resultCancelar.canceladas || 0);
+    } catch (e) {
+      Logger.log('⚠️ Error enviando email de cancelación: ' + e.message);
+    }
+
+    return {
+      success: true,
+      message: `Recurrencia cancelada. ${resultCancelar.canceladas || 0} reservas futuras eliminadas.`,
+      reservasCanceladas: resultCancelar.canceladas || 0
+    };
+
+  } catch (error) {
+    Logger.log('❌ Error cancelando recurrencia: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Envía email notificando la cancelación de una recurrencia
+ */
+function enviarEmailCancelacionRecurrente(solicitud, numReservas) {
+  const config = getConfig();
+  const tituloApp = config.TITULO_APP || 'Sistema de Reservas';
+
+  const htmlBody = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #dc2626;">Recurrencia Cancelada</h2>
+      <p>Hola ${solicitud.nombre_usuario},</p>
+      <p>Tu reserva recurrente ha sido <strong>cancelada</strong> por un administrador:</p>
+      <div style="background: #fef2f2; padding: 15px; border-radius: 8px; margin: 15px 0;">
+        <p><strong>Recurso:</strong> ${solicitud.nombre_recurso}</p>
+        <p><strong>Reservas canceladas:</strong> ${numReservas}</p>
+      </div>
+      <p>Si tienes alguna duda, contacta con el administrador.</p>
+      <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+      <p style="color: #6b7280; font-size: 12px;">${tituloApp}</p>
+    </div>
+  `;
+
+  MailApp.sendEmail({
+    to: solicitud.email_usuario,
+    subject: `${tituloApp} - Recurrencia Cancelada`,
+    htmlBody: htmlBody
+  });
+}
+
 /* ============================================
    GENERAR RESERVAS DESDE SOLICITUD APROBADA
    ============================================ */

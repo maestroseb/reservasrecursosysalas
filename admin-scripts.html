@@ -3697,6 +3697,43 @@ async function aprobarTodasPendientes() {
 }
 
 /**
+ * Cancela una recurrencia aprobada
+ */
+async function cancelarRecurrenciaAprobada(idSolicitud) {
+  const solicitud = AdminState.solicitudesRecurrentes.find(s => s.id_solicitud === idSolicitud);
+  if (!solicitud) {
+    mostrarToast('Solicitud no encontrada', 'error');
+    return;
+  }
+
+  if (!confirm(`¿Cancelar la recurrencia de "${solicitud.nombre_recurso}"?\n\nEsto cancelará todas las reservas futuras generadas por esta recurrencia.`)) {
+    return;
+  }
+
+  mostrarToast('Cancelando recurrencia...', 'info');
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler((res) => resolve(res || { success: false, error: 'Respuesta vacía' }))
+        .withFailureHandler(reject)
+        .cancelarRecurrenciaAprobada(idSolicitud);
+    });
+
+    if (result && result.success) {
+      mostrarToast(result.message || 'Recurrencia cancelada', 'success');
+      await cargarSolicitudesRecurrentes();
+      adminHaCambiadoDatos = true;
+    } else {
+      mostrarToast(result?.error || 'Error al cancelar', 'error');
+    }
+  } catch (error) {
+    console.error('Error cancelando recurrencia:', error);
+    mostrarToast('Error: ' + (error.message || error), 'error');
+  }
+}
+
+/**
  * Renderiza las solicitudes recurrentes según el filtro activo
  */
 function renderizarSolicitudesRecurrentes() {
@@ -3756,8 +3793,8 @@ function renderizarSolicitudesRecurrentes() {
 
   // Función para obtener el icono del recurso
   const getIconoRecurso = (idRecurso) => {
-    const recurso = AdminState.recursos?.find(r => r.id === idRecurso);
-    return recurso?.icono || 'mdi:calendar';
+    const recurso = AdminState.recursos?.find(r => r.id_recurso === idRecurso);
+    return recurso?.icono || 'mdi:cube-outline';
   };
 
   container.innerHTML = solicitudes.map(sol => {
@@ -3814,6 +3851,12 @@ function renderizarSolicitudesRecurrentes() {
               <button onclick="abrirModalGestionarSolicitud('${sol.id_solicitud}')"
                 class="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
                 Gestionar
+              </button>
+            ` : ''}
+            ${(sol.estado || '').toLowerCase() === 'aprobada' ? `
+              <button onclick="cancelarRecurrenciaAprobada('${sol.id_solicitud}')"
+                class="px-3 py-1.5 text-xs font-medium text-red-600 hover:text-white hover:bg-red-600 border border-red-200 rounded-lg transition-colors">
+                Cancelar
               </button>
             ` : ''}
             <button onclick="verDetalleSolicitud('${sol.id_solicitud}')"
