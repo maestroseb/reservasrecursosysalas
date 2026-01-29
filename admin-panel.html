@@ -44,7 +44,7 @@
       <button class="admin-subtab relative flex-1 whitespace-nowrap flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 outline-none focus:outline-none focus:ring-0 text-gray-500 hover:text-gray-700 hover:bg-gray-200/50" data-section="recurrentes">
       <iconify-icon icon="mdi:calendar-sync" class="text-lg"></iconify-icon>
       <span>Recurrentes</span>
-      <span id="badgeSolicitudesPendientes" class="hidden absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center"></span>
+      <span id="badgeSolicitudesRecurrentes" class="hidden absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center"></span>
     </button>
 
       <button class="admin-subtab flex-1 whitespace-nowrap flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 outline-none focus:outline-none focus:ring-0 text-gray-500 hover:text-gray-700 hover:bg-gray-200/50" data-section="config">
@@ -407,12 +407,12 @@
       <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <div>
           <h2 class="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            <iconify-icon icon="mdi:calendar-sync" class="text-amber-600"></iconify-icon>
+            <iconify-icon icon="mdi:calendar-sync" class="text-blue-600"></iconify-icon>
             Reservas Recurrentes
           </h2>
           <p class="text-sm text-gray-500 mt-1">Gestiona solicitudes de uso recurrente de recursos</p>
         </div>
-        <button onclick="abrirModalCrearRecurrenteDirecta()" class="w-full sm:w-auto bg-amber-600 hover:bg-amber-700 text-white px-5 py-2.5 rounded-xl shadow-lg shadow-amber-600/20 transition-all transform active:scale-95 flex items-center justify-center gap-2 font-medium">
+        <button onclick="abrirModalRecurrenteDirecta()" class="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl shadow-lg shadow-blue-600/20 transition-all transform active:scale-95 flex items-center justify-center gap-2 font-medium">
           <iconify-icon icon="mdi:plus" class="text-xl"></iconify-icon>
           <span>Nueva Recurrente</span>
         </button>
@@ -421,18 +421,22 @@
       <!-- Filtros -->
       <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-6">
         <div class="flex flex-wrap gap-2">
-          <button onclick="filtrarSolicitudesRecurrentes('todas')" class="filtro-recurrente active px-4 py-2 rounded-lg text-sm font-medium bg-gray-900 text-white">
+          <button onclick="filtrarSolicitudesRecurrentes('todas')" data-filtro-recurrente="todas"
+            class="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700">
             Todas
           </button>
-          <button onclick="filtrarSolicitudesRecurrentes('Pendiente')" class="filtro-recurrente px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-amber-100 hover:text-amber-700">
+          <button onclick="filtrarSolicitudesRecurrentes('pendiente')" data-filtro-recurrente="pendiente"
+            class="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white">
             <iconify-icon icon="mdi:clock-outline" class="mr-1"></iconify-icon>
             Pendientes
           </button>
-          <button onclick="filtrarSolicitudesRecurrentes('Aprobada')" class="filtro-recurrente px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-green-100 hover:text-green-700">
+          <button onclick="filtrarSolicitudesRecurrentes('aprobada')" data-filtro-recurrente="aprobada"
+            class="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700">
             <iconify-icon icon="mdi:check-circle-outline" class="mr-1"></iconify-icon>
             Aprobadas
           </button>
-          <button onclick="filtrarSolicitudesRecurrentes('Rechazada')" class="filtro-recurrente px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-red-100 hover:text-red-700">
+          <button onclick="filtrarSolicitudesRecurrentes('rechazada')" data-filtro-recurrente="rechazada"
+            class="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700">
             <iconify-icon icon="mdi:close-circle-outline" class="mr-1"></iconify-icon>
             Rechazadas
           </button>
@@ -1024,177 +1028,201 @@
 </dialog>
 
 <!-- Modal: Crear Reserva Recurrente Directa (Admin) -->
-<dialog id="modalRecurrenteDirecta" class="p-0 border-0 w-full max-w-xl shadow-xl rounded-xl bg-white">
-  <div class="bg-gradient-to-b from-amber-50 to-white">
+<div id="modalRecurrenteDirecta" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 hidden">
+  <div class="bg-white rounded-xl shadow-xl max-w-xl w-full max-h-[90vh] overflow-y-auto">
+    <div class="bg-gradient-to-b from-blue-50 to-white rounded-xl">
 
-    <!-- Header -->
-    <div class="flex items-center justify-between p-5 border-b border-gray-100">
-      <div class="flex items-center gap-3">
-        <div class="p-2 rounded-xl bg-amber-100 text-amber-600">
-          <iconify-icon icon="mdi:calendar-plus" class="text-2xl"></iconify-icon>
+      <!-- Header -->
+      <div class="flex items-center justify-between p-5 border-b border-gray-100">
+        <div class="flex items-center gap-3">
+          <div class="p-2 rounded-xl bg-blue-100 text-blue-600">
+            <iconify-icon icon="mdi:calendar-plus" class="text-2xl"></iconify-icon>
+          </div>
+          <h3 class="text-xl font-bold text-gray-900">Nueva Reserva Recurrente</h3>
         </div>
-        <h3 class="text-xl font-bold text-gray-900">Nueva Reserva Recurrente</h3>
+        <button onclick="cerrarModalRecurrenteDirecta()" class="text-gray-400 hover:text-gray-600 text-2xl focus:outline-none">
+          <iconify-icon icon="mdi:close"></iconify-icon>
+        </button>
       </div>
-      <button id="closeModalRecurrenteDirecta" class="text-gray-400 hover:text-gray-600 text-2xl focus:outline-none">
-        <iconify-icon icon="mdi:close"></iconify-icon>
-      </button>
+
+      <!-- Form -->
+      <div class="p-6 space-y-5">
+
+        <!-- Recurso -->
+        <div>
+          <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+            <iconify-icon icon="mdi:cube-outline"></iconify-icon>
+            Recurso *
+          </label>
+          <select id="recDirectaRecurso"
+            class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+            <option value="">-- Selecciona un recurso --</option>
+          </select>
+        </div>
+
+        <!-- Usuario -->
+        <div>
+          <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+            <iconify-icon icon="mdi:account-outline"></iconify-icon>
+            Usuario *
+          </label>
+          <select id="recDirectaUsuario"
+            class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+            <option value="">-- Selecciona un usuario --</option>
+          </select>
+        </div>
+
+        <!-- Días de la semana -->
+        <div>
+          <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-3">
+            <iconify-icon icon="mdi:calendar-week"></iconify-icon>
+            Días de la semana *
+          </label>
+          <div class="flex flex-wrap gap-2">
+            <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 cursor-pointer transition-all">
+              <input type="checkbox" name="recDirectaDias" value="L" class="accent-blue-600">
+              <span class="text-sm font-medium">L</span>
+            </label>
+            <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 cursor-pointer transition-all">
+              <input type="checkbox" name="recDirectaDias" value="M" class="accent-blue-600">
+              <span class="text-sm font-medium">M</span>
+            </label>
+            <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 cursor-pointer transition-all">
+              <input type="checkbox" name="recDirectaDias" value="X" class="accent-blue-600">
+              <span class="text-sm font-medium">X</span>
+            </label>
+            <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 cursor-pointer transition-all">
+              <input type="checkbox" name="recDirectaDias" value="J" class="accent-blue-600">
+              <span class="text-sm font-medium">J</span>
+            </label>
+            <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 cursor-pointer transition-all">
+              <input type="checkbox" name="recDirectaDias" value="V" class="accent-blue-600">
+              <span class="text-sm font-medium">V</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Tramo -->
+        <div>
+          <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+            <iconify-icon icon="mdi:clock-outline"></iconify-icon>
+            Tramo horario *
+          </label>
+          <select id="recDirectaTramo"
+            class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+            <option value="">-- Selecciona un tramo --</option>
+          </select>
+        </div>
+
+        <!-- Fechas -->
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+              <iconify-icon icon="mdi:calendar-start"></iconify-icon>
+              Desde fecha
+            </label>
+            <input type="date" id="recDirectaFechaInicio"
+              class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+          </div>
+          <div>
+            <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+              <iconify-icon icon="mdi:calendar-end"></iconify-icon>
+              Hasta fecha *
+            </label>
+            <input type="date" id="recDirectaFechaFin"
+              class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+          </div>
+        </div>
+
+        <!-- Notas -->
+        <div>
+          <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+            <iconify-icon icon="mdi:message-text-outline"></iconify-icon>
+            Notas (opcional)
+          </label>
+          <textarea id="recDirectaNotas" rows="2" placeholder="Ej: Clases de informática"
+            class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none"></textarea>
+        </div>
+
+        <!-- Botones -->
+        <div class="flex gap-3 pt-4 border-t border-gray-100">
+          <button type="button" onclick="cerrarModalRecurrenteDirecta()" class="flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium">
+            Cancelar
+          </button>
+          <button type="button" onclick="guardarRecurrenteDirecta()" class="flex-[2] px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2">
+            <iconify-icon icon="mdi:check"></iconify-icon>
+            Crear Reservas
+          </button>
+        </div>
+
+      </div>
+
     </div>
-
-    <!-- Form -->
-    <form id="formRecurrenteDirecta" class="p-6 space-y-5">
-
-      <!-- Recurso -->
-      <div>
-        <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
-          <iconify-icon icon="mdi:cube-outline"></iconify-icon>
-          Recurso *
-        </label>
-        <select id="recDirectaRecurso" required
-          class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none">
-          <option value="">-- Selecciona un recurso --</option>
-        </select>
-      </div>
-
-      <!-- Usuario (opcional) -->
-      <div>
-        <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
-          <iconify-icon icon="mdi:account-outline"></iconify-icon>
-          Usuario (opcional)
-        </label>
-        <select id="recDirectaUsuario"
-          class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none">
-          <option value="">-- Administrador --</option>
-        </select>
-        <p class="text-xs text-gray-400 mt-1">Deja vacío para asignarla a tu usuario</p>
-      </div>
-
-      <!-- Días de la semana -->
-      <div>
-        <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-3">
-          <iconify-icon icon="mdi:calendar-week"></iconify-icon>
-          Días de la semana *
-        </label>
-        <div class="flex flex-wrap gap-2">
-          <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 hover:border-amber-300 hover:bg-amber-50 cursor-pointer transition-all">
-            <input type="checkbox" name="recDirectaDias" value="L" class="accent-amber-600">
-            <span class="text-sm font-medium">L</span>
-          </label>
-          <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 hover:border-amber-300 hover:bg-amber-50 cursor-pointer transition-all">
-            <input type="checkbox" name="recDirectaDias" value="M" class="accent-amber-600">
-            <span class="text-sm font-medium">M</span>
-          </label>
-          <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 hover:border-amber-300 hover:bg-amber-50 cursor-pointer transition-all">
-            <input type="checkbox" name="recDirectaDias" value="X" class="accent-amber-600">
-            <span class="text-sm font-medium">X</span>
-          </label>
-          <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 hover:border-amber-300 hover:bg-amber-50 cursor-pointer transition-all">
-            <input type="checkbox" name="recDirectaDias" value="J" class="accent-amber-600">
-            <span class="text-sm font-medium">J</span>
-          </label>
-          <label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 hover:border-amber-300 hover:bg-amber-50 cursor-pointer transition-all">
-            <input type="checkbox" name="recDirectaDias" value="V" class="accent-amber-600">
-            <span class="text-sm font-medium">V</span>
-          </label>
-        </div>
-      </div>
-
-      <!-- Tramo -->
-      <div>
-        <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
-          <iconify-icon icon="mdi:clock-outline"></iconify-icon>
-          Tramo horario *
-        </label>
-        <select id="recDirectaTramo" required
-          class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none">
-          <option value="">-- Selecciona un tramo --</option>
-        </select>
-      </div>
-
-      <!-- Fecha fin -->
-      <div>
-        <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
-          <iconify-icon icon="mdi:calendar-end"></iconify-icon>
-          Hasta fecha *
-        </label>
-        <input type="date" id="recDirectaFechaFin" required
-          class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none">
-      </div>
-
-      <!-- Motivo -->
-      <div>
-        <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
-          <iconify-icon icon="mdi:message-text-outline"></iconify-icon>
-          Motivo (opcional)
-        </label>
-        <input type="text" id="recDirectaMotivo" placeholder="Ej: Clases de informática"
-          class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none">
-      </div>
-
-      <!-- Botones -->
-      <div class="flex gap-3 pt-4 border-t border-gray-100">
-        <button type="button" id="cancelModalRecurrenteDirecta" class="flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium">
-          Cancelar
-        </button>
-        <button type="submit" id="btnCrearRecurrenteDirecta" class="flex-[2] px-4 py-2.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors font-medium flex items-center justify-center gap-2">
-          <iconify-icon icon="mdi:check"></iconify-icon>
-          Crear Reservas
-        </button>
-      </div>
-
-    </form>
-
   </div>
-</dialog>
+</div>
 
 <!-- Modal: Aprobar/Rechazar Solicitud -->
-<dialog id="modalGestionarSolicitud" class="p-0 border-0 w-full max-w-lg shadow-xl rounded-xl bg-white">
-  <div class="bg-gradient-to-b from-gray-50 to-white">
+<div id="modalGestionarSolicitud" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 hidden">
+  <div class="bg-white rounded-xl shadow-xl max-w-lg w-full">
+    <div class="bg-gradient-to-b from-gray-50 to-white rounded-xl">
+      <input type="hidden" id="gestionarSolicitudId" value="">
 
-    <div class="flex items-center justify-between p-5 border-b border-gray-100">
-      <div class="flex items-center gap-3">
-        <div id="iconoGestionSolicitud" class="p-2 rounded-xl bg-amber-100 text-amber-600">
-          <iconify-icon icon="mdi:clipboard-check-outline" class="text-2xl"></iconify-icon>
+      <div class="flex items-center justify-between p-5 border-b border-gray-100">
+        <div class="flex items-center gap-3">
+          <div class="p-2 rounded-xl bg-blue-100 text-blue-600">
+            <iconify-icon icon="mdi:clipboard-check-outline" class="text-2xl"></iconify-icon>
+          </div>
+          <h3 class="text-xl font-bold text-gray-900">Gestionar Solicitud</h3>
         </div>
-        <h3 id="tituloGestionSolicitud" class="text-xl font-bold text-gray-900">Gestionar Solicitud</h3>
-      </div>
-      <button onclick="cerrarModalGestionarSolicitud()" class="text-gray-400 hover:text-gray-600 text-2xl focus:outline-none">
-        <iconify-icon icon="mdi:close"></iconify-icon>
-      </button>
-    </div>
-
-    <div class="p-6">
-      <!-- Detalles de la solicitud -->
-      <div id="detallesSolicitud" class="bg-gray-50 rounded-lg p-4 mb-5 space-y-2 text-sm">
-        <!-- Se llena dinámicamente -->
-      </div>
-
-      <!-- Campo de notas -->
-      <div class="mb-5">
-        <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
-          <iconify-icon icon="mdi:message-text-outline"></iconify-icon>
-          <span id="labelNotasSolicitud">Notas (opcional)</span>
-        </label>
-        <textarea id="notasSolicitud" rows="3" placeholder="Añade un comentario..."
-          class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none resize-none"></textarea>
-      </div>
-
-      <!-- Botones -->
-      <div class="flex gap-3">
-        <button onclick="rechazarSolicitudDesdeModal()" id="btnRechazarSolicitud"
-          class="flex-1 px-4 py-2.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors font-medium flex items-center justify-center gap-2">
+        <button onclick="cerrarModalGestionarSolicitud()" class="text-gray-400 hover:text-gray-600 text-2xl focus:outline-none">
           <iconify-icon icon="mdi:close"></iconify-icon>
-          Rechazar
-        </button>
-        <button onclick="aprobarSolicitudDesdeModal()" id="btnAprobarSolicitud"
-          class="flex-1 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center justify-center gap-2">
-          <iconify-icon icon="mdi:check"></iconify-icon>
-          Aprobar
         </button>
       </div>
-    </div>
 
+      <div class="p-6">
+        <!-- Detalles de la solicitud -->
+        <div id="gestionarSolicitudInfo" class="bg-gray-50 rounded-lg p-4 mb-5">
+          <!-- Se llena dinámicamente -->
+        </div>
+
+        <!-- Campo de notas (para aprobar) -->
+        <div class="mb-4">
+          <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+            <iconify-icon icon="mdi:message-text-outline"></iconify-icon>
+            Notas para el usuario (opcional al aprobar)
+          </label>
+          <textarea id="gestionarSolicitudNotas" rows="2" placeholder="Añade un comentario opcional..."
+            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none"></textarea>
+        </div>
+
+        <!-- Campo de motivo (para rechazar) -->
+        <div class="mb-5">
+          <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+            <iconify-icon icon="mdi:alert-circle-outline"></iconify-icon>
+            Motivo del rechazo (obligatorio si rechazas)
+          </label>
+          <textarea id="gestionarSolicitudMotivo" rows="2" placeholder="Indica el motivo del rechazo..."
+            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent outline-none resize-none"></textarea>
+        </div>
+
+        <!-- Botones -->
+        <div class="flex gap-3">
+          <button onclick="rechazarSolicitudRecurrente()" id="btnRechazarSolicitud"
+            class="flex-1 px-4 py-2.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors font-medium flex items-center justify-center gap-2">
+            <iconify-icon icon="mdi:close"></iconify-icon>
+            Rechazar
+          </button>
+          <button onclick="aprobarSolicitudRecurrente()" id="btnAprobarSolicitud"
+            class="flex-1 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center justify-center gap-2">
+            <iconify-icon icon="mdi:check"></iconify-icon>
+            Aprobar
+          </button>
+        </div>
+      </div>
+
+    </div>
   </div>
-</dialog>
+</div>
 
 <div id="modalConfirmacion"
   class="fixed inset-0 bg-gray-900/60 z-[9999] hidden flex items-center justify-center backdrop-blur-sm transition-all duration-300">

@@ -552,6 +552,38 @@
     </div>
   </div>
 
+  <!-- MODAL: Confirmación de Cancelación de Grupo Recurrente -->
+  <div id="modalConfirmacionCancelacionGrupo"
+    class="fixed inset-0 bg-gray-900/60 z-[200] hidden flex items-center justify-center backdrop-blur-sm transition-all duration-300">
+    <div
+      class="bg-white rounded-2xl shadow-2xl max-w-sm w-full mx-4 overflow-hidden transform transition-all scale-100 border border-gray-100 animate-in zoom-in-95 fade-in duration-200">
+
+      <div class="p-6 text-center">
+        <div
+          class="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-purple-50 mb-5 ring-4 ring-purple-50/50">
+          <iconify-icon icon="mdi:calendar-remove" class="text-purple-600 text-3xl"></iconify-icon>
+        </div>
+
+        <h3 class="text-xl font-bold text-gray-900 mb-2">¿Cancelar todas las reservas?</h3>
+        <p class="text-sm text-gray-500 mb-6 leading-relaxed">
+          Esto cancelará <strong>TODAS</strong> las reservas futuras de este grupo recurrente. Esta acción no se puede deshacer.
+        </p>
+
+        <div class="flex gap-3 justify-center">
+          <button onclick="cerrarConfirmacionCancelacionGrupo()"
+                class="flex-1 px-4 py-2.5 bg-white border-2 border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-semibold text-sm transition-colors active:scale-95">
+          No, mantener
+        </button>
+          <button onclick="confirmarCancelacionGrupo()"
+                class="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl hover:bg-red-700 font-semibold text-sm shadow-lg shadow-red-600/20 transition-all transform hover:scale-[1.02] active:scale-95">
+          Sí, cancelar todas
+        </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <!-- ============================================
      MODAL: REPORTAR INCIDENCIA (OPTIMIZADO)
      ============================================ -->
