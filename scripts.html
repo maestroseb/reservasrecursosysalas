@@ -1746,6 +1746,11 @@ function showInfo(message) {
    SISTEMA DE RESERVAS RECURRENTES - FRONTEND USUARIO
    ========================================================= */
 
+// Estado para las selecciones del calendario recurrente
+let seleccionesRecurrentes = new Set(); // Formato: "idTramo-dia" ej: "T001-L"
+const DIAS_RECURRENTES = ['L', 'M', 'X', 'J', 'V'];
+const NOMBRES_DIAS_RECURRENTES = { 'L': 'Lun', 'M': 'Mar', 'X': 'Mié', 'J': 'Jue', 'V': 'Vie' };
+
 /**
  * Abrir modal de solicitud de reserva recurrente
  */
@@ -1766,17 +1771,19 @@ function abrirModalSolicitudRecurrente() {
     nombreRecurso.textContent = recurso.nombre || 'Recurso';
   }
 
-  // Poblar selector de tramos
-  poblarSelectorTramosRecurrente();
+  // Resetear selecciones
+  seleccionesRecurrentes.clear();
+
+  // Generar matriz del calendario
+  generarMatrizRecurrente();
 
   // Resetear formulario
-  document.querySelectorAll('input[name="diasSemana"]').forEach(cb => cb.checked = false);
-  document.getElementById('recurrenteTramoSelect').value = '';
   document.querySelector('input[name="tipoFechaFin"][value="finCurso"]').checked = true;
   document.getElementById('fechaFinContainer').classList.add('hidden');
   document.getElementById('recurrenteFechaFin').value = '';
   document.getElementById('recurrenteMotivo').value = '';
   ocultarErrorRecurrente();
+  actualizarContadorRecurrente();
 
   // Configurar fecha mínima
   const hoy = new Date();
@@ -1802,6 +1809,98 @@ function abrirModalSolicitudRecurrente() {
 }
 
 /**
+ * Generar matriz del calendario semanal para selección
+ */
+function generarMatrizRecurrente() {
+  const tbody = document.getElementById('cuerpoMatrizRecurrente');
+  if (!tbody || !globalState.tramos) return;
+
+  tbody.innerHTML = '';
+
+  // Ordenar tramos por hora de inicio
+  const tramosOrdenados = [...globalState.tramos].sort((a, b) =>
+    (a.hora_inicio || '').localeCompare(b.hora_inicio || '')
+  );
+
+  tramosOrdenados.forEach(tramo => {
+    const tr = document.createElement('tr');
+    tr.className = 'hover:bg-gray-50/50';
+
+    // Celda del tramo (fija)
+    tr.innerHTML = `
+      <td class="px-3 py-2 border-r border-gray-200 bg-gray-50">
+        <div class="text-xs font-bold text-gray-700">${tramo.nombre_tramo}</div>
+        <div class="text-[10px] text-gray-400">${tramo.hora_inicio} - ${tramo.hora_fin}</div>
+      </td>
+    `;
+
+    // Celdas de días (clickeables)
+    DIAS_RECURRENTES.forEach(dia => {
+      const td = document.createElement('td');
+      const celdaId = `${tramo.id_tramo}-${dia}`;
+      td.id = `celda-rec-${celdaId}`;
+      td.className = 'p-1 border border-gray-100 h-12 text-center transition-all duration-200 cursor-pointer hover:bg-blue-50';
+      td.innerHTML = `
+        <div class="w-full h-full flex items-center justify-center opacity-0 group-hover:opacity-100">
+          <iconify-icon icon="mdi:plus" class="text-blue-400"></iconify-icon>
+        </div>
+      `;
+
+      td.onclick = () => toggleCeldaRecurrente(tramo.id_tramo, dia);
+      tr.appendChild(td);
+    });
+
+    tbody.appendChild(tr);
+  });
+}
+
+/**
+ * Toggle selección de celda en el calendario recurrente
+ */
+function toggleCeldaRecurrente(idTramo, dia) {
+  const celdaId = `${idTramo}-${dia}`;
+  const celda = document.getElementById(`celda-rec-${celdaId}`);
+  if (!celda) return;
+
+  if (seleccionesRecurrentes.has(celdaId)) {
+    // Deseleccionar
+    seleccionesRecurrentes.delete(celdaId);
+    celda.className = 'p-1 border border-gray-100 h-12 text-center transition-all duration-200 cursor-pointer hover:bg-blue-50';
+    celda.innerHTML = `
+      <div class="w-full h-full flex items-center justify-center opacity-0 group-hover:opacity-100">
+        <iconify-icon icon="mdi:plus" class="text-blue-400"></iconify-icon>
+      </div>
+    `;
+  } else {
+    // Seleccionar
+    seleccionesRecurrentes.add(celdaId);
+    celda.className = 'p-1 border border-blue-300 h-12 text-center transition-all duration-200 cursor-pointer bg-blue-500';
+    celda.innerHTML = `
+      <div class="w-full h-full flex items-center justify-center">
+        <iconify-icon icon="mdi:check" class="text-white text-xl"></iconify-icon>
+      </div>
+    `;
+  }
+
+  actualizarContadorRecurrente();
+}
+
+/**
+ * Actualizar contador de tramos seleccionados
+ */
+function actualizarContadorRecurrente() {
+  const contador = document.getElementById('contadorSeleccionRecurrente');
+  if (!contador) return;
+
+  const num = seleccionesRecurrentes.size;
+  contador.textContent = num === 0 ? '0 tramos seleccionados' :
+    num === 1 ? '1 tramo seleccionado' : `${num} tramos seleccionados`;
+  contador.className = num > 0 ?
+    'mt-2 text-center text-sm font-medium text-blue-600' :
+    'mt-2 text-center text-sm text-gray-500';
+}
+
+/**
  * Cerrar modal de solicitud recurrente
  */
 function cerrarModalSolicitudRecurrente() {
@@ -1810,23 +1909,6 @@ function cerrarModalSolicitudRecurrente() {
     modal.classList.add('hidden');
   }
   ocultarErrorRecurrente();
-}
-
-/**
- * Poblar selector de tramos para solicitud recurrente
- */
-function poblarSelectorTramosRecurrente() {
-  const select = document.getElementById('recurrenteTramoSelect');
-  if (!select || !globalState.tramos) return;
-
-  select.innerHTML = '<option value="">-- Selecciona un tramo --</option>';
-
-  globalState.tramos.forEach(tramo => {
-    const option = document.createElement('option');
-    option.value = tramo.id_tramo;
-    option.textContent = `${tramo.nombre_tramo} (${tramo.hora_inicio} - ${tramo.hora_fin})`;
-    select.appendChild(option);
-  });
 }
 
 /**
@@ -1854,21 +1936,9 @@ function enviarSolicitudRecurrente() {
 
   ocultarErrorRecurrente();
 
-  // Obtener días seleccionados
-  const diasSeleccionados = [];
-  document.querySelectorAll('input[name="diasSemana"]:checked').forEach(cb => {
-    diasSeleccionados.push(cb.value);
-  });
-
-  if (diasSeleccionados.length === 0) {
-    mostrarErrorRecurrente('Selecciona al menos un día de la semana');
-    return;
-  }
-
-  // Obtener tramo
-  const tramoId = document.getElementById('recurrenteTramoSelect').value;
-  if (!tramoId) {
-    mostrarErrorRecurrente('Selecciona un tramo horario');
+  // Verificar selecciones
+  if (seleccionesRecurrentes.size === 0) {
+    mostrarErrorRecurrente('Selecciona al menos un tramo en el calendario');
     return;
   }
 
@@ -1894,11 +1964,17 @@ function enviarSolicitudRecurrente() {
     return;
   }
 
+  // Convertir selecciones a formato para backend
+  // Formato: array de objetos {dia, id_tramo}
+  const selecciones = Array.from(seleccionesRecurrentes).map(s => {
+    const [idTramo, dia] = s.split('-');
+    return { dia, id_tramo: idTramo };
+  });
+
   // Preparar datos
   const datos = {
     id_recurso: globalState.recursoActual.id_recurso,
-    dias_semana: diasSeleccionados,
-    id_tramo: tramoId,
+    selecciones: selecciones, // Nuevo formato: múltiples día-tramo
     fecha_fin: fechaFin.toISOString().split('T')[0],
     motivo: motivo
   };

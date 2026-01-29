@@ -3457,21 +3457,22 @@ async function cargarSolicitudesRecurrentes() {
   try {
     const result = await new Promise((resolve, reject) => {
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((res) => resolve(res || { success: true, solicitudes: [] }))
         .withFailureHandler(reject)
         .getSolicitudesRecurrentes();
     });
 
-    if (result.success) {
+    if (result && result.success) {
       AdminState.solicitudesRecurrentes = result.solicitudes || [];
       renderizarSolicitudesRecurrentes();
       actualizarBadgeRecurrentes();
     } else {
-      container.innerHTML = `<p class="text-red-500 text-center py-4">${escaparHTML(result.error)}</p>`;
+      const errorMsg = (result && result.error) ? result.error : 'Error desconocido al cargar';
+      container.innerHTML = `<p class="text-red-500 text-center py-4">${escaparHTML(errorMsg)}</p>`;
     }
   } catch (error) {
     console.error('Error cargando solicitudes recurrentes:', error);
-    container.innerHTML = `<p class="text-red-500 text-center py-4">Error al cargar: ${escaparHTML(error.message)}</p>`;
+    container.innerHTML = `<p class="text-red-500 text-center py-4">Error al cargar: ${escaparHTML(error.message || String(error))}</p>`;
   }
 }
 

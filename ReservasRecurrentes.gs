@@ -96,18 +96,37 @@ function getOrCreateSheetSolicitudesRecurrentes() {
 /**
  * Crea una nueva solicitud de reserva recurrente
  * @param {Object} datos - Datos de la solicitud
+ * Formatos aceptados:
+ *   - Nuevo: { id_recurso, selecciones: [{dia, id_tramo}], fecha_fin, motivo }
+ *   - Antiguo: { id_recurso, dias_semana: ['L','M'], id_tramo, fecha_fin, motivo }
  * @returns {Object} - Resultado de la operación
  */
 function crearSolicitudRecurrente(datos) {
   try {
     Logger.log('📝 Creando solicitud recurrente: ' + JSON.stringify(datos));
 
-    // Validaciones
+    // Validaciones básicas
     if (!datos.id_recurso) throw new Error('Recurso no especificado');
-    if (!datos.dias_semana || datos.dias_semana.length === 0) throw new Error('Selecciona al menos un día');
-    if (!datos.id_tramo) throw new Error('Tramo no especificado');
     if (!datos.fecha_fin) throw new Error('Fecha fin no especificada');
     if (!datos.motivo || datos.motivo.trim().length < 10) throw new Error('El motivo debe tener al menos 10 caracteres');
+
+    // Detectar formato y normalizar
+    let seleccionesNormalizadas = [];
+
+    if (datos.selecciones && Array.isArray(datos.selecciones) && datos.selecciones.length > 0) {
+      // Formato nuevo: múltiples día-tramo
+      seleccionesNormalizadas = datos.selecciones;
+    } else if (datos.dias_semana && datos.id_tramo) {
+      // Formato antiguo: un tramo para todos los días
+      const dias = Array.isArray(datos.dias_semana) ? datos.dias_semana : datos.dias_semana.split(',');
+      seleccionesNormalizadas = dias.map(d => ({ dia: d.trim(), id_tramo: datos.id_tramo }));
+    } else {
+      throw new Error('Selecciona al menos un tramo');
+    }
+
+    if (seleccionesNormalizadas.length === 0) {
+      throw new Error('Selecciona al menos un tramo');
+    }
 
     const userEmail = Session.getActiveUser().getEmail();
     if (!userEmail) throw new Error('No se pudo obtener el email del usuario');
@@ -119,8 +138,15 @@ function crearSolicitudRecurrente(datos) {
     if (!recurso) throw new Error('Recurso no encontrado');
 
     const tramos = sheetToObjects(ss.getSheetByName(SHEETS.TRAMOS));
-    const tramo = tramos.find(t => String(t.id_tramo) === String(datos.id_tramo));
-    if (!tramo) throw new Error('Tramo no encontrado');
+    const tramosMap = {};
+    tramos.forEach(t => { tramosMap[t.id_tramo] = t; });
+
+    // Verificar que todos los tramos existen
+    for (const sel of seleccionesNormalizadas) {
+      if (!tramosMap[sel.id_tramo]) {
+        throw new Error('Tramo no encontrado: ' + sel.id_tramo);
+      }
+    }
 
     // Obtener nombre del usuario
     const usuarios = sheetToObjects(ss.getSheetByName(SHEETS.USUARIOS));
@@ -130,8 +156,20 @@ function crearSolicitudRecurrente(datos) {
     // Generar ID único
     const idSolicitud = 'SOL-' + Utilities.getUuid().substring(0, 8).toUpperCase();
 
-    // Formatear días de semana
-    const diasStr = Array.isArray(datos.dias_semana) ? datos.dias_semana.join(',') : datos.dias_semana;
+    // Formatear selecciones para almacenamiento: "L:T001,M:T001,X:T002"
+    const seleccionesStr = seleccionesNormalizadas.map(s => `${s.dia}:${s.id_tramo}`).join(',');
+
+    // Determinar tramo(s) para mostrar
+    const tramosUnicos = [...new Set(seleccionesNormalizadas.map(s => s.id_tramo))];
+    let tramoIdGuardar, tramoNombreGuardar;
+
+    if (tramosUnicos.length === 1) {
+      tramoIdGuardar = tramosUnicos[0];
+      tramoNombreGuardar = tramosMap[tramosUnicos[0]].nombre_tramo;
+    } else {
+      tramoIdGuardar = tramosUnicos.join(';');
+      tramoNombreGuardar = '(Múltiples tramos)';
+    }
 
     // Fecha de inicio (hoy o la especificada)
     const fechaInicio = datos.fecha_inicio ? new Date(datos.fecha_inicio) : new Date();
@@ -145,9 +183,9 @@ function crearSolicitudRecurrente(datos) {
       recurso.nombre,
       userEmail,
       nombreUsuario,
-      diasStr,
-      datos.id_tramo,
-      tramo.nombre_tramo,
+      seleccionesStr,  // Ahora guarda "L:T001,M:T002" en lugar de "L,M"
+      tramoIdGuardar,
+      tramoNombreGuardar,
       fechaInicio,
       fechaFin,
       datos.motivo.trim(),
@@ -160,14 +198,22 @@ function crearSolicitudRecurrente(datos) {
 
     sheet.appendRow(nuevaFila);
 
+    // Formatear info de tramos para el email
+    const infoTramos = seleccionesNormalizadas.map(s => {
+      const t = tramosMap[s.id_tramo];
+      const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes' };
+      return `${diasNombres[s.dia] || s.dia}: ${t.nombre_tramo} (${t.hora_inicio}-${t.hora_fin})`;
+    }).join('\n');
+
     // Enviar email al admin
     enviarEmailNuevaSolicitudRecurrente({
       id: idSolicitud,
       recurso: recurso.nombre,
       usuario: nombreUsuario,
       email: userEmail,
-      dias: diasStr,
-      tramo: tramo.nombre_tramo,
+      dias: seleccionesStr,
+      tramo: tramoNombreGuardar,
+      infoTramos: infoTramos,
       fechaInicio: fechaInicio,
       fechaFin: fechaFin,
       motivo: datos.motivo
@@ -201,37 +247,49 @@ function crearSolicitudRecurrente(datos) {
 function getSolicitudesRecurrentes(filtroEstado) {
   try {
     const sheet = getOrCreateSheetSolicitudesRecurrentes();
-    if (sheet.getLastRow() < 2) return { success: true, solicitudes: [] };
+    if (!sheet || sheet.getLastRow() < 2) {
+      return { success: true, solicitudes: [] };
+    }
 
     const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS_SOLICITUDES.length).getValues();
 
+    // Función auxiliar para serializar fechas
+    const serializarFecha = (val) => {
+      if (!val) return '';
+      if (val instanceof Date) return val.toISOString();
+      return String(val);
+    };
+
     let solicitudes = data.map(row => ({
-      id_solicitud: row[COLS_SOLICITUDES.ID_SOLICITUD],
-      id_recurso: row[COLS_SOLICITUDES.ID_RECURSO],
-      nombre_recurso: row[COLS_SOLICITUDES.NOMBRE_RECURSO],
-      email_usuario: row[COLS_SOLICITUDES.EMAIL_USUARIO],
-      nombre_usuario: row[COLS_SOLICITUDES.NOMBRE_USUARIO],
-      dias_semana: row[COLS_SOLICITUDES.DIAS_SEMANA],
-      id_tramo: row[COLS_SOLICITUDES.ID_TRAMO],
-      nombre_tramo: row[COLS_SOLICITUDES.NOMBRE_TRAMO],
-      fecha_inicio: row[COLS_SOLICITUDES.FECHA_INICIO],
-      fecha_fin: row[COLS_SOLICITUDES.FECHA_FIN],
-      motivo: row[COLS_SOLICITUDES.MOTIVO],
-      estado: row[COLS_SOLICITUDES.ESTADO],
-      fecha_solicitud: row[COLS_SOLICITUDES.FECHA_SOLICITUD],
-      fecha_resolucion: row[COLS_SOLICITUDES.FECHA_RESOLUCION],
-      admin_resolutor: row[COLS_SOLICITUDES.ADMIN_RESOLUTOR],
-      notas_admin: row[COLS_SOLICITUDES.NOTAS_ADMIN]
+      id_solicitud: String(row[COLS_SOLICITUDES.ID_SOLICITUD] || ''),
+      id_recurso: String(row[COLS_SOLICITUDES.ID_RECURSO] || ''),
+      nombre_recurso: String(row[COLS_SOLICITUDES.NOMBRE_RECURSO] || ''),
+      email_usuario: String(row[COLS_SOLICITUDES.EMAIL_USUARIO] || ''),
+      nombre_usuario: String(row[COLS_SOLICITUDES.NOMBRE_USUARIO] || ''),
+      dias_semana: String(row[COLS_SOLICITUDES.DIAS_SEMANA] || ''),
+      id_tramo: String(row[COLS_SOLICITUDES.ID_TRAMO] || ''),
+      nombre_tramo: String(row[COLS_SOLICITUDES.NOMBRE_TRAMO] || ''),
+      fecha_inicio: serializarFecha(row[COLS_SOLICITUDES.FECHA_INICIO]),
+      fecha_fin: serializarFecha(row[COLS_SOLICITUDES.FECHA_FIN]),
+      motivo: String(row[COLS_SOLICITUDES.MOTIVO] || ''),
+      estado: String(row[COLS_SOLICITUDES.ESTADO] || ''),
+      fecha_solicitud: serializarFecha(row[COLS_SOLICITUDES.FECHA_SOLICITUD]),
+      fecha_resolucion: serializarFecha(row[COLS_SOLICITUDES.FECHA_RESOLUCION]),
+      admin_resolutor: String(row[COLS_SOLICITUDES.ADMIN_RESOLUTOR] || ''),
+      notas_admin: String(row[COLS_SOLICITUDES.NOTAS_ADMIN] || '')
     })).filter(s => s.id_solicitud); // Filtrar filas vacías
 
     // Filtrar por estado si se especifica
     if (filtroEstado && filtroEstado !== 'todas') {
-      solicitudes = solicitudes.filter(s => s.estado === filtroEstado);
+      solicitudes = solicitudes.filter(s =>
+        s.estado.toLowerCase() === filtroEstado.toLowerCase()
+      );
     }
 
     // Ordenar por fecha de solicitud (más recientes primero)
     solicitudes.sort((a, b) => new Date(b.fecha_solicitud) - new Date(a.fecha_solicitud));
 
+    Logger.log('✅ getSolicitudesRecurrentes: Devolviendo ' + solicitudes.length + ' solicitudes');
     return { success: true, solicitudes: solicitudes };
 
   } catch (error) {
@@ -423,6 +481,9 @@ function rechazarSolicitudRecurrente(idSolicitud, motivoRechazo) {
 /**
  * Genera las reservas individuales a partir de una solicitud aprobada
  * @param {Object} solicitud - Datos de la solicitud
+ * Formatos soportados para dias_semana:
+ *   - Nuevo: "L:T001,M:T002,X:T001" (cada día con su tramo)
+ *   - Antiguo: "L,M,X" (todos los días con id_tramo de la solicitud)
  */
 function generarReservasDesdeRecurrente(solicitud) {
   try {
@@ -430,8 +491,32 @@ function generarReservasDesdeRecurrente(solicitud) {
     const sheetReservas = ss.getSheetByName(SHEETS.RESERVAS);
 
     // Mapeo de días: L=1, M=2, X=3, J=4, V=5, S=6, D=0
-    const mapaDias = { 'L': 1, 'M': 2, 'X': 3, 'J': 4, 'V': 5, 'S': 6, 'D': 0 };
-    const diasSeleccionados = solicitud.dias_semana.split(',').map(d => mapaDias[d.trim().toUpperCase()]);
+    const mapaDiasNum = { 'L': 1, 'M': 2, 'X': 3, 'J': 4, 'V': 5, 'S': 6, 'D': 0 };
+    const mapaDiasLetra = { 1: 'L', 2: 'M', 3: 'X', 4: 'J', 5: 'V', 6: 'S', 0: 'D' };
+
+    // Parsear días y tramos según el formato
+    const diasSemanaStr = String(solicitud.dias_semana || '');
+    let seleccionesMap = {}; // { 'L': 'T001', 'M': 'T002', ... }
+
+    if (diasSemanaStr.includes(':')) {
+      // Formato nuevo: "L:T001,M:T002"
+      diasSemanaStr.split(',').forEach(item => {
+        const [dia, tramo] = item.trim().split(':');
+        if (dia && tramo) {
+          seleccionesMap[dia.toUpperCase()] = tramo;
+        }
+      });
+    } else {
+      // Formato antiguo: "L,M,X" con un único tramo
+      diasSemanaStr.split(',').forEach(dia => {
+        const d = dia.trim().toUpperCase();
+        if (d && mapaDiasNum[d] !== undefined) {
+          seleccionesMap[d] = solicitud.id_tramo;
+        }
+      });
+    }
+
+    const diasSeleccionados = Object.keys(seleccionesMap).map(d => mapaDiasNum[d]);
 
     const fechaInicio = new Date(solicitud.fecha_inicio);
     const fechaFin = new Date(solicitud.fecha_fin);
@@ -456,19 +541,21 @@ function generarReservasDesdeRecurrente(solicitud) {
 
     while (fechaActual <= fechaFin) {
       const diaSemana = fechaActual.getDay(); // 0=Domingo, 1=Lunes, etc.
+      const diaLetra = mapaDiasLetra[diaSemana];
 
-      if (diasSeleccionados.includes(diaSemana)) {
+      if (diasSeleccionados.includes(diaSemana) && seleccionesMap[diaLetra]) {
         const fechaISO = Utilities.formatDate(fechaActual, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        const tramoParaEsteDia = seleccionesMap[diaLetra];
 
         // Verificar si ya hay una reserva para ese recurso/fecha/tramo
         const yaReservado = reservasExistentes.some(r =>
           String(r.id_recurso) === String(solicitud.id_recurso) &&
           r.fecha === fechaISO &&
-          String(r.id_tramo) === String(solicitud.id_tramo)
+          String(r.id_tramo) === String(tramoParaEsteDia)
         );
 
         if (yaReservado) {
-          fechasSaltadas.push(fechaISO);
+          fechasSaltadas.push(fechaISO + ' (' + tramoParaEsteDia + ')');
         } else {
           // Generar ID único para la reserva
           const idReserva = 'RES-' + Utilities.getUuid().substring(0, 8).toUpperCase();
@@ -480,12 +567,13 @@ function generarReservasDesdeRecurrente(solicitud) {
           if (headerMap['id_reserva'] !== undefined) nuevaFila[headerMap['id_reserva']] = idReserva;
           if (headerMap['id_recurso'] !== undefined) nuevaFila[headerMap['id_recurso']] = solicitud.id_recurso;
           if (headerMap['email_usuario'] !== undefined) nuevaFila[headerMap['email_usuario']] = solicitud.email_usuario;
-          if (headerMap['fecha'] !== undefined) nuevaFila[headerMap['fecha']] = fechaActual;
+          if (headerMap['fecha'] !== undefined) nuevaFila[headerMap['fecha']] = new Date(fechaActual);
           if (headerMap['curso'] !== undefined) nuevaFila[headerMap['curso']] = '';
-          if (headerMap['id_tramo'] !== undefined) nuevaFila[headerMap['id_tramo']] = solicitud.id_tramo;
+          if (headerMap['id_tramo'] !== undefined) nuevaFila[headerMap['id_tramo']] = tramoParaEsteDia;
           if (headerMap['cantidad'] !== undefined) nuevaFila[headerMap['cantidad']] = 1;
           if (headerMap['estado'] !== undefined) nuevaFila[headerMap['estado']] = 'Confirmada';
           if (headerMap['notas'] !== undefined) nuevaFila[headerMap['notas']] = 'Reserva recurrente: ' + solicitud.id_solicitud;
+          if (headerMap['timestamp'] !== undefined) nuevaFila[headerMap['timestamp']] = new Date();
           if (headerMap['id_solicitud_recurrente'] !== undefined) nuevaFila[headerMap['id_solicitud_recurrente']] = solicitud.id_solicitud;
 
           nuevasReservas.push(nuevaFila);
