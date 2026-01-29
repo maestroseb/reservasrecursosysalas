@@ -866,8 +866,28 @@ function crearRecurrenteDirecta(datos) {
     if (!recurso) throw new Error('Recurso no encontrado');
 
     const tramos = sheetToObjects(ss.getSheetByName(SHEETS.TRAMOS));
-    const tramo = tramos.find(t => String(t.id_tramo) === String(datos.id_tramo));
-    if (!tramo) throw new Error('Tramo no encontrado');
+
+    // Formato de dias_semana: "V:T001,V:T002,L:T001" (día:tramo)
+    // Extraer el primer tramo para mostrar en la solicitud
+    const diasStr = Array.isArray(datos.dias_semana) ? datos.dias_semana.join(',') : (datos.dias_semana || '');
+    let primerTramoId = datos.id_tramo || '';
+    let nombreTramo = 'Múltiples tramos';
+
+    // Si el formato incluye tramos (nuevo formato: "L:T001,M:T002")
+    if (diasStr.includes(':')) {
+      const primerItem = diasStr.split(',')[0];
+      if (primerItem && primerItem.includes(':')) {
+        primerTramoId = primerItem.split(':')[1];
+      }
+    }
+
+    // Buscar el tramo para obtener el nombre
+    if (primerTramoId) {
+      const tramo = tramos.find(t => String(t.id_tramo) === String(primerTramoId));
+      if (tramo) {
+        nombreTramo = tramo.nombre_tramo;
+      }
+    }
 
     // Email del usuario beneficiario (puede ser otro usuario o el admin)
     const emailBeneficiario = datos.email_usuario || adminEmail;
@@ -880,7 +900,6 @@ function crearRecurrenteDirecta(datos) {
     // Generar ID
     const idSolicitud = 'SOL-' + Utilities.getUuid().substring(0, 8).toUpperCase();
 
-    const diasStr = Array.isArray(datos.dias_semana) ? datos.dias_semana.join(',') : datos.dias_semana;
     const fechaInicio = datos.fecha_inicio ? new Date(datos.fecha_inicio) : new Date();
     const fechaFin = new Date(datos.fecha_fin);
 
@@ -893,8 +912,8 @@ function crearRecurrenteDirecta(datos) {
       emailBeneficiario,
       nombreBeneficiario,
       diasStr,
-      datos.id_tramo,
-      tramo.nombre_tramo,
+      primerTramoId,
+      nombreTramo,
       fechaInicio,
       fechaFin,
       datos.motivo || 'Creada directamente por administrador',
@@ -902,7 +921,7 @@ function crearRecurrenteDirecta(datos) {
       new Date(),
       new Date(),
       adminEmail,
-      'Creación directa'
+      datos.notas_admin || 'Creación directa'
     ];
 
     sheet.appendRow(nuevaFila);
@@ -913,7 +932,7 @@ function crearRecurrenteDirecta(datos) {
       id_recurso: datos.id_recurso,
       email_usuario: emailBeneficiario,
       dias_semana: diasStr,
-      id_tramo: datos.id_tramo,
+      id_tramo: primerTramoId, // Se usa para formato antiguo, el nuevo usa dias_semana
       fecha_inicio: fechaInicio,
       fecha_fin: fechaFin
     };
