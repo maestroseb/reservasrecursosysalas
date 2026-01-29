@@ -31,7 +31,10 @@ const AdminState = {
   isEditMode: false,
   tipoFiltroActivo: '', // '' = Todas, 'Sala', 'Dispositivo', 'Agrupado'
   cambiosPendientes: false, // Indica si hay cambios sin guardar
-  ordenOriginal: {} // Guarda el orden original para detectar cambios
+  ordenOriginal: {}, // Guarda el orden original para detectar cambios
+  // Filtros de reservas
+  filtroReservasPeriodo: 'semana', // 'semana', '2semanas', 'mes', 'todas'
+  filtroReservasTipo: 'todas' // 'todas', 'normal', 'recurrente'
 };
 
 let adminHaCambiadoDatos = false; // Flag para saber si hay que recargar al volver
@@ -446,6 +449,9 @@ function renderTablaReservas() {
 
   // --- B. PROCESADO Y FILTRADO ---
   const hoyStr = new Date().toISOString().split('T')[0];
+  const { fechaInicio, fechaFin } = getFechasFiltroPeriodo();
+  const fechaInicioStr = fechaInicio ? fechaInicio.toISOString().split('T')[0] : null;
+  const fechaFinStr = fechaFin ? fechaFin.toISOString().split('T')[0] : null;
 
   const lista = AdminState.reservas
     .map(reserva => {
@@ -460,15 +466,33 @@ function renderTablaReservas() {
       };
     })
     .filter(r => {
-      if (!filtro) return true;
-      // Búsqueda en todos los campos relevantes
-      return (
-        String(r.nombreUsuario).toLowerCase().includes(filtro) ||
-        String(r.Email_Usuario).toLowerCase().includes(filtro) ||
-        String(r.nombreRecurso).toLowerCase().includes(filtro) ||
-        String(r.Fecha).toLowerCase().includes(filtro) ||
-        String(r.Estado).toLowerCase().includes(filtro)
-      );
+      // Filtro de texto
+      if (filtro) {
+        const coincide = (
+          String(r.nombreUsuario).toLowerCase().includes(filtro) ||
+          String(r.Email_Usuario).toLowerCase().includes(filtro) ||
+          String(r.nombreRecurso).toLowerCase().includes(filtro) ||
+          String(r.Fecha).toLowerCase().includes(filtro) ||
+          String(r.Estado).toLowerCase().includes(filtro)
+        );
+        if (!coincide) return false;
+      }
+
+      // Filtro de período
+      if (fechaInicioStr || fechaFinStr) {
+        const fechaReserva = r.Fecha || '';
+        if (fechaInicioStr && fechaReserva < fechaInicioStr) return false;
+        if (fechaFinStr && fechaReserva > fechaFinStr) return false;
+      }
+
+      // Filtro de tipo (normal/recurrente)
+      if (AdminState.filtroReservasTipo !== 'todas') {
+        const esRecurrente = !!(r.ID_Solicitud_Recurrente || r.id_solicitud_recurrente);
+        if (AdminState.filtroReservasTipo === 'recurrente' && !esRecurrente) return false;
+        if (AdminState.filtroReservasTipo === 'normal' && esRecurrente) return false;
+      }
+
+      return true;
     });
 
   // --- C. ORDENACIÓN MULTINIVEL ---
@@ -544,6 +568,7 @@ function renderTablaReservas() {
     const emailSafe = safeHtmlRes(reserva.Email_Usuario);
     const cursoSafe = safeHtmlRes(reserva.Curso);
     const tramoSafe = safeHtmlRes(reserva.ID_Tramo);
+    const esRecurrente = !!(reserva.ID_Solicitud_Recurrente || reserva.id_solicitud_recurrente);
 
     // Template HTML
     tr.innerHTML = `
@@ -551,6 +576,7 @@ function renderTablaReservas() {
          <div class="flex flex-col">
             <span class="text-sm font-bold text-gray-800 flex items-center gap-2">
                <iconify-icon icon="mdi:calendar-month" class="text-gray-400"></iconify-icon> ${fechaEsp}
+               ${esRecurrente ? '<iconify-icon icon="mdi:sync" class="text-purple-500 text-xs" title="Reserva recurrente"></iconify-icon>' : ''}
             </span>
             <span class="text-xs text-gray-500 ml-6 font-mono bg-gray-100 px-1.5 py-0.5 rounded w-fit">
                ${tramoSafe}
@@ -654,10 +680,95 @@ function cancelarReserva(idReserva) {
   );
 }
 
+// --- 5. FILTROS DE RESERVAS ---
+
+/**
+ * Filtrar reservas por período de tiempo
+ */
+function filtrarReservasPorPeriodo(periodo) {
+  AdminState.filtroReservasPeriodo = periodo;
+
+  // Actualizar botones
+  document.querySelectorAll('[data-filtro-periodo]').forEach(btn => {
+    const btnPeriodo = btn.dataset.filtroPeriodo;
+    if (btnPeriodo === periodo) {
+      btn.classList.add('bg-blue-600', 'text-white');
+      btn.classList.remove('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200');
+    } else {
+      btn.classList.remove('bg-blue-600', 'text-white');
+      btn.classList.add('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200');
+    }
+  });
+
+  renderTablaReservas();
+}
+
+/**
+ * Filtrar reservas por tipo (normal/recurrente)
+ */
+function filtrarReservasPorTipo(tipo) {
+  AdminState.filtroReservasTipo = tipo;
+
+  // Actualizar botones
+  document.querySelectorAll('[data-filtro-tipo]').forEach(btn => {
+    const btnTipo = btn.dataset.filtroTipo;
+    if (btnTipo === tipo) {
+      btn.classList.add('bg-gray-800', 'text-white');
+      btn.classList.remove('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200');
+    } else {
+      btn.classList.remove('bg-gray-800', 'text-white');
+      btn.classList.add('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200');
+    }
+  });
+
+  renderTablaReservas();
+}
+
+/**
+ * Obtener fechas límite según el período seleccionado
+ */
+function getFechasFiltroPeriodo() {
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+
+  let fechaInicio = new Date(hoy);
+  let fechaFin = null;
+
+  switch (AdminState.filtroReservasPeriodo) {
+    case 'semana':
+      // Desde hoy hasta el domingo de esta semana
+      fechaFin = new Date(hoy);
+      fechaFin.setDate(hoy.getDate() + (7 - hoy.getDay()));
+      break;
+
+    case '2semanas':
+      // Desde hoy hasta dentro de 2 semanas
+      fechaFin = new Date(hoy);
+      fechaFin.setDate(hoy.getDate() + 14);
+      break;
+
+    case 'mes':
+      // Desde hoy hasta fin de mes
+      fechaFin = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
+      break;
+
+    case 'todas':
+    default:
+      // Sin límites
+      fechaInicio = null;
+      fechaFin = null;
+      break;
+  }
+
+  return { fechaInicio, fechaFin };
+}
+
 // EXPORTS GLOBALES
 window.inicializarReservas = inicializarReservas;
 window.renderTablaReservas = renderTablaReservas;
 window.cancelarReserva = cancelarReserva;
+window.filtrarReservasPorPeriodo = filtrarReservasPorPeriodo;
+window.filtrarReservasPorTipo = filtrarReservasPorTipo;
 
 
 /* =========================================================
