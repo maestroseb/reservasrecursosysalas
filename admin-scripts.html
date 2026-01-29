@@ -3899,11 +3899,17 @@ function abrirModalGestionarSolicitud(idSolicitud) {
     </div>
   `;
 
-  document.getElementById('modalGestionarSolicitud').classList.remove('hidden');
+  const modal = document.getElementById('modalGestionarSolicitud');
+  // Mover modal al body para que el overlay cubra toda la pantalla
+  if (modal.parentElement !== document.body) {
+    document.body.appendChild(modal);
+  }
+  modal.classList.remove('hidden');
 }
 
 function cerrarModalGestionarSolicitud() {
-  document.getElementById('modalGestionarSolicitud').classList.add('hidden');
+  const modal = document.getElementById('modalGestionarSolicitud');
+  modal.classList.add('hidden');
 }
 
 /**
@@ -3914,6 +3920,7 @@ async function aprobarSolicitudRecurrente() {
   const notas = document.getElementById('gestionarSolicitudNotas').value.trim();
 
   const btnAprobar = document.getElementById('btnAprobarSolicitud');
+  const btnRechazar = document.getElementById('btnRechazarSolicitud');
   if (!btnAprobar) {
     mostrarToast('Error interno: botón no encontrado', 'error');
     return;
@@ -3921,6 +3928,7 @@ async function aprobarSolicitudRecurrente() {
 
   const textoOriginal = btnAprobar.innerHTML;
   btnAprobar.disabled = true;
+  if (btnRechazar) btnRechazar.disabled = true;
   btnAprobar.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>Aprobando...';
 
   try {
@@ -3931,21 +3939,25 @@ async function aprobarSolicitudRecurrente() {
         .aprobarSolicitudRecurrente(idSolicitud, notas);
     });
 
+    // Restaurar botones siempre
+    btnAprobar.disabled = false;
+    btnAprobar.innerHTML = textoOriginal;
+    if (btnRechazar) btnRechazar.disabled = false;
+
     if (result && result.success) {
-      mostrarToast(`Solicitud aprobada. Se generaron ${result.reservasGeneradas || 0} reservas.`, 'success');
+      mostrarToast(`Solicitud aprobada. Se crearon ${result.reservasCreadas || 0} reservas.`, 'success');
       cerrarModalGestionarSolicitud();
       await cargarSolicitudesRecurrentes();
       adminHaCambiadoDatos = true;
     } else {
       mostrarToast(result?.error || 'Error al aprobar', 'error');
-      btnAprobar.disabled = false;
-      btnAprobar.innerHTML = textoOriginal;
     }
   } catch (error) {
     console.error('Error al aprobar:', error);
     mostrarToast('Error al aprobar la solicitud: ' + (error.message || error), 'error');
     btnAprobar.disabled = false;
     btnAprobar.innerHTML = textoOriginal;
+    if (btnRechazar) btnRechazar.disabled = false;
   }
 }
 
