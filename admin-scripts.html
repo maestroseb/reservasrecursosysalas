@@ -538,8 +538,24 @@ function renderTablaReservas() {
 
   lista.forEach(reserva => {
     const tr = document.createElement('tr');
-    const esPasado = (reserva.Fecha || '') < hoyStr;
     const estado = reserva.Estado || 'Confirmada';
+
+    // Determinar si la reserva ya pasó (incluyendo tramos del día actual)
+    let esPasado = (reserva.Fecha || '') < hoyStr;
+
+    // Si es hoy, verificar si el tramo ya pasó
+    if (!esPasado && reserva.Fecha === hoyStr) {
+      const tramo = AdminState.tramos?.find(t => t.id_tramo === reserva.ID_Tramo);
+      if (tramo && tramo.hora_fin) {
+        const ahora = new Date();
+        const [horaFin, minFin] = tramo.hora_fin.split(':').map(Number);
+        const horaFinReserva = new Date();
+        horaFinReserva.setHours(horaFin, minFin, 0, 0);
+        if (ahora > horaFinReserva) {
+          esPasado = true;
+        }
+      }
+    }
     
     // Clases dinámicas
     tr.className = `group hover:bg-blue-50/30 transition-all border-b border-gray-100 ${esPasado ? 'opacity-60 grayscale-[0.8]' : ''}`;
@@ -4074,38 +4090,70 @@ function verDetalleSolicitud(idSolicitud) {
 /**
  * Abre modal para crear reserva recurrente directa (admin)
  */
+// Variables para calendario de recurrente admin
+let seleccionesRecurrenteAdmin = new Set();
+const DIAS_RECURRENTES_ADMIN = ['L', 'M', 'X', 'J', 'V'];
+
 function abrirModalRecurrenteDirecta() {
+  // Resetear selecciones
+  seleccionesRecurrenteAdmin.clear();
+
   // Poblar selector de recursos
   const selectRecurso = document.getElementById('recDirectaRecurso');
   selectRecurso.innerHTML = '<option value="">Selecciona un recurso</option>';
-  AdminState.recursos.forEach(r => {
+  (AdminState.recursos || []).forEach(r => {
     if (r.estado === 'Activo') {
       selectRecurso.innerHTML += `<option value="${r.id_recurso}">${escaparHTML(r.nombre)}</option>`;
     }
   });
 
-  // Poblar selector de tramos
-  const selectTramo = document.getElementById('recDirectaTramo');
-  selectTramo.innerHTML = '<option value="">Selecciona un tramo</option>';
-  AdminState.tramos.forEach(t => {
-    selectTramo.innerHTML += `<option value="${t.id_tramo}">${escaparHTML(t.nombre_tramo)} (${t.hora_inicio} - ${t.hora_fin})</option>`;
-  });
-
   // Poblar selector de usuarios
   const selectUsuario = document.getElementById('recDirectaUsuario');
   selectUsuario.innerHTML = '<option value="">Selecciona un usuario</option>';
-  const usuariosActivos = AdminState.usuarios.filter(u => u.activo === true || u.activo === 'TRUE');
+  const usuariosActivos = (AdminState.usuarios || []).filter(u =>
+    u.activo === true || u.activo === 'TRUE' || u.activo === 'true'
+  );
   usuariosActivos.forEach(u => {
-    selectUsuario.innerHTML += `<option value="${u.email_usuario}">${escaparHTML(u.nombre_completo)} (${u.email_usuario})</option>`;
+    selectUsuario.innerHTML += `<option value="${u.email_usuario}">${escaparHTML(u.nombre_completo || u.email_usuario)}</option>`;
   });
 
-  // Resetear campos
-  document.querySelectorAll('input[name="recDirectaDias"]').forEach(cb => cb.checked = false);
-  document.getElementById('recDirectaFechaInicio').value = new Date().toISOString().split('T')[0];
-  document.getElementById('recDirectaFechaFin').value = '';
-  document.getElementById('recDirectaNotas').value = '';
+  // Generar matriz del calendario
+  generarMatrizRecurrenteAdmin();
 
-  document.getElementById('modalRecurrenteDirecta').classList.remove('hidden');
+  // Configurar opciones de fecha fin
+  const radioFinCurso = document.querySelector('input[name="recDirectaTipoFin"][value="finCurso"]');
+  if (radioFinCurso) radioFinCurso.checked = true;
+  document.getElementById('recDirectaFechaFinContainer').classList.add('hidden');
+
+  const fechaInput = document.getElementById('recDirectaFechaFin');
+  if (fechaInput) {
+    const hoy = new Date().toISOString().split('T')[0];
+    fechaInput.min = hoy;
+    fechaInput.value = '';
+  }
+
+  // Listeners para radios de fecha
+  document.querySelectorAll('input[name="recDirectaTipoFin"]').forEach(radio => {
+    radio.onchange = function() {
+      const container = document.getElementById('recDirectaFechaFinContainer');
+      if (this.value === 'fecha') {
+        container.classList.remove('hidden');
+      } else {
+        container.classList.add('hidden');
+      }
+    };
+  });
+
+  // Resetear otros campos
+  document.getElementById('recDirectaNotas').value = '';
+  actualizarContadorRecurrenteAdmin();
+
+  // Mover modal al body y mostrar
+  const modal = document.getElementById('modalRecurrenteDirecta');
+  if (modal.parentElement !== document.body) {
+    document.body.appendChild(modal);
+  }
+  modal.classList.remove('hidden');
 }
 
 function cerrarModalRecurrenteDirecta() {
@@ -4113,29 +4161,115 @@ function cerrarModalRecurrenteDirecta() {
 }
 
 /**
+ * Genera la matriz del calendario semanal para admin
+ */
+function generarMatrizRecurrenteAdmin() {
+  const tbody = document.getElementById('cuerpoMatrizRecurrenteAdmin');
+  if (!tbody || !AdminState.tramos) return;
+
+  tbody.innerHTML = '';
+
+  // Ordenar tramos por hora de inicio
+  const tramosOrdenados = [...AdminState.tramos].sort((a, b) =>
+    (a.hora_inicio || '').localeCompare(b.hora_inicio || '')
+  );
+
+  tramosOrdenados.forEach(tramo => {
+    const tr = document.createElement('tr');
+    tr.className = 'hover:bg-gray-50/50';
+
+    // Celda del tramo
+    tr.innerHTML = `
+      <td class="px-2 py-1.5 border-r border-gray-200 bg-gray-50">
+        <div class="text-xs font-bold text-gray-700">${escaparHTML(tramo.nombre_tramo)}</div>
+        <div class="text-[10px] text-gray-400">${tramo.hora_inicio} - ${tramo.hora_fin}</div>
+      </td>
+    `;
+
+    // Celdas de días
+    DIAS_RECURRENTES_ADMIN.forEach(dia => {
+      const td = document.createElement('td');
+      const celdaId = `${tramo.id_tramo}-${dia}`;
+      td.id = `celda-rec-admin-${celdaId}`;
+      td.className = 'p-1 border border-gray-100 h-10 text-center transition-all duration-200 cursor-pointer hover:bg-blue-50';
+      td.innerHTML = `<div class="w-full h-full flex items-center justify-center"></div>`;
+      td.onclick = () => toggleCeldaRecurrenteAdmin(tramo.id_tramo, dia);
+      tr.appendChild(td);
+    });
+
+    tbody.appendChild(tr);
+  });
+}
+
+/**
+ * Toggle selección de celda
+ */
+function toggleCeldaRecurrenteAdmin(idTramo, dia) {
+  const celdaId = `${idTramo}-${dia}`;
+  const celda = document.getElementById(`celda-rec-admin-${celdaId}`);
+  if (!celda) return;
+
+  if (seleccionesRecurrenteAdmin.has(celdaId)) {
+    seleccionesRecurrenteAdmin.delete(celdaId);
+    celda.className = 'p-1 border border-gray-100 h-10 text-center transition-all duration-200 cursor-pointer hover:bg-blue-50';
+    celda.innerHTML = `<div class="w-full h-full flex items-center justify-center"></div>`;
+  } else {
+    seleccionesRecurrenteAdmin.add(celdaId);
+    celda.className = 'p-1 border border-blue-300 h-10 text-center transition-all duration-200 cursor-pointer bg-blue-500';
+    celda.innerHTML = `<div class="w-full h-full flex items-center justify-center"><iconify-icon icon="mdi:check" class="text-white text-lg"></iconify-icon></div>`;
+  }
+
+  actualizarContadorRecurrenteAdmin();
+}
+
+/**
+ * Actualiza el contador de selecciones
+ */
+function actualizarContadorRecurrenteAdmin() {
+  const contador = document.getElementById('contadorSeleccionRecurrenteAdmin');
+  if (!contador) return;
+
+  const num = seleccionesRecurrenteAdmin.size;
+  contador.textContent = num === 0 ? '0 tramos seleccionados' :
+    num === 1 ? '1 tramo seleccionado' : `${num} tramos seleccionados`;
+  contador.className = num > 0 ?
+    'mt-2 text-center text-xs font-medium text-blue-600' :
+    'mt-2 text-center text-xs text-gray-500';
+}
+
+/**
  * Guarda una reserva recurrente directa (sin solicitud previa)
  */
 async function guardarRecurrenteDirecta() {
   const recurso = document.getElementById('recDirectaRecurso').value;
-  const tramo = document.getElementById('recDirectaTramo').value;
   const usuario = document.getElementById('recDirectaUsuario').value;
-  const fechaInicio = document.getElementById('recDirectaFechaInicio').value;
-  const fechaFin = document.getElementById('recDirectaFechaFin').value;
   const notas = document.getElementById('recDirectaNotas').value.trim();
 
-  const diasSeleccionados = [];
-  document.querySelectorAll('input[name="recDirectaDias"]:checked').forEach(cb => {
-    diasSeleccionados.push(cb.value);
+  // Obtener selecciones del calendario (formato: "L:T001,M:T002")
+  const seleccionesArray = Array.from(seleccionesRecurrenteAdmin).map(sel => {
+    const [idTramo, dia] = sel.split('-');
+    return `${dia}:${idTramo}`;
   });
+
+  // Determinar fecha fin
+  const tipoFin = document.querySelector('input[name="recDirectaTipoFin"]:checked')?.value;
+  let fechaFin = '';
+  if (tipoFin === 'fecha') {
+    fechaFin = document.getElementById('recDirectaFechaFin').value;
+    if (!fechaFin) return mostrarToast('Indica la fecha de fin', 'error');
+  } else {
+    // Fin de curso - usar fecha de la config o 30 junio
+    const config = AdminState.config || [];
+    const finCursoConfig = config.find(c => c.clave === 'FECHA_FIN_CURSO');
+    fechaFin = finCursoConfig?.valor || `${new Date().getFullYear()}-06-30`;
+  }
 
   // Validaciones
   if (!recurso) return mostrarToast('Selecciona un recurso', 'error');
-  if (!tramo) return mostrarToast('Selecciona un tramo', 'error');
   if (!usuario) return mostrarToast('Selecciona un usuario', 'error');
-  if (diasSeleccionados.length === 0) return mostrarToast('Selecciona al menos un día', 'error');
-  if (!fechaFin) return mostrarToast('Indica la fecha de fin', 'error');
+  if (seleccionesArray.length === 0) return mostrarToast('Selecciona al menos un tramo en el calendario', 'error');
 
-  const btn = document.querySelector('#modalRecurrenteDirecta button[onclick="guardarRecurrenteDirecta()"]');
+  const btn = document.getElementById('btnGuardarRecurrenteDirecta');
   const textoOriginal = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>Generando...';
@@ -4143,33 +4277,34 @@ async function guardarRecurrenteDirecta() {
   try {
     const datos = {
       id_recurso: recurso,
-      id_tramo: tramo,
       email_usuario: usuario,
-      dias_semana: diasSeleccionados,
-      fecha_inicio: fechaInicio,
+      dias_semana: seleccionesArray.join(','), // Formato: "L:T001,M:T002"
+      fecha_inicio: new Date().toISOString().split('T')[0], // Siempre desde hoy
       fecha_fin: fechaFin,
       notas_admin: notas
     };
 
     const result = await new Promise((resolve, reject) => {
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((res) => resolve(res || { success: false, error: 'Respuesta vacía' }))
         .withFailureHandler(reject)
         .crearRecurrenteDirecta(datos);
     });
 
-    if (result.success) {
-      mostrarToast(`Reservas generadas: ${result.reservasGeneradas || 0}`, 'success');
+    btn.disabled = false;
+    btn.innerHTML = textoOriginal;
+
+    if (result && result.success) {
+      mostrarToast(`Reservas generadas: ${result.reservasCreadas || result.reservasGeneradas || 0}`, 'success');
       cerrarModalRecurrenteDirecta();
-      cargarSolicitudesRecurrentes();
+      await cargarSolicitudesRecurrentes();
       adminHaCambiadoDatos = true;
     } else {
-      mostrarToast(result.error || 'Error al crear reservas', 'error');
+      mostrarToast(result?.error || 'Error al crear reservas', 'error');
     }
   } catch (error) {
     console.error('Error al crear recurrente directa:', error);
-    mostrarToast('Error: ' + error.message, 'error');
-  } finally {
+    mostrarToast('Error: ' + (error.message || error), 'error');
     btn.disabled = false;
     btn.innerHTML = textoOriginal;
   }

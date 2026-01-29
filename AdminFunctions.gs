@@ -101,24 +101,37 @@ function getAdminData() {
       }));
     }
 
-    // 5. RESERVAS
+    // 5. RESERVAS (con soporte para id_solicitud_recurrente)
     const sheetReservas = ss.getSheetByName(SHEETS.RESERVAS);
     let reservas = [];
     if (sheetReservas && sheetReservas.getLastRow() > 1) {
-      const dataReservas = sheetReservas.getRange(2, 1, sheetReservas.getLastRow() - 1, 10).getValues();
+      // Leer todas las columnas dinámicamente
+      const lastCol = sheetReservas.getLastColumn();
+      const headers = sheetReservas.getRange(1, 1, 1, lastCol).getValues()[0];
+      const headerMap = {};
+      headers.forEach((h, i) => { headerMap[h.toString().toLowerCase().trim()] = i; });
+
+      const dataReservas = sheetReservas.getRange(2, 1, sheetReservas.getLastRow() - 1, lastCol).getValues();
       reservas = dataReservas.map(row => {
         let fechaStr = '';
-        try { fechaStr = Utilities.formatDate(new Date(row[3]), Session.getScriptTimeZone(), 'yyyy-MM-dd'); } catch (e) { fechaStr = String(row[3]); }
+        const fechaCol = headerMap['fecha'] !== undefined ? headerMap['fecha'] : 3;
+        try { fechaStr = Utilities.formatDate(new Date(row[fechaCol]), Session.getScriptTimeZone(), 'yyyy-MM-dd'); } catch (e) { fechaStr = String(row[fechaCol]); }
+
+        // Obtener id_solicitud_recurrente si existe
+        const idSolRecCol = headerMap['id_solicitud_recurrente'];
+        const idSolicitudRecurrente = idSolRecCol !== undefined ? String(row[idSolRecCol] || '').trim() : '';
+
         return {
-          ID_Reserva: String(row[0]), 
-          ID_Recurso: String(row[1]).trim(), 
-          Email_Usuario: String(row[2]).trim(),
-          Fecha: fechaStr, 
-          Curso: String(row[4]), 
-          ID_Tramo: String(row[5]).trim(),
-          Cantidad: Number(row[6]), 
-          Estado: String(row[7]), 
-          Notas: String(row[8])
+          ID_Reserva: String(row[headerMap['id_reserva'] || 0]),
+          ID_Recurso: String(row[headerMap['id_recurso'] || 1]).trim(),
+          Email_Usuario: String(row[headerMap['email_usuario'] || 2]).trim(),
+          Fecha: fechaStr,
+          Curso: String(row[headerMap['curso'] || 4]),
+          ID_Tramo: String(row[headerMap['id_tramo'] || 5]).trim(),
+          Cantidad: Number(row[headerMap['cantidad'] || 6] || 1),
+          Estado: String(row[headerMap['estado'] || 7]),
+          Notas: String(row[headerMap['notas'] || 8] || ''),
+          ID_Solicitud_Recurrente: idSolicitudRecurrente
         };
       });
     }
