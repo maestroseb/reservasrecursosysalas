@@ -963,6 +963,136 @@ function crearRecurrenteDirecta(datos) {
 }
 
 /* ============================================
+   OBTENER CONFLICTOS PARA NUEVA RECURRENCIA
+   ============================================ */
+
+/**
+ * Obtiene los conflictos para un recurso específico:
+ * - Recurrencias aprobadas existentes (día:tramo ocupados)
+ * - Disponibilidad del recurso (día:tramo no permitidos)
+ *
+ * @param {string} idRecurso - ID del recurso
+ * @returns {Object} { recurrenciasOcupadas: [{dia, tramo, usuario}], nodisponibles: [{dia, tramo}] }
+ */
+function getConflictosRecurrencia(idRecurso) {
+  try {
+    const ss = getDB();
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+
+    // 1. RECURRENCIAS APROBADAS ACTIVAS para este recurso
+    const sheetSolicitudes = ss.getSheetByName(SHEETS.SOLICITUDES_RECURRENTES);
+    let recurrenciasOcupadas = [];
+
+    if (sheetSolicitudes && sheetSolicitudes.getLastRow() > 1) {
+      const solicitudes = sheetToObjects(sheetSolicitudes);
+
+      // Filtrar solo aprobadas, del mismo recurso, y que no hayan terminado
+      const activas = solicitudes.filter(sol => {
+        if (String(sol.id_recurso) !== String(idRecurso)) return false;
+        if ((sol.estado || '').toLowerCase() !== 'aprobada') return false;
+
+        // Verificar que la fecha_fin sea >= hoy
+        const fechaFin = sol.fecha_fin ? new Date(sol.fecha_fin) : null;
+        if (fechaFin && fechaFin < hoy) return false;
+
+        return true;
+      });
+
+      // Extraer día:tramo de cada recurrencia activa
+      activas.forEach(sol => {
+        const diasSemanaStr = sol.dias_semana || '';
+
+        if (diasSemanaStr.includes(':')) {
+          // Formato nuevo: "V:T001,L:T002"
+          diasSemanaStr.split(',').forEach(item => {
+            const [dia, tramo] = item.trim().split(':');
+            if (dia && tramo) {
+              recurrenciasOcupadas.push({
+                dia: dia.toUpperCase(),
+                tramo: tramo,
+                usuario: sol.nombre_usuario || sol.email_usuario,
+                idSolicitud: sol.id_solicitud
+              });
+            }
+          });
+        } else {
+          // Formato antiguo: "L,M,X" con un único tramo
+          const tramo = sol.id_tramo;
+          diasSemanaStr.split(',').forEach(d => {
+            const dia = d.trim().toUpperCase();
+            if (dia && tramo) {
+              recurrenciasOcupadas.push({
+                dia: dia,
+                tramo: tramo,
+                usuario: sol.nombre_usuario || sol.email_usuario,
+                idSolicitud: sol.id_solicitud
+              });
+            }
+          });
+        }
+      });
+    }
+
+    // 2. DISPONIBILIDAD DEL RECURSO (qué día:tramo están bloqueados)
+    const sheetDisp = ss.getSheetByName(SHEETS.DISPONIBILIDAD);
+    let nodisponibles = [];
+
+    if (sheetDisp && sheetDisp.getLastRow() > 1) {
+      const disponibilidad = sheetToObjects(sheetDisp);
+
+      // Mapeo de día de semana a letra
+      const diasMap = {
+        'lunes': 'L', 'martes': 'M', 'miércoles': 'X', 'miercoles': 'X',
+        'jueves': 'J', 'viernes': 'V', 'sábado': 'S', 'sabado': 'S', 'domingo': 'D',
+        'l': 'L', 'm': 'M', 'x': 'X', 'j': 'J', 'v': 'V', 's': 'S', 'd': 'D'
+      };
+
+      disponibilidad.forEach(d => {
+        if (String(d.id_recurso) !== String(idRecurso)) return;
+
+        // Si Permitido es false/no/0, está bloqueado
+        const permitido = d.permitido;
+        const esBloqueado = permitido === false ||
+                           permitido === 'false' ||
+                           permitido === 'FALSE' ||
+                           permitido === 'No' ||
+                           permitido === 'no' ||
+                           permitido === 'NO' ||
+                           permitido === 0 ||
+                           permitido === '0';
+
+        if (esBloqueado) {
+          const diaRaw = String(d.dia_semana || '').toLowerCase().trim();
+          const dia = diasMap[diaRaw] || diaRaw.toUpperCase().charAt(0);
+          const tramo = d.id_tramo;
+
+          if (dia && tramo) {
+            nodisponibles.push({
+              dia: dia,
+              tramo: tramo,
+              razon: d.razon_bloqueo || 'No disponible'
+            });
+          }
+        }
+      });
+    }
+
+    Logger.log(`📋 Conflictos para ${idRecurso}: ${recurrenciasOcupadas.length} recurrencias, ${nodisponibles.length} no disponibles`);
+
+    return {
+      success: true,
+      recurrenciasOcupadas: recurrenciasOcupadas,
+      nodisponibles: nodisponibles
+    };
+
+  } catch (error) {
+    Logger.log('❌ Error en getConflictosRecurrencia: ' + error.message);
+    return { success: false, error: error.message, recurrenciasOcupadas: [], nodisponibles: [] };
+  }
+}
+
+/* ============================================
    OBTENER RESERVAS RECURRENTES DEL USUARIO
    ============================================ */
 

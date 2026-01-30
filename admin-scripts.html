@@ -4181,7 +4181,45 @@ function verDetalleSolicitud(idSolicitud) {
  */
 // Variables para calendario de recurrente admin
 let seleccionesRecurrenteAdmin = new Set();
+let conflictosRecurrenteAdmin = { recurrenciasOcupadas: [], nodisponibles: [] };
 const DIAS_RECURRENTES_ADMIN = ['L', 'M', 'X', 'J', 'V'];
+
+/**
+ * Carga los conflictos para un recurso específico
+ */
+async function cargarConflictosRecurso(idRecurso) {
+  if (!idRecurso) {
+    conflictosRecurrenteAdmin = { recurrenciasOcupadas: [], nodisponibles: [] };
+    generarMatrizRecurrenteAdmin();
+    return;
+  }
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .getConflictosRecurrencia(idRecurso);
+    });
+
+    if (result && result.success) {
+      conflictosRecurrenteAdmin = {
+        recurrenciasOcupadas: result.recurrenciasOcupadas || [],
+        nodisponibles: result.nodisponibles || []
+      };
+    } else {
+      conflictosRecurrenteAdmin = { recurrenciasOcupadas: [], nodisponibles: [] };
+    }
+  } catch (error) {
+    console.error('Error cargando conflictos:', error);
+    conflictosRecurrenteAdmin = { recurrenciasOcupadas: [], nodisponibles: [] };
+  }
+
+  // Limpiar selecciones previas y regenerar matriz
+  seleccionesRecurrenteAdmin.clear();
+  generarMatrizRecurrenteAdmin();
+  actualizarContadorRecurrenteAdmin();
+}
 
 function abrirModalRecurrenteDirecta() {
   // Resetear selecciones
@@ -4195,6 +4233,14 @@ function abrirModalRecurrenteDirecta() {
       selectRecurso.innerHTML += `<option value="${r.id_recurso}">${escaparHTML(r.nombre)}</option>`;
     }
   });
+
+  // Listener para cargar conflictos al cambiar recurso
+  selectRecurso.onchange = function() {
+    cargarConflictosRecurso(this.value);
+  };
+
+  // Resetear conflictos
+  conflictosRecurrenteAdmin = { recurrenciasOcupadas: [], nodisponibles: [] };
 
   // Poblar selector de usuarios (campos: Nombre, Email, Activo, Admin)
   const selectUsuario = document.getElementById('recDirectaUsuario');
@@ -4283,9 +4329,38 @@ function generarMatrizRecurrenteAdmin() {
       const td = document.createElement('td');
       const celdaId = `${tramo.id_tramo}-${dia}`;
       td.id = `celda-rec-admin-${celdaId}`;
-      td.className = 'p-1 border border-gray-100 h-10 text-center transition-all duration-200 cursor-pointer hover:bg-blue-50';
-      td.innerHTML = `<div class="w-full h-full flex items-center justify-center"></div>`;
-      td.onclick = () => toggleCeldaRecurrenteAdmin(tramo.id_tramo, dia);
+
+      // Verificar si está ocupada por recurrencia
+      const ocupadaPor = conflictosRecurrenteAdmin.recurrenciasOcupadas.find(
+        c => c.dia === dia && c.tramo === tramo.id_tramo
+      );
+
+      // Verificar si no está disponible
+      const noDisponible = conflictosRecurrenteAdmin.nodisponibles.find(
+        c => c.dia === dia && c.tramo === tramo.id_tramo
+      );
+
+      if (ocupadaPor) {
+        // Celda ocupada por otra recurrencia (ROJO)
+        td.className = 'p-1 border border-red-200 h-10 text-center bg-red-100 cursor-not-allowed';
+        td.innerHTML = `<div class="w-full h-full flex items-center justify-center" title="Ocupado por: ${escaparHTML(ocupadaPor.usuario)}">
+          <iconify-icon icon="mdi:account-clock" class="text-red-500 text-sm"></iconify-icon>
+        </div>`;
+        td.title = `Ocupado por: ${ocupadaPor.usuario}`;
+      } else if (noDisponible) {
+        // Celda no disponible (GRIS)
+        td.className = 'p-1 border border-gray-200 h-10 text-center bg-gray-200 cursor-not-allowed';
+        td.innerHTML = `<div class="w-full h-full flex items-center justify-center" title="${escaparHTML(noDisponible.razon || 'No disponible')}">
+          <iconify-icon icon="mdi:block-helper" class="text-gray-400 text-sm"></iconify-icon>
+        </div>`;
+        td.title = noDisponible.razon || 'No disponible';
+      } else {
+        // Celda disponible (normal)
+        td.className = 'p-1 border border-gray-100 h-10 text-center transition-all duration-200 cursor-pointer hover:bg-blue-50';
+        td.innerHTML = `<div class="w-full h-full flex items-center justify-center"></div>`;
+        td.onclick = () => toggleCeldaRecurrenteAdmin(tramo.id_tramo, dia);
+      }
+
       tr.appendChild(td);
     });
 
@@ -4300,6 +4375,19 @@ function toggleCeldaRecurrenteAdmin(idTramo, dia) {
   const celdaId = `${idTramo}-${dia}`;
   const celda = document.getElementById(`celda-rec-admin-${celdaId}`);
   if (!celda) return;
+
+  // Verificar que no esté bloqueada
+  const ocupada = conflictosRecurrenteAdmin.recurrenciasOcupadas.find(
+    c => c.dia === dia && c.tramo === idTramo
+  );
+  const noDisponible = conflictosRecurrenteAdmin.nodisponibles.find(
+    c => c.dia === dia && c.tramo === idTramo
+  );
+
+  if (ocupada || noDisponible) {
+    // No permitir seleccionar celdas bloqueadas
+    return;
+  }
 
   if (seleccionesRecurrenteAdmin.has(celdaId)) {
     seleccionesRecurrenteAdmin.delete(celdaId);
