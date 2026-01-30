@@ -444,7 +444,10 @@ function renderTablaReservas() {
   const recursosMap = {};
   (AdminState.recursos || []).forEach(r => {
     const id = String(r.id_recurso || r.ID_Recurso || '').toLowerCase();
-    if (id) recursosMap[id] = r.nombre_recurso || r.Nombre || r.nombre || r.ID_Recurso;
+    if (id) recursosMap[id] = {
+      nombre: r.nombre_recurso || r.Nombre || r.nombre || r.ID_Recurso,
+      icono: r.icono || 'mdi:cube-outline'
+    };
   });
 
   // --- B. PROCESADO Y FILTRADO ---
@@ -457,12 +460,14 @@ function renderTablaReservas() {
     .map(reserva => {
       const emailKey = String(reserva.Email_Usuario || '').toLowerCase();
       const recursoKey = String(reserva.ID_Recurso || '').toLowerCase();
+      const recursoInfo = recursosMap[recursoKey] || { nombre: reserva.ID_Recurso || 'Recurso eliminado', icono: 'mdi:cube-outline' };
 
       return {
         ...reserva,
         // Usamos los mapas para obtener nombres bonitos
         nombreUsuario: usuariosMap[emailKey] || reserva.Email_Usuario || 'Desconocido',
-        nombreRecurso: recursosMap[recursoKey] || reserva.ID_Recurso || 'Recurso eliminado'
+        nombreRecurso: recursoInfo.nombre,
+        iconoRecurso: recursoInfo.icono
       };
     })
     .filter(r => {
@@ -607,7 +612,7 @@ function renderTablaReservas() {
       <td class="px-6 py-4">
          <div class="flex items-center gap-3">
             <div class="h-9 w-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 shadow-sm border border-blue-100">
-               <iconify-icon icon="mdi:cube-outline" width="18"></iconify-icon>
+               <iconify-icon icon="${safeHtmlRes(reserva.iconoRecurso)}" width="18"></iconify-icon>
             </div>
             <div class="flex flex-col min-w-0">
                <span class="text-sm font-semibold text-gray-700 truncate max-w-[150px]" title="${nombreRecursoSafe}">${nombreRecursoSafe}</span>
