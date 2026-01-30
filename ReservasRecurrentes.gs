@@ -981,7 +981,7 @@ function getConflictosRecurrencia(idRecurso) {
     hoy.setHours(0, 0, 0, 0);
 
     // 1. RECURRENCIAS APROBADAS ACTIVAS para este recurso
-    const sheetSolicitudes = ss.getSheetByName(SHEETS.SOLICITUDES_RECURRENTES);
+    const sheetSolicitudes = getOrCreateSheetSolicitudesRecurrentes();
     let recurrenciasOcupadas = [];
 
     if (sheetSolicitudes && sheetSolicitudes.getLastRow() > 1) {
