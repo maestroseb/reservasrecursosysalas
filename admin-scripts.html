@@ -3827,8 +3827,40 @@ function renderizarSolicitudesRecurrentes() {
     };
     const config = estadoConfig[(sol.estado || '').toLowerCase()] || { bg: 'bg-gray-100', text: 'text-gray-800', icon: 'mdi:help-circle' };
 
-    const diasMap = { 'L': 'L', 'M': 'M', 'X': 'X', 'J': 'J', 'V': 'V' };
-    const diasFormateados = (sol.dias_semana || '').split(',').map(d => diasMap[d.trim()] || d).join('·');
+    // Parsear días y tramos (soporta formato nuevo "V:T001,L:T002" y antiguo "L,M,X")
+    const diasSemanaStr = sol.dias_semana || '';
+    let diasUnicos = [];
+    let tramosUnicos = [];
+
+    if (diasSemanaStr.includes(':')) {
+      // Formato nuevo: "V:T001,V:T002,L:T001"
+      const items = diasSemanaStr.split(',');
+      const diasSet = new Set();
+      const tramosSet = new Set();
+      items.forEach(item => {
+        const [dia, tramo] = item.trim().split(':');
+        if (dia) diasSet.add(dia.toUpperCase());
+        if (tramo) tramosSet.add(tramo);
+      });
+      diasUnicos = Array.from(diasSet);
+      tramosUnicos = Array.from(tramosSet);
+    } else {
+      // Formato antiguo: "L,M,X"
+      diasUnicos = diasSemanaStr.split(',').map(d => d.trim().toUpperCase()).filter(Boolean);
+      if (sol.id_tramo) tramosUnicos = [sol.id_tramo];
+    }
+
+    const diasNombres = { 'L': 'L', 'M': 'M', 'X': 'X', 'J': 'J', 'V': 'V', 'S': 'S', 'D': 'D' };
+    const diasFormateados = diasUnicos.map(d => diasNombres[d] || d).join('·');
+
+    // Buscar nombres de tramos
+    const tramosNombres = tramosUnicos.map(idTramo => {
+      const tramo = AdminState.tramos?.find(t => t.id_tramo === idTramo);
+      return tramo?.nombre_tramo || idTramo;
+    });
+    const tramosDisplay = tramosNombres.length > 2
+      ? `${tramosNombres.slice(0, 2).join(', ')} +${tramosNombres.length - 2}`
+      : tramosNombres.join(', ') || sol.nombre_tramo || '-';
 
     const fechaInicio = sol.fecha_inicio ? new Date(sol.fecha_inicio).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }) : '-';
     const fechaFin = sol.fecha_fin ? new Date(sol.fecha_fin).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }) : '-';
@@ -3837,10 +3869,11 @@ function renderizarSolicitudesRecurrentes() {
     const esPendiente = (sol.estado || '').toLowerCase() === 'pendiente';
 
     return `
-      <div class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow">
+      <div class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow cursor-pointer group"
+           onclick="verDetalleSolicitud('${sol.id_solicitud}')">
         <div class="flex items-center gap-3">
           <!-- Icono del recurso -->
-          <div class="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+          <div class="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0 group-hover:bg-blue-100 transition-colors">
             <iconify-icon icon="${escaparHTML(icono)}" class="text-xl text-blue-600"></iconify-icon>
           </div>
 
@@ -3861,14 +3894,14 @@ function renderizarSolicitudesRecurrentes() {
               <span class="text-gray-300">|</span>
               <span class="font-medium">${escaparHTML(diasFormateados)}</span>
               <span class="text-gray-300">|</span>
-              <span>${escaparHTML(sol.nombre_tramo)}</span>
+              <span title="${escaparHTML(tramosNombres.join(', '))}">${escaparHTML(tramosDisplay)}</span>
               <span class="text-gray-300">|</span>
               <span>${fechaInicio} → ${fechaFin}</span>
             </div>
           </div>
 
           <!-- Botones -->
-          <div class="flex items-center gap-1 flex-shrink-0">
+          <div class="flex items-center gap-1 flex-shrink-0" onclick="event.stopPropagation()">
             ${esPendiente ? `
               <button onclick="abrirModalGestionarSolicitud('${sol.id_solicitud}')"
                 class="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
@@ -3881,10 +3914,6 @@ function renderizarSolicitudesRecurrentes() {
                 Cancelar
               </button>
             ` : ''}
-            <button onclick="verDetalleSolicitud('${sol.id_solicitud}')"
-              class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Ver detalle">
-              <iconify-icon icon="mdi:information-outline" class="text-lg"></iconify-icon>
-            </button>
           </div>
         </div>
       </div>
@@ -3906,16 +3935,38 @@ function abrirModalGestionarSolicitud(idSolicitud) {
   document.getElementById('gestionarSolicitudNotas').value = '';
   document.getElementById('gestionarSolicitudMotivo').value = '';
 
-  // Mostrar info de la solicitud
-  const diasMap = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes' };
-  const diasFormateados = (solicitud.dias_semana || '').split(',').map(d => diasMap[d.trim()] || d).join(', ');
+  // Mostrar info de la solicitud - Parsear días y tramos
+  const diasSemanaStr = solicitud.dias_semana || '';
+  const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes', 'S': 'Sábado', 'D': 'Domingo' };
+  let diasFormateados = '';
+  let tramosFormateados = '';
+
+  if (diasSemanaStr.includes(':')) {
+    const items = diasSemanaStr.split(',');
+    const diasSet = new Set();
+    const tramosSet = new Set();
+    items.forEach(item => {
+      const [dia, tramo] = item.trim().split(':');
+      if (dia) diasSet.add(dia.toUpperCase());
+      if (tramo) tramosSet.add(tramo);
+    });
+    diasFormateados = Array.from(diasSet).map(d => diasNombres[d] || d).join(', ');
+    const tramosConNombre = Array.from(tramosSet).map(idTramo => {
+      const tramo = AdminState.tramos?.find(t => t.id_tramo === idTramo);
+      return tramo?.nombre_tramo || idTramo;
+    });
+    tramosFormateados = tramosConNombre.join(', ');
+  } else {
+    diasFormateados = diasSemanaStr.split(',').map(d => diasNombres[d.trim().toUpperCase()] || d).join(', ');
+    tramosFormateados = solicitud.nombre_tramo || '-';
+  }
 
   document.getElementById('gestionarSolicitudInfo').innerHTML = `
     <div class="space-y-2 text-sm">
       <p><span class="font-medium text-gray-700">Recurso:</span> ${escaparHTML(solicitud.nombre_recurso)}</p>
       <p><span class="font-medium text-gray-700">Solicitante:</span> ${escaparHTML(solicitud.nombre_usuario)}</p>
       <p><span class="font-medium text-gray-700">Días:</span> ${escaparHTML(diasFormateados)}</p>
-      <p><span class="font-medium text-gray-700">Tramo:</span> ${escaparHTML(solicitud.nombre_tramo)}</p>
+      <p><span class="font-medium text-gray-700">Tramos:</span> ${escaparHTML(tramosFormateados)}</p>
       <p><span class="font-medium text-gray-700">Período:</span> ${new Date(solicitud.fecha_inicio).toLocaleDateString('es-ES')} → ${new Date(solicitud.fecha_fin).toLocaleDateString('es-ES')}</p>
       <p><span class="font-medium text-gray-700">Motivo:</span> ${escaparHTML(solicitud.motivo)}</p>
     </div>
@@ -4040,8 +4091,35 @@ function verDetalleSolicitud(idSolicitud) {
     return;
   }
 
-  const diasMap = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes' };
-  const diasFormateados = (solicitud.dias_semana || '').split(',').map(d => diasMap[d.trim()] || d).join(', ');
+  // Parsear días y tramos (soporta formato nuevo "V:T001,L:T002" y antiguo "L,M,X")
+  const diasSemanaStr = solicitud.dias_semana || '';
+  const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes', 'S': 'Sábado', 'D': 'Domingo' };
+  let diasFormateados = '';
+  let tramosFormateados = '';
+
+  if (diasSemanaStr.includes(':')) {
+    // Formato nuevo: "V:T001,V:T002,L:T001"
+    const items = diasSemanaStr.split(',');
+    const diasSet = new Set();
+    const tramosSet = new Set();
+    items.forEach(item => {
+      const [dia, tramo] = item.trim().split(':');
+      if (dia) diasSet.add(dia.toUpperCase());
+      if (tramo) tramosSet.add(tramo);
+    });
+    diasFormateados = Array.from(diasSet).map(d => diasNombres[d] || d).join(', ');
+
+    // Buscar nombres de tramos
+    const tramosConNombre = Array.from(tramosSet).map(idTramo => {
+      const tramo = AdminState.tramos?.find(t => t.id_tramo === idTramo);
+      return tramo?.nombre_tramo || idTramo;
+    });
+    tramosFormateados = tramosConNombre.join(', ');
+  } else {
+    // Formato antiguo: "L,M,X"
+    diasFormateados = diasSemanaStr.split(',').map(d => diasNombres[d.trim().toUpperCase()] || d).join(', ');
+    tramosFormateados = solicitud.nombre_tramo || '-';
+  }
 
   const estadoClasses = {
     'pendiente': 'text-amber-600',
@@ -4060,7 +4138,7 @@ function verDetalleSolicitud(idSolicitud) {
       <p><strong>ID:</strong> ${escaparHTML(solicitud.id_solicitud)}</p>
       <p><strong>Solicitante:</strong> ${escaparHTML(solicitud.nombre_usuario)} (${escaparHTML(solicitud.email_usuario)})</p>
       <p><strong>Días:</strong> ${escaparHTML(diasFormateados)}</p>
-      <p><strong>Tramo:</strong> ${escaparHTML(solicitud.nombre_tramo)}</p>
+      <p><strong>Tramos:</strong> ${escaparHTML(tramosFormateados)}</p>
       <p><strong>Período:</strong> ${new Date(solicitud.fecha_inicio).toLocaleDateString('es-ES')} → ${new Date(solicitud.fecha_fin).toLocaleDateString('es-ES')}</p>
       <p><strong>Motivo:</strong> ${escaparHTML(solicitud.motivo || 'No especificado')}</p>
       <p><strong>Fecha solicitud:</strong> ${new Date(solicitud.fecha_solicitud).toLocaleString('es-ES')}</p>

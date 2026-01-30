@@ -402,7 +402,7 @@
        ======================================== -->
   <div id="admin-section-recurrentes" class="admin-section hidden">
 
-    <div class="max-w-5xl mx-auto">
+    <div class="max-w-4xl mx-auto">
 
       <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <div>
@@ -418,44 +418,45 @@
         </button>
       </div>
 
-      <!-- Buscador y botón aprobar todas -->
-      <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-4">
-        <div class="flex flex-col sm:flex-row gap-3">
-          <div class="relative flex-1">
-            <iconify-icon icon="mdi:magnify" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-lg"></iconify-icon>
-            <input type="text" id="buscadorRecurrentes" placeholder="Buscar por recurso, usuario o motivo..."
-              oninput="buscarSolicitudesRecurrentes(this.value)"
-              class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm">
-          </div>
-          <button onclick="aprobarTodasPendientes()" id="btnAprobarTodasPendientes"
-            class="px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium flex items-center justify-center gap-2 transition-colors whitespace-nowrap">
-            <iconify-icon icon="mdi:check-all" class="text-lg"></iconify-icon>
-            <span>Aprobar todas pendientes</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- Filtros -->
+      <!-- Buscador, Filtros y botón aprobar todas -->
       <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-6">
-        <div class="flex flex-wrap gap-2">
-          <button onclick="filtrarSolicitudesRecurrentes('todas')" data-filtro-recurrente="todas"
-            class="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700">
-            Todas
-          </button>
-          <button onclick="filtrarSolicitudesRecurrentes('pendiente')" data-filtro-recurrente="pendiente"
-            class="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white">
-            <iconify-icon icon="mdi:clock-outline" class="mr-1"></iconify-icon>
-            Pendientes
-          </button>
-          <button onclick="filtrarSolicitudesRecurrentes('aprobada')" data-filtro-recurrente="aprobada"
-            class="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700">
-            <iconify-icon icon="mdi:check-circle-outline" class="mr-1"></iconify-icon>
-            Aprobadas
-          </button>
-          <button onclick="filtrarSolicitudesRecurrentes('rechazada')" data-filtro-recurrente="rechazada"
-            class="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700">
-            <iconify-icon icon="mdi:close-circle-outline" class="mr-1"></iconify-icon>
-            Rechazadas
+        <div class="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center">
+          <!-- Buscador -->
+          <div class="relative flex-1 min-w-0">
+            <iconify-icon icon="mdi:magnify" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-lg"></iconify-icon>
+            <input type="text" id="buscadorRecurrentes" placeholder="Buscar..."
+              oninput="buscarSolicitudesRecurrentes(this.value)"
+              class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm">
+          </div>
+
+          <!-- Filtros -->
+          <div class="flex flex-wrap gap-1.5 justify-center lg:justify-start">
+            <button onclick="filtrarSolicitudesRecurrentes('todas')" data-filtro-recurrente="todas"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white transition-colors">
+              Todas
+            </button>
+            <button onclick="filtrarSolicitudesRecurrentes('pendiente')" data-filtro-recurrente="pendiente"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors">
+              <iconify-icon icon="mdi:clock-outline" class="mr-0.5"></iconify-icon>
+              Pendientes
+            </button>
+            <button onclick="filtrarSolicitudesRecurrentes('aprobada')" data-filtro-recurrente="aprobada"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors">
+              <iconify-icon icon="mdi:check-circle-outline" class="mr-0.5"></iconify-icon>
+              Aprobadas
+            </button>
+            <button onclick="filtrarSolicitudesRecurrentes('rechazada')" data-filtro-recurrente="rechazada"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors">
+              <iconify-icon icon="mdi:close-circle-outline" class="mr-0.5"></iconify-icon>
+              Rechazadas
+            </button>
+          </div>
+
+          <!-- Botón aprobar todas -->
+          <button onclick="aprobarTodasPendientes()" id="btnAprobarTodasPendientes"
+            class="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0">
+            <iconify-icon icon="mdi:check-all" class="text-base"></iconify-icon>
+            <span>Aprobar todas</span>
           </button>
         </div>
       </div>
