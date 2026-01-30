@@ -1063,8 +1063,336 @@ function saveBatchDisponibilidad(cambios) {
     
     purgarCache();
     return { success: true };
-    
+
   } catch (e) { return { success: false, error: e.toString() }; }
+}
+
+/* ===========================================
+   DETECTAR CONFLICTOS CON RECURRENCIAS AL CAMBIAR DISPONIBILIDAD
+   =========================================== */
+
+/**
+ * Detecta si los cambios de disponibilidad afectan a recurrencias aprobadas
+ * @param {Array} cambios - Lista de cambios [{id_recurso, dia_semana, id_tramo, permitido, ...}]
+ * @returns {Object} - {tieneConflictos: boolean, afectados: Array}
+ */
+function detectarConflictosDisponibilidad(cambios) {
+  try {
+    if (!isUserAdmin()) throw new Error("Permiso denegado");
+
+    // Filtrar solo los cambios que BLOQUEAN (de Sí a No)
+    const bloqueos = cambios.filter(c =>
+      c.permitido === 'No' || c.permitido === false || c.permitido === 'FALSE'
+    );
+
+    if (bloqueos.length === 0) {
+      return { tieneConflictos: false, afectados: [] };
+    }
+
+    // Obtener recurrencias aprobadas
+    const sheetRecurrentes = getOrCreateSheetSolicitudesRecurrentes();
+    const data = sheetRecurrentes.getDataRange().getValues();
+
+    if (data.length <= 1) {
+      return { tieneConflictos: false, afectados: [] };
+    }
+
+    // Mapeo de días: nombre completo -> letra
+    const diaALetra = {
+      'Lunes': 'L', 'Martes': 'M', 'Miércoles': 'X', 'Miercoles': 'X',
+      'Jueves': 'J', 'Viernes': 'V'
+    };
+
+    const afectados = [];
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+
+    // Revisar cada recurrencia aprobada
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const estado = String(row[COLS_SOLICITUDES.ESTADO] || '').toLowerCase();
+
+      if (estado !== 'aprobada') continue;
+
+      const idRecurso = String(row[COLS_SOLICITUDES.ID_RECURSO] || '').trim();
+      const diasSemana = String(row[COLS_SOLICITUDES.DIAS_SEMANA] || '');
+      const emailUsuario = row[COLS_SOLICITUDES.EMAIL_USUARIO] || '';
+      const nombreUsuario = row[COLS_SOLICITUDES.NOMBRE_USUARIO] || emailUsuario;
+      const nombreRecurso = row[COLS_SOLICITUDES.NOMBRE_RECURSO] || idRecurso;
+      const fechaFin = row[COLS_SOLICITUDES.FECHA_FIN];
+
+      // Verificar que la recurrencia siga activa
+      if (fechaFin) {
+        const fechaFinDate = new Date(fechaFin);
+        if (fechaFinDate < hoy) continue; // Ya terminó
+      }
+
+      // Parsear días:tramos del formato "L:T001,M:T002,X:T003"
+      const tramosRecurrencia = [];
+      diasSemana.split(',').forEach(entry => {
+        const [dia, tramo] = entry.trim().split(':');
+        if (dia && tramo) {
+          tramosRecurrencia.push({ dia: dia.trim(), tramo: tramo.trim() });
+        }
+      });
+
+      // Verificar cada bloqueo contra esta recurrencia
+      for (const bloqueo of bloqueos) {
+        if (String(bloqueo.id_recurso).trim() !== idRecurso) continue;
+
+        const letraDia = diaALetra[bloqueo.dia_semana] || bloqueo.dia_semana;
+        const idTramo = String(bloqueo.id_tramo).trim();
+
+        // Buscar si este día:tramo está en la recurrencia
+        const afectado = tramosRecurrencia.find(t =>
+          t.dia === letraDia && t.tramo === idTramo
+        );
+
+        if (afectado) {
+          afectados.push({
+            id_solicitud: row[COLS_SOLICITUDES.ID_SOLICITUD],
+            id_recurso: idRecurso,
+            email_usuario: emailUsuario,
+            nombre_usuario: nombreUsuario,
+            nombre_recurso: nombreRecurso,
+            dia_semana: bloqueo.dia_semana,
+            id_tramo: idTramo,
+            dia_letra: letraDia
+          });
+        }
+      }
+    }
+
+    return {
+      tieneConflictos: afectados.length > 0,
+      afectados: afectados
+    };
+
+  } catch (e) {
+    Logger.log('Error en detectarConflictosDisponibilidad: ' + e.message);
+    return { tieneConflictos: false, afectados: [], error: e.message };
+  }
+}
+
+/**
+ * Guarda disponibilidad con opción de forzar (cancela recurrencias afectadas)
+ * @param {Array} cambios - Lista de cambios de disponibilidad
+ * @param {boolean} forzar - Si true, cancela los tramos afectados de las recurrencias
+ * @returns {Object}
+ */
+function saveBatchDisponibilidadConValidacion(cambios, forzar = false) {
+  try {
+    if (!isUserAdmin()) throw new Error("Permiso denegado");
+
+    // Primero detectar conflictos
+    const conflictos = detectarConflictosDisponibilidad(cambios);
+
+    if (conflictos.tieneConflictos && !forzar) {
+      // Hay conflictos y no se fuerza: devolver para confirmación
+      return {
+        success: false,
+        requiereConfirmacion: true,
+        afectados: conflictos.afectados
+      };
+    }
+
+    // Si hay conflictos y se fuerza, procesar las cancelaciones
+    if (conflictos.tieneConflictos && forzar) {
+      const resultadoCancelaciones = procesarCancelacionesPorDisponibilidad(conflictos.afectados);
+      if (!resultadoCancelaciones.success) {
+        return resultadoCancelaciones;
+      }
+    }
+
+    // Guardar los cambios de disponibilidad
+    return saveBatchDisponibilidad(cambios);
+
+  } catch (e) {
+    Logger.log('Error en saveBatchDisponibilidadConValidacion: ' + e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Procesa las cancelaciones de tramos en recurrencias afectadas
+ * @param {Array} afectados - Lista de tramos afectados
+ * @returns {Object}
+ */
+function procesarCancelacionesPorDisponibilidad(afectados) {
+  try {
+    const sheetRecurrentes = getOrCreateSheetSolicitudesRecurrentes();
+    const data = sheetRecurrentes.getDataRange().getValues();
+
+    // Agrupar afectados por solicitud
+    const porSolicitud = {};
+    afectados.forEach(a => {
+      if (!porSolicitud[a.id_solicitud]) {
+        porSolicitud[a.id_solicitud] = {
+          email: a.email_usuario,
+          nombre: a.nombre_usuario,
+          recurso: a.nombre_recurso,
+          tramosAfectados: []
+        };
+      }
+      porSolicitud[a.id_solicitud].tramosAfectados.push({
+        dia: a.dia_semana,
+        dia_letra: a.dia_letra,
+        tramo: a.id_tramo
+      });
+    });
+
+    // Procesar cada solicitud afectada
+    for (let i = 1; i < data.length; i++) {
+      const idSolicitud = data[i][COLS_SOLICITUDES.ID_SOLICITUD];
+
+      if (!porSolicitud[idSolicitud]) continue;
+
+      const diasActuales = String(data[i][COLS_SOLICITUDES.DIAS_SEMANA] || '');
+      const tramosAfectados = porSolicitud[idSolicitud].tramosAfectados;
+
+      // Eliminar los tramos afectados
+      const tramosList = diasActuales.split(',').map(e => e.trim()).filter(e => e);
+      const tramosRestantes = tramosList.filter(entry => {
+        const [dia, tramo] = entry.split(':');
+        // Mantener si NO está en los afectados
+        return !tramosAfectados.some(t => t.dia_letra === dia && t.tramo === tramo);
+      });
+
+      const fila = i + 1;
+
+      if (tramosRestantes.length === 0) {
+        // Sin tramos restantes: marcar como cancelada
+        sheetRecurrentes.getRange(fila, COLS_SOLICITUDES.ESTADO + 1).setValue('cancelada');
+        sheetRecurrentes.getRange(fila, COLS_SOLICITUDES.NOTAS_ADMIN + 1).setValue(
+          'Cancelada automáticamente por cambio de disponibilidad del recurso'
+        );
+      } else {
+        // Actualizar con los tramos restantes
+        sheetRecurrentes.getRange(fila, COLS_SOLICITUDES.DIAS_SEMANA + 1).setValue(tramosRestantes.join(','));
+
+        // Añadir nota
+        const notaActual = data[i][COLS_SOLICITUDES.NOTAS_ADMIN] || '';
+        const nuevaNota = notaActual + (notaActual ? '\n' : '') +
+          `Tramos cancelados por disponibilidad: ${tramosAfectados.map(t => t.dia_letra + ':' + t.tramo).join(', ')}`;
+        sheetRecurrentes.getRange(fila, COLS_SOLICITUDES.NOTAS_ADMIN + 1).setValue(nuevaNota);
+      }
+
+      // Enviar notificación al usuario
+      enviarNotificacionCancelacionDisponibilidad(porSolicitud[idSolicitud]);
+    }
+
+    // También cancelar las reservas individuales futuras de esos tramos
+    cancelarReservasFuturasPorDisponibilidad(afectados);
+
+    return { success: true };
+
+  } catch (e) {
+    Logger.log('Error en procesarCancelacionesPorDisponibilidad: ' + e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Cancela reservas futuras individuales afectadas por cambio de disponibilidad
+ */
+function cancelarReservasFuturasPorDisponibilidad(afectados) {
+  try {
+    const ss = getDB();
+    const sheetReservas = ss.getSheetByName(SHEETS.RESERVAS);
+    if (!sheetReservas) return;
+
+    const data = sheetReservas.getDataRange().getValues();
+    const headers = data[0].map(h => String(h).toLowerCase().trim());
+
+    const colIdRecurso = headers.indexOf('id_recurso');
+    const colFecha = headers.indexOf('fecha');
+    const colIdTramo = headers.indexOf('id_tramo');
+    const colEstado = headers.indexOf('estado');
+    const colTipoReserva = headers.indexOf('tipo_reserva');
+
+    if (colIdRecurso < 0 || colFecha < 0 || colIdTramo < 0 || colEstado < 0) return;
+
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+
+    // Mapeo de día de semana JS a letra
+    const jsToLetra = { 1: 'L', 2: 'M', 3: 'X', 4: 'J', 5: 'V' };
+
+    for (let i = data.length - 1; i >= 1; i--) {
+      const row = data[i];
+      const estado = String(row[colEstado] || '').toLowerCase();
+
+      if (estado !== 'activa') continue;
+
+      const tipoReserva = String(row[colTipoReserva] || '').toLowerCase();
+      if (tipoReserva !== 'recurrente') continue;
+
+      const fechaReserva = new Date(row[colFecha]);
+      if (fechaReserva < hoy) continue;
+
+      const idRecurso = String(row[colIdRecurso]).trim();
+      const idTramo = String(row[colIdTramo]).trim();
+      const diaSemana = jsToLetra[fechaReserva.getDay()];
+
+      // Verificar si está afectada (debe coincidir recurso, día Y tramo)
+      const esAfectada = afectados.some(a =>
+        String(a.id_recurso || '').trim() === idRecurso &&
+        a.dia_letra === diaSemana &&
+        String(a.id_tramo).trim() === idTramo
+      );
+
+      if (esAfectada) {
+        // Cancelar la reserva
+        sheetReservas.getRange(i + 1, colEstado + 1).setValue('cancelada');
+      }
+    }
+
+  } catch (e) {
+    Logger.log('Error en cancelarReservasFuturasPorDisponibilidad: ' + e.message);
+  }
+}
+
+/**
+ * Envía notificación al usuario sobre cancelación por disponibilidad
+ */
+function enviarNotificacionCancelacionDisponibilidad(info) {
+  try {
+    const email = info.email;
+    const nombre = info.nombre || email;
+    const recurso = info.recurso;
+    const tramos = info.tramosAfectados;
+
+    const tramosTexto = tramos.map(t => `${t.dia} (${t.tramo})`).join(', ');
+
+    const asunto = `[Reservas] Cambio en tu reserva recurrente de ${recurso}`;
+
+    const cuerpo = `
+Hola ${nombre},
+
+Te informamos que el administrador ha modificado la disponibilidad del recurso "${recurso}".
+
+Como consecuencia, los siguientes tramos de tu reserva recurrente han sido cancelados:
+${tramosTexto}
+
+Las reservas futuras de esos tramos ya no están activas.
+
+Si tienes alguna duda, contacta con el administrador.
+
+Saludos,
+Sistema de Reservas
+    `.trim();
+
+    MailApp.sendEmail({
+      to: email,
+      subject: asunto,
+      body: cuerpo
+    });
+
+    Logger.log(`Email enviado a ${email} sobre cancelación de tramos`);
+
+  } catch (e) {
+    Logger.log('Error enviando email de cancelación: ' + e.message);
+  }
 }
 
 /* ===========================================

@@ -1531,14 +1531,17 @@ function checkDispChanges() {
   }
 }
 
-function guardarCambiosDisp() {
+// Variable para almacenar payload pendiente de confirmación
+let payloadDisponibilidadPendiente = null;
+
+function guardarCambiosDisp(forzar = false) {
   if (!DispState.recursoId) {
       showToast('error', 'Error: No hay recurso seleccionado');
       return;
   }
 
   showLoading();
-  
+
   const payload = DispState.datosActuales.map(d => ({
     id_recurso: DispState.recursoId,
     id_tramo: d.id_tramo,
@@ -1546,22 +1549,132 @@ function guardarCambiosDisp() {
     permitido: d.permitido,
     razon_bloqueo: d.razon_bloqueo
   }));
-  
+
   google.script.run
     .withSuccessHandler(res => {
       hideLoading();
+
+      if (res.requiereConfirmacion && !forzar) {
+        // Hay conflictos con recurrencias: mostrar modal de confirmación
+        payloadDisponibilidadPendiente = payload;
+        mostrarModalConflictosDisponibilidad(res.afectados);
+        return;
+      }
+
       if(res.success) {
         showToast('success', 'Disponibilidad guardada');
         DispState.datosOriginales = JSON.parse(JSON.stringify(DispState.datosActuales));
         AdminState.disponibilidad = AdminState.disponibilidad.filter(d => String(d.id_recurso) !== String(DispState.recursoId));
         payload.forEach(p => AdminState.disponibilidad.push(p));
         checkDispChanges();
+        payloadDisponibilidadPendiente = null;
       } else {
-        showToast('error', res.error);
+        showToast('error', res.error || 'Error al guardar');
       }
     })
     .withFailureHandler(err => { hideLoading(); showToast('error', err); })
-    .saveBatchDisponibilidad(payload);
+    .saveBatchDisponibilidadConValidacion(payload, forzar);
+}
+
+/**
+ * Muestra modal de confirmación cuando hay recurrencias afectadas
+ */
+function mostrarModalConflictosDisponibilidad(afectados) {
+  // Agrupar por usuario
+  const porUsuario = {};
+  afectados.forEach(a => {
+    if (!porUsuario[a.email_usuario]) {
+      porUsuario[a.email_usuario] = {
+        nombre: a.nombre_usuario,
+        tramos: []
+      };
+    }
+    porUsuario[a.email_usuario].tramos.push(`${a.dia_semana} (${a.id_tramo})`);
+  });
+
+  // Generar HTML del listado
+  let listaHTML = '';
+  Object.keys(porUsuario).forEach(email => {
+    const u = porUsuario[email];
+    listaHTML += `
+      <div class="flex items-start gap-3 p-3 bg-red-50 rounded-lg border border-red-100">
+        <iconify-icon icon="mdi:account-alert" class="text-red-500 text-xl mt-0.5 shrink-0"></iconify-icon>
+        <div class="flex-1 min-w-0">
+          <p class="font-medium text-gray-800 text-sm truncate">${escaparHTML(u.nombre)}</p>
+          <p class="text-xs text-gray-500 truncate">${escaparHTML(email)}</p>
+          <p class="text-xs text-red-600 mt-1">Tramos: ${u.tramos.join(', ')}</p>
+        </div>
+      </div>
+    `;
+  });
+
+  // Crear o actualizar modal
+  let modal = document.getElementById('modalConflictosDisponibilidad');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modalConflictosDisponibilidad';
+    document.body.appendChild(modal);
+  }
+
+  modal.className = 'fixed inset-0 z-[10000] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4';
+  modal.innerHTML = `
+    <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 fade-in duration-200">
+      <!-- Header -->
+      <div class="bg-red-50 border-b border-red-100 px-5 py-4 flex items-center gap-3">
+        <div class="p-2 rounded-lg bg-red-100 text-red-600">
+          <iconify-icon icon="mdi:alert-circle" class="text-2xl"></iconify-icon>
+        </div>
+        <div>
+          <h3 class="text-lg font-bold text-gray-900">Conflicto con reservas recurrentes</h3>
+          <p class="text-sm text-gray-600">${afectados.length} tramo(s) afectado(s)</p>
+        </div>
+      </div>
+
+      <!-- Body -->
+      <div class="p-5 overflow-y-auto flex-1">
+        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+          <div class="flex items-start gap-2">
+            <iconify-icon icon="mdi:information" class="text-amber-600 text-lg mt-0.5 shrink-0"></iconify-icon>
+            <p class="text-sm text-amber-800">
+              Los siguientes usuarios tienen reservas recurrentes en los tramos que vas a bloquear.
+              Si continúas, se cancelarán sus tramos afectados y recibirán una notificación por email.
+            </p>
+          </div>
+        </div>
+
+        <div class="space-y-2 max-h-60 overflow-y-auto">
+          ${listaHTML}
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="bg-gray-50 border-t border-gray-200 px-5 py-4 flex gap-3">
+        <button onclick="cerrarModalConflictosDisponibilidad()"
+          class="flex-1 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition-colors">
+          Cancelar
+        </button>
+        <button onclick="confirmarGuardarConConflictos()"
+          class="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-colors flex items-center justify-center gap-2">
+          <iconify-icon icon="mdi:check"></iconify-icon>
+          Guardar y notificar
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function cerrarModalConflictosDisponibilidad() {
+  const modal = document.getElementById('modalConflictosDisponibilidad');
+  if (modal) modal.remove();
+  payloadDisponibilidadPendiente = null;
+}
+
+function confirmarGuardarConConflictos() {
+  cerrarModalConflictosDisponibilidad();
+  if (payloadDisponibilidadPendiente) {
+    // Llamar de nuevo con forzar = true
+    guardarCambiosDisp(true);
+  }
 }
 
 function descartarCambiosDisp() {
