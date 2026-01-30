@@ -1670,11 +1670,43 @@ function cerrarModalConflictosDisponibilidad() {
 }
 
 function confirmarGuardarConConflictos() {
-  cerrarModalConflictosDisponibilidad();
-  if (payloadDisponibilidadPendiente) {
-    // Llamar de nuevo con forzar = true
-    guardarCambiosDisp(true);
-  }
+  // Cerrar modal pero NO resetear el payload todavía
+  const modal = document.getElementById('modalConflictosDisponibilidad');
+  if (modal) modal.remove();
+
+  // Mostrar loading
+  showLoading();
+
+  // Reconstruir payload desde el estado actual
+  const payload = DispState.datosActuales.map(d => ({
+    id_recurso: DispState.recursoId,
+    id_tramo: d.id_tramo,
+    dia_semana: d.dia_semana,
+    permitido: d.permitido,
+    razon_bloqueo: d.razon_bloqueo
+  }));
+
+  google.script.run
+    .withSuccessHandler(res => {
+      hideLoading();
+      payloadDisponibilidadPendiente = null;
+
+      if (res.success) {
+        showToast('success', 'Disponibilidad guardada y usuarios notificados');
+        DispState.datosOriginales = JSON.parse(JSON.stringify(DispState.datosActuales));
+        AdminState.disponibilidad = AdminState.disponibilidad.filter(d => String(d.id_recurso) !== String(DispState.recursoId));
+        payload.forEach(p => AdminState.disponibilidad.push(p));
+        checkDispChanges();
+      } else {
+        showToast('error', res.error || 'Error al guardar');
+      }
+    })
+    .withFailureHandler(err => {
+      hideLoading();
+      payloadDisponibilidadPendiente = null;
+      showToast('error', 'Error: ' + err);
+    })
+    .saveBatchDisponibilidadConValidacion(payload, true);
 }
 
 function descartarCambiosDisp() {
