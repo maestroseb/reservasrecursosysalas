@@ -1748,13 +1748,14 @@ function showInfo(message) {
 
 // Estado para las selecciones del calendario recurrente
 let seleccionesRecurrentes = new Set(); // Formato: "idTramo-dia" ej: "T001-L"
+let conflictosRecurrenteUsuario = { recurrenciasOcupadas: [], nodisponibles: [] };
 const DIAS_RECURRENTES = ['L', 'M', 'X', 'J', 'V'];
 const NOMBRES_DIAS_RECURRENTES = { 'L': 'Lun', 'M': 'Mar', 'X': 'Mié', 'J': 'Jue', 'V': 'Vie' };
 
 /**
  * Abrir modal de solicitud de reserva recurrente
  */
-function abrirModalSolicitudRecurrente() {
+async function abrirModalSolicitudRecurrente() {
   console.log('🔄 Abriendo modal de solicitud recurrente');
 
   if (!globalState.recursoActual) {
@@ -1774,7 +1775,29 @@ function abrirModalSolicitudRecurrente() {
   // Resetear selecciones
   seleccionesRecurrentes.clear();
 
-  // Generar matriz del calendario
+  // Cargar conflictos para este recurso
+  try {
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .getConflictosRecurrencia(recurso.id_recurso);
+    });
+
+    if (result && result.success) {
+      conflictosRecurrenteUsuario = {
+        recurrenciasOcupadas: result.recurrenciasOcupadas || [],
+        nodisponibles: result.nodisponibles || []
+      };
+    } else {
+      conflictosRecurrenteUsuario = { recurrenciasOcupadas: [], nodisponibles: [] };
+    }
+  } catch (error) {
+    console.error('Error cargando conflictos:', error);
+    conflictosRecurrenteUsuario = { recurrenciasOcupadas: [], nodisponibles: [] };
+  }
+
+  // Generar matriz del calendario (ahora con conflictos)
   generarMatrizRecurrente();
 
   // Resetear formulario
@@ -1839,14 +1862,42 @@ function generarMatrizRecurrente() {
       const td = document.createElement('td');
       const celdaId = `${tramo.id_tramo}-${dia}`;
       td.id = `celda-rec-${celdaId}`;
-      td.className = 'p-1 border border-gray-100 h-12 text-center transition-all duration-200 cursor-pointer hover:bg-blue-50';
-      td.innerHTML = `
-        <div class="w-full h-full flex items-center justify-center opacity-0 group-hover:opacity-100">
-          <iconify-icon icon="mdi:plus" class="text-blue-400"></iconify-icon>
-        </div>
-      `;
 
-      td.onclick = () => toggleCeldaRecurrente(tramo.id_tramo, dia);
+      // Verificar si está ocupada por recurrencia
+      const ocupadaPor = conflictosRecurrenteUsuario.recurrenciasOcupadas.find(
+        c => c.dia === dia && c.tramo === tramo.id_tramo
+      );
+
+      // Verificar si no está disponible
+      const noDisponible = conflictosRecurrenteUsuario.nodisponibles.find(
+        c => c.dia === dia && c.tramo === tramo.id_tramo
+      );
+
+      if (ocupadaPor) {
+        // Celda ocupada por otra recurrencia (ROJO)
+        td.className = 'p-1 border border-red-200 h-12 text-center bg-red-100 cursor-not-allowed';
+        td.innerHTML = `<div class="w-full h-full flex items-center justify-center" title="Ocupado por: ${ocupadaPor.usuario}">
+          <iconify-icon icon="mdi:account-clock" class="text-red-500 text-sm"></iconify-icon>
+        </div>`;
+        td.title = `Ocupado por: ${ocupadaPor.usuario}`;
+      } else if (noDisponible) {
+        // Celda no disponible (GRIS)
+        td.className = 'p-1 border border-gray-200 h-12 text-center bg-gray-200 cursor-not-allowed';
+        td.innerHTML = `<div class="w-full h-full flex items-center justify-center" title="${noDisponible.razon || 'No disponible'}">
+          <iconify-icon icon="mdi:block-helper" class="text-gray-400 text-sm"></iconify-icon>
+        </div>`;
+        td.title = noDisponible.razon || 'No disponible';
+      } else {
+        // Celda disponible (normal)
+        td.className = 'p-1 border border-gray-100 h-12 text-center transition-all duration-200 cursor-pointer hover:bg-blue-50';
+        td.innerHTML = `
+          <div class="w-full h-full flex items-center justify-center opacity-0 group-hover:opacity-100">
+            <iconify-icon icon="mdi:plus" class="text-blue-400"></iconify-icon>
+          </div>
+        `;
+        td.onclick = () => toggleCeldaRecurrente(tramo.id_tramo, dia);
+      }
+
       tr.appendChild(td);
     });
 
@@ -1861,6 +1912,19 @@ function toggleCeldaRecurrente(idTramo, dia) {
   const celdaId = `${idTramo}-${dia}`;
   const celda = document.getElementById(`celda-rec-${celdaId}`);
   if (!celda) return;
+
+  // Verificar que no esté bloqueada
+  const ocupada = conflictosRecurrenteUsuario.recurrenciasOcupadas.find(
+    c => c.dia === dia && c.tramo === idTramo
+  );
+  const noDisponible = conflictosRecurrenteUsuario.nodisponibles.find(
+    c => c.dia === dia && c.tramo === idTramo
+  );
+
+  if (ocupada || noDisponible) {
+    // No permitir seleccionar celdas bloqueadas
+    return;
+  }
 
   if (seleccionesRecurrentes.has(celdaId)) {
     // Deseleccionar
