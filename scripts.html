@@ -1755,7 +1755,7 @@ const NOMBRES_DIAS_RECURRENTES = { 'L': 'Lun', 'M': 'Mar', 'X': 'Mié', 'J': 'Ju
 /**
  * Abrir modal de solicitud de reserva recurrente
  */
-async function abrirModalSolicitudRecurrente() {
+function abrirModalSolicitudRecurrente() {
   console.log('🔄 Abriendo modal de solicitud recurrente');
 
   if (!globalState.recursoActual) {
@@ -1772,33 +1772,29 @@ async function abrirModalSolicitudRecurrente() {
     nombreRecurso.textContent = recurso.nombre || 'Recurso';
   }
 
-  // Resetear selecciones
+  // Resetear selecciones y conflictos
   seleccionesRecurrentes.clear();
+  conflictosRecurrenteUsuario = { recurrenciasOcupadas: [], nodisponibles: [] };
 
-  // Cargar conflictos para este recurso
-  try {
-    const result = await new Promise((resolve, reject) => {
-      google.script.run
-        .withSuccessHandler(resolve)
-        .withFailureHandler(reject)
-        .getConflictosRecurrencia(recurso.id_recurso);
-    });
-
-    if (result && result.success) {
-      conflictosRecurrenteUsuario = {
-        recurrenciasOcupadas: result.recurrenciasOcupadas || [],
-        nodisponibles: result.nodisponibles || []
-      };
-    } else {
-      conflictosRecurrenteUsuario = { recurrenciasOcupadas: [], nodisponibles: [] };
-    }
-  } catch (error) {
-    console.error('Error cargando conflictos:', error);
-    conflictosRecurrenteUsuario = { recurrenciasOcupadas: [], nodisponibles: [] };
-  }
-
-  // Generar matriz del calendario (ahora con conflictos)
+  // Generar matriz del calendario SIN conflictos (se actualizará después)
   generarMatrizRecurrente();
+
+  // Cargar conflictos en segundo plano y actualizar calendario
+  google.script.run
+    .withSuccessHandler(function(result) {
+      if (result && result.success) {
+        conflictosRecurrenteUsuario = {
+          recurrenciasOcupadas: result.recurrenciasOcupadas || [],
+          nodisponibles: result.nodisponibles || []
+        };
+        // Regenerar matriz con los conflictos
+        generarMatrizRecurrente();
+      }
+    })
+    .withFailureHandler(function(error) {
+      console.error('Error cargando conflictos:', error);
+    })
+    .getConflictosRecurrencia(recurso.id_recurso);
 
   // Resetear formulario
   document.querySelector('input[name="tipoFechaFin"][value="finCurso"]').checked = true;
