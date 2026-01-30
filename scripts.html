@@ -1779,9 +1779,16 @@ function abrirModalSolicitudRecurrente() {
   // Generar matriz del calendario SIN conflictos (se actualizará después)
   generarMatrizRecurrente();
 
+  // Mostrar spinner mientras carga conflictos
+  const spinnerConflictos = document.getElementById('spinnerConflictosUsuario');
+  if (spinnerConflictos) spinnerConflictos.classList.remove('hidden');
+
   // Cargar conflictos en segundo plano y actualizar calendario
   google.script.run
     .withSuccessHandler(function(result) {
+      // Ocultar spinner
+      if (spinnerConflictos) spinnerConflictos.classList.add('hidden');
+
       if (result && result.success) {
         conflictosRecurrenteUsuario = {
           recurrenciasOcupadas: result.recurrenciasOcupadas || [],
@@ -1792,6 +1799,8 @@ function abrirModalSolicitudRecurrente() {
       }
     })
     .withFailureHandler(function(error) {
+      // Ocultar spinner en caso de error
+      if (spinnerConflictos) spinnerConflictos.classList.add('hidden');
       console.error('Error cargando conflictos:', error);
     })
     .getConflictosRecurrencia(recurso.id_recurso);

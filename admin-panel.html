@@ -1139,7 +1139,14 @@
             <iconify-icon icon="mdi:calendar-week"></iconify-icon>
             Selecciona los tramos *
           </label>
-          <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <div class="relative bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <!-- Spinner overlay mientras carga conflictos -->
+            <div id="spinnerConflictosAdmin" class="absolute inset-0 bg-white/80 z-10 flex items-center justify-center hidden">
+              <div class="flex flex-col items-center gap-2">
+                <iconify-icon icon="mdi:loading" class="text-2xl text-blue-500 animate-spin"></iconify-icon>
+                <span class="text-xs text-gray-500">Cargando disponibilidad...</span>
+              </div>
+            </div>
             <div class="overflow-x-auto">
               <table class="min-w-full">
                 <thead class="bg-gray-50 text-gray-500 text-xs uppercase font-medium">

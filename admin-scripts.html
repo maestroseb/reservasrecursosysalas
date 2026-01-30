@@ -4188,11 +4188,16 @@ const DIAS_RECURRENTES_ADMIN = ['L', 'M', 'X', 'J', 'V'];
  * Carga los conflictos para un recurso específico
  */
 async function cargarConflictosRecurso(idRecurso) {
+  const spinnerAdmin = document.getElementById('spinnerConflictosAdmin');
+
   if (!idRecurso) {
     conflictosRecurrenteAdmin = { recurrenciasOcupadas: [], nodisponibles: [] };
     generarMatrizRecurrenteAdmin();
     return;
   }
+
+  // Mostrar spinner
+  if (spinnerAdmin) spinnerAdmin.classList.remove('hidden');
 
   try {
     const result = await new Promise((resolve, reject) => {
@@ -4214,6 +4219,9 @@ async function cargarConflictosRecurso(idRecurso) {
     console.error('Error cargando conflictos:', error);
     conflictosRecurrenteAdmin = { recurrenciasOcupadas: [], nodisponibles: [] };
   }
+
+  // Ocultar spinner
+  if (spinnerAdmin) spinnerAdmin.classList.add('hidden');
 
   // Limpiar selecciones previas y regenerar matriz
   seleccionesRecurrenteAdmin.clear();
