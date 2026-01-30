@@ -485,63 +485,62 @@ function updateStep2Header(recurso) {
 }
 
 /* ============================================
-   2. RENDERIZAR CALENDARIO (COMPACTO) 📅
+   2. RENDERIZAR CALENDARIO (RESPONSIVE) 📅
    ============================================ */
 function renderCalendar(year, month) {
   if (!calendarGrid || !monthYear) return;
-  
-  // Cabeceras días (Muy minimalistas)
-  calendarGrid.innerHTML = 
-    ['L','M','X','J','V','S','D'].map(d => 
-      `<div class="w-8 h-8 flex items-center justify-center text-[10px] font-bold text-gray-400 tracking-wide">${d}</div>`
+
+  // Cabeceras días (Responsive: pequeño en móvil, más grande en PC)
+  calendarGrid.innerHTML =
+    ['L','M','X','J','V','S','D'].map(d =>
+      `<div class="w-8 h-8 sm:w-10 sm:h-10 md:w-11 md:h-11 flex items-center justify-center text-[10px] sm:text-xs font-bold text-gray-400 tracking-wide">${d}</div>`
     ).join('');
-  
+
   // Título Mes
   const fechaTitulo = new Date(year, month, 1);
   let textoMes = fechaTitulo.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
   monthYear.textContent = textoMes.charAt(0).toUpperCase() + textoMes.slice(1);
-  
+
   // Huecos vacíos
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   let startOffset = firstDay.getDay();
   if (startOffset === 0) startOffset = 6; else startOffset--;
-  
-  for (let i = 0; i < startOffset; i++) { 
-    calendarGrid.innerHTML += '<div class="w-8 h-8"></div>'; 
+
+  for (let i = 0; i < startOffset; i++) {
+    calendarGrid.innerHTML += '<div class="w-8 h-8 sm:w-10 sm:h-10 md:w-11 md:h-11"></div>';
   }
-  
+
   // Control de fechas
   const hoy = new Date();
   hoy.setHours(0, 0, 0, 0);
   const ahora = new Date();
   const esTardeHoy = (ahora.getHours() > 13 || (ahora.getHours() === 13 && ahora.getMinutes() > 10));
-  
+
   let htmlDias = '';
   for (let day = 1; day <= lastDay.getDate(); day++) {
     const thisDate = new Date(year, month, day);
-    
-    // ESTILOS DE DÍA (Compactos w-8 h-8)
-    // Redondos totalmente (rounded-full) para estilo móvil
-    let classes = "w-8 h-8 flex items-center justify-center rounded-full text-xs font-medium transition-all duration-200";
+
+    // ESTILOS DE DÍA (Responsive: compacto en móvil, más grande en PC)
+    let classes = "w-8 h-8 sm:w-10 sm:h-10 md:w-11 md:h-11 flex items-center justify-center rounded-full text-xs sm:text-sm md:text-base font-medium transition-all duration-200";
     let isDisabled = false;
-    
+
     const diaDeLaSemana = thisDate.getDay();
     const esFinDeSemana = (diaDeLaSemana === 0 || diaDeLaSemana === 6);
     const esHoyMismo = (thisDate.getTime() === hoy.getTime());
     const esPasado = thisDate < hoy;
 
     if (esPasado || (esHoyMismo && esTardeHoy) || esFinDeSemana) {
-      classes += " text-gray-300 cursor-not-allowed"; 
+      classes += " text-gray-300 cursor-not-allowed";
       isDisabled = true;
     } else if (globalState.fechaActual && thisDate.getTime() === globalState.fechaActual.getTime()) {
-      classes += " bg-gray-900 text-white shadow-md font-bold"; // Seleccionado (Negro/Oscuro elegante)
+      classes += " bg-blue-600 text-white shadow-md font-bold"; // Seleccionado (Azul)
     } else if (esHoyMismo) {
-      classes += " text-blue-600 border border-blue-200 font-bold"; 
+      classes += " text-blue-600 border border-blue-300 font-bold";
     } else {
       classes += " hover:bg-gray-100 text-gray-700";
     }
-    
+
     htmlDias += `<button class="${classes}" data-day="${day}" ${isDisabled ? 'disabled' : ''}>${day}</button>`;
   }
   calendarGrid.innerHTML += htmlDias;

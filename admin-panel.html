@@ -1090,24 +1090,23 @@
 
 <!-- Modal: Crear Reserva Recurrente Directa (Admin) -->
 <div id="modalRecurrenteDirecta" class="fixed inset-0 bg-gray-900/60 flex items-start sm:items-center justify-center z-[9999] p-4 overflow-y-auto hidden backdrop-blur-sm">
-  <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full my-4 sm:my-0">
-    <div class="bg-gradient-to-b from-blue-50 to-white rounded-xl">
+  <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full my-4 sm:my-0 max-h-[90vh] overflow-y-auto">
 
-      <!-- Header -->
-      <div class="flex items-center justify-between p-4 border-b border-gray-100">
-        <div class="flex items-center gap-2">
-          <div class="p-1.5 rounded-lg bg-blue-100 text-blue-600">
-            <iconify-icon icon="mdi:calendar-plus" class="text-xl"></iconify-icon>
-          </div>
-          <h3 class="text-lg font-bold text-gray-900">Nueva Reserva Recurrente</h3>
+    <!-- Header -->
+    <div class="sticky top-0 bg-white border-b border-gray-200 px-5 py-4 flex items-center justify-between rounded-t-xl z-10">
+      <div class="flex items-center gap-3">
+        <div class="p-2 rounded-lg bg-blue-50 text-blue-600 leading-none">
+          <iconify-icon icon="mdi:calendar-plus" class="text-2xl"></iconify-icon>
         </div>
-        <button onclick="cerrarModalRecurrenteDirecta()" class="text-gray-400 hover:text-gray-600 text-xl focus:outline-none">
-          <iconify-icon icon="mdi:close"></iconify-icon>
-        </button>
+        <h3 class="text-lg font-bold text-gray-800">Nueva Reserva Recurrente</h3>
       </div>
+      <button onclick="cerrarModalRecurrenteDirecta()" class="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+        <iconify-icon icon="mdi:close" class="text-xl text-gray-400"></iconify-icon>
+      </button>
+    </div>
 
-      <!-- Form -->
-      <div class="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+    <!-- Form -->
+    <div class="p-5 space-y-4">
 
         <!-- Fila: Recurso + Usuario -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1218,20 +1217,19 @@
             class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none text-sm"></textarea>
         </div>
 
-      </div>
-
-      <!-- Footer -->
-      <div class="sticky bottom-0 bg-gray-50 border-t border-gray-100 px-4 py-3 flex gap-2 rounded-b-xl">
-        <button type="button" onclick="cerrarModalRecurrenteDirecta()" class="flex-1 px-3 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium text-sm">
-          Cancelar
-        </button>
-        <button type="button" onclick="guardarRecurrenteDirecta()" id="btnGuardarRecurrenteDirecta" class="flex-[2] px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2 text-sm">
-          <iconify-icon icon="mdi:check"></iconify-icon>
-          Crear Reservas
-        </button>
-      </div>
-
     </div>
+
+    <!-- Footer -->
+    <div class="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-5 py-4 flex gap-3 rounded-b-xl">
+      <button type="button" onclick="cerrarModalRecurrenteDirecta()" class="flex-1 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium">
+        Cancelar
+      </button>
+      <button type="button" onclick="guardarRecurrenteDirecta()" id="btnGuardarRecurrenteDirecta" class="flex-[2] px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2">
+        <iconify-icon icon="mdi:check"></iconify-icon>
+        Crear Reservas
+      </button>
+    </div>
+
   </div>
 </div>
 
