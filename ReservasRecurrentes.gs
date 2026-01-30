@@ -1495,35 +1495,42 @@ function cancelarReservasFuturasDeTramos(idRecurso, idSolicitudRecurrente, tramo
     const colEstado = headers.indexOf('estado');
     const colIdSolicitudRec = headers.indexOf('id_solicitud_recurrente');
 
+    Logger.log(`[cancelarReservasFuturasDeTramos] Buscando reservas - Recurso: ${idRecurso}, Solicitud: ${idSolicitudRecurrente}`);
+    Logger.log(`[cancelarReservasFuturasDeTramos] Tramos a eliminar: ${JSON.stringify(tramosEliminados)}`);
+    Logger.log(`[cancelarReservasFuturasDeTramos] Columnas - idRecurso: ${colIdRecurso}, fecha: ${colFecha}, tramo: ${colIdTramo}, estado: ${colEstado}, idSolRec: ${colIdSolicitudRec}`);
+
     if (colIdRecurso < 0 || colFecha < 0 || colIdTramo < 0 || colEstado < 0) return 0;
 
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
 
     // Mapeo de día de semana JS a letra
-    const jsToLetra = { 1: 'L', 2: 'M', 3: 'X', 4: 'J', 5: 'V' };
+    const jsToLetra = { 0: 'D', 1: 'L', 2: 'M', 3: 'X', 4: 'J', 5: 'V', 6: 'S' };
 
     let canceladas = 0;
 
     for (let i = data.length - 1; i >= 1; i--) {
       const row = data[i];
-      const estado = String(row[colEstado] || '').toLowerCase();
+      const estado = String(row[colEstado] || '').toLowerCase().trim();
 
-      if (estado !== 'activa') continue;
+      // Aceptar tanto 'activa' como 'confirmada'
+      if (estado !== 'activa' && estado !== 'confirmada') continue;
 
-      // Verificar que pertenece a esta recurrencia
-      if (colIdSolicitudRec >= 0) {
-        const idSolRec = String(row[colIdSolicitudRec] || '').trim();
-        if (idSolRec !== idSolicitudRecurrente) continue;
-      }
-
-      const idRecursoReserva = String(row[colIdRecurso]).trim();
+      const idRecursoReserva = String(row[colIdRecurso] || '').trim();
       if (idRecursoReserva !== String(idRecurso).trim()) continue;
 
+      // Si existe la columna de solicitud recurrente, verificar que coincida
+      if (colIdSolicitudRec >= 0) {
+        const idSolRec = String(row[colIdSolicitudRec] || '').trim();
+        // Solo filtrar si hay un ID de solicitud en la reserva
+        if (idSolRec && idSolRec !== String(idSolicitudRecurrente).trim()) continue;
+      }
+
       const fechaReserva = new Date(row[colFecha]);
+      if (isNaN(fechaReserva.getTime())) continue;
       if (fechaReserva < hoy) continue;
 
-      const idTramo = String(row[colIdTramo]).trim();
+      const idTramo = String(row[colIdTramo] || '').trim();
       const diaSemana = jsToLetra[fechaReserva.getDay()];
 
       // Verificar si este tramo está en los eliminados
@@ -1532,11 +1539,13 @@ function cancelarReservasFuturasDeTramos(idRecurso, idSolicitudRecurrente, tramo
       );
 
       if (debeEliminar) {
-        sheetReservas.getRange(i + 1, colEstado + 1).setValue('cancelada');
+        Logger.log(`[cancelarReservasFuturasDeTramos] Cancelando reserva fila ${i + 1}: ${fechaReserva.toISOString()} - ${diaSemana}:${idTramo}`);
+        sheetReservas.getRange(i + 1, colEstado + 1).setValue('Cancelada');
         canceladas++;
       }
     }
 
+    Logger.log(`[cancelarReservasFuturasDeTramos] Total canceladas: ${canceladas}`);
     return canceladas;
 
   } catch (error) {

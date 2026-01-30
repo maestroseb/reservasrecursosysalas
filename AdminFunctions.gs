@@ -1316,18 +1316,20 @@ function cancelarReservasFuturasPorDisponibilidad(afectados) {
     hoy.setHours(0, 0, 0, 0);
 
     // Mapeo de día de semana JS a letra
-    const jsToLetra = { 1: 'L', 2: 'M', 3: 'X', 4: 'J', 5: 'V' };
+    const jsToLetra = { 0: 'D', 1: 'L', 2: 'M', 3: 'X', 4: 'J', 5: 'V', 6: 'S' };
 
     for (let i = data.length - 1; i >= 1; i--) {
       const row = data[i];
-      const estado = String(row[colEstado] || '').toLowerCase();
+      const estado = String(row[colEstado] || '').toLowerCase().trim();
 
-      if (estado !== 'activa') continue;
+      // Aceptar tanto 'activa' como 'confirmada'
+      if (estado !== 'activa' && estado !== 'confirmada') continue;
 
       const tipoReserva = String(row[colTipoReserva] || '').toLowerCase();
       if (tipoReserva !== 'recurrente') continue;
 
       const fechaReserva = new Date(row[colFecha]);
+      if (isNaN(fechaReserva.getTime())) continue;
       if (fechaReserva < hoy) continue;
 
       const idRecurso = String(row[colIdRecurso]).trim();
@@ -1343,7 +1345,7 @@ function cancelarReservasFuturasPorDisponibilidad(afectados) {
 
       if (esAfectada) {
         // Cancelar la reserva
-        sheetReservas.getRange(i + 1, colEstado + 1).setValue('cancelada');
+        sheetReservas.getRange(i + 1, colEstado + 1).setValue('Cancelada');
       }
     }
 
