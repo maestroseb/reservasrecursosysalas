@@ -513,8 +513,8 @@ function cancelarRecurrenciaAprobada(idSolicitud) {
 
     // Actualizar estado a Cancelada
     sheet.getRange(filaIndex, COLS_SOLICITUDES.ESTADO + 1).setValue('Cancelada');
-    sheet.getRange(filaIndex, COLS_SOLICITUDES.PROCESADO_POR + 1).setValue(adminEmail);
-    sheet.getRange(filaIndex, COLS_SOLICITUDES.FECHA_PROCESADO + 1).setValue(new Date());
+    sheet.getRange(filaIndex, COLS_SOLICITUDES.ADMIN_RESOLUTOR + 1).setValue(adminEmail);
+    sheet.getRange(filaIndex, COLS_SOLICITUDES.FECHA_RESOLUCION + 1).setValue(new Date());
     sheet.getRange(filaIndex, COLS_SOLICITUDES.NOTAS_ADMIN + 1).setValue('Cancelada por administrador');
 
     // Cancelar reservas futuras
