@@ -1397,3 +1397,197 @@ function contarSolicitudesPendientes() {
     return 0;
   }
 }
+
+/**
+ * Edita los tramos de una recurrencia aprobada
+ * @param {string} idSolicitud - ID de la solicitud
+ * @param {Array} tramosRestantes - Tramos que se mantienen [{dia, tramo}, ...]
+ * @param {Array} tramosEliminados - Tramos que se eliminan [{dia, tramo}, ...]
+ */
+function editarTramosRecurrencia(idSolicitud, tramosRestantes, tramosEliminados) {
+  try {
+    if (!isUserAdmin()) {
+      return { success: false, error: 'Permiso denegado' };
+    }
+
+    const sheetSolicitudes = getOrCreateSheetSolicitudesRecurrentes();
+    const data = sheetSolicitudes.getDataRange().getValues();
+
+    // Buscar la solicitud
+    let filaEncontrada = -1;
+    let solicitud = null;
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][COLS_SOLICITUDES.ID_SOLICITUD] === idSolicitud) {
+        filaEncontrada = i + 1;
+        solicitud = {
+          id_solicitud: data[i][COLS_SOLICITUDES.ID_SOLICITUD],
+          id_recurso: data[i][COLS_SOLICITUDES.ID_RECURSO],
+          nombre_recurso: data[i][COLS_SOLICITUDES.NOMBRE_RECURSO],
+          email_usuario: data[i][COLS_SOLICITUDES.EMAIL_USUARIO],
+          nombre_usuario: data[i][COLS_SOLICITUDES.NOMBRE_USUARIO],
+          dias_semana: data[i][COLS_SOLICITUDES.DIAS_SEMANA],
+          notas_admin: data[i][COLS_SOLICITUDES.NOTAS_ADMIN] || ''
+        };
+        break;
+      }
+    }
+
+    if (filaEncontrada < 0 || !solicitud) {
+      return { success: false, error: 'Solicitud no encontrada' };
+    }
+
+    // Verificar que hay tramos restantes
+    if (!tramosRestantes || tramosRestantes.length === 0) {
+      return { success: false, error: 'Debe quedar al menos un tramo. Use "Cancelar" para eliminar la recurrencia completa.' };
+    }
+
+    // Construir nuevo string de dias_semana
+    const nuevosDiasSemana = tramosRestantes.map(t => `${t.dia}:${t.tramo}`).join(',');
+
+    // Actualizar la solicitud
+    sheetSolicitudes.getRange(filaEncontrada, COLS_SOLICITUDES.DIAS_SEMANA + 1).setValue(nuevosDiasSemana);
+
+    // Añadir nota de modificación
+    const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes' };
+    const eliminadosTexto = tramosEliminados.map(t => `${diasNombres[t.dia] || t.dia}:${t.tramo}`).join(', ');
+    const nuevaNota = solicitud.notas_admin +
+      (solicitud.notas_admin ? '\n' : '') +
+      `[${new Date().toLocaleDateString('es-ES')}] Tramos eliminados por admin: ${eliminadosTexto}`;
+    sheetSolicitudes.getRange(filaEncontrada, COLS_SOLICITUDES.NOTAS_ADMIN + 1).setValue(nuevaNota);
+
+    // Cancelar las reservas futuras de los tramos eliminados
+    const reservasCanceladas = cancelarReservasFuturasDeTramos(
+      solicitud.id_recurso,
+      idSolicitud,
+      tramosEliminados
+    );
+
+    // Notificar al usuario
+    enviarNotificacionEdicionRecurrencia(solicitud, tramosEliminados, reservasCanceladas);
+
+    return {
+      success: true,
+      message: `Tramos actualizados. ${reservasCanceladas} reservas futuras canceladas.`
+    };
+
+  } catch (error) {
+    Logger.log('Error en editarTramosRecurrencia: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Cancela las reservas futuras de tramos específicos de una recurrencia
+ */
+function cancelarReservasFuturasDeTramos(idRecurso, idSolicitudRecurrente, tramosEliminados) {
+  try {
+    const ss = getDB();
+    const sheetReservas = ss.getSheetByName(SHEETS.RESERVAS);
+    if (!sheetReservas) return 0;
+
+    const data = sheetReservas.getDataRange().getValues();
+    const headers = data[0].map(h => String(h).toLowerCase().trim());
+
+    const colIdRecurso = headers.indexOf('id_recurso');
+    const colFecha = headers.indexOf('fecha');
+    const colIdTramo = headers.indexOf('id_tramo');
+    const colEstado = headers.indexOf('estado');
+    const colIdSolicitudRec = headers.indexOf('id_solicitud_recurrente');
+
+    if (colIdRecurso < 0 || colFecha < 0 || colIdTramo < 0 || colEstado < 0) return 0;
+
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+
+    // Mapeo de día de semana JS a letra
+    const jsToLetra = { 1: 'L', 2: 'M', 3: 'X', 4: 'J', 5: 'V' };
+
+    let canceladas = 0;
+
+    for (let i = data.length - 1; i >= 1; i--) {
+      const row = data[i];
+      const estado = String(row[colEstado] || '').toLowerCase();
+
+      if (estado !== 'activa') continue;
+
+      // Verificar que pertenece a esta recurrencia
+      if (colIdSolicitudRec >= 0) {
+        const idSolRec = String(row[colIdSolicitudRec] || '').trim();
+        if (idSolRec !== idSolicitudRecurrente) continue;
+      }
+
+      const idRecursoReserva = String(row[colIdRecurso]).trim();
+      if (idRecursoReserva !== String(idRecurso).trim()) continue;
+
+      const fechaReserva = new Date(row[colFecha]);
+      if (fechaReserva < hoy) continue;
+
+      const idTramo = String(row[colIdTramo]).trim();
+      const diaSemana = jsToLetra[fechaReserva.getDay()];
+
+      // Verificar si este tramo está en los eliminados
+      const debeEliminar = tramosEliminados.some(t =>
+        t.dia === diaSemana && t.tramo === idTramo
+      );
+
+      if (debeEliminar) {
+        sheetReservas.getRange(i + 1, colEstado + 1).setValue('cancelada');
+        canceladas++;
+      }
+    }
+
+    return canceladas;
+
+  } catch (error) {
+    Logger.log('Error en cancelarReservasFuturasDeTramos: ' + error.message);
+    return 0;
+  }
+}
+
+/**
+ * Envía notificación al usuario sobre edición de su recurrencia
+ */
+function enviarNotificacionEdicionRecurrencia(solicitud, tramosEliminados, reservasCanceladas) {
+  try {
+    const email = solicitud.email_usuario;
+    const nombre = solicitud.nombre_usuario || email;
+    const recurso = solicitud.nombre_recurso;
+
+    const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes' };
+    const tramosTexto = tramosEliminados.map(t =>
+      `${diasNombres[t.dia] || t.dia} (${t.tramo})`
+    ).join(', ');
+
+    const asunto = `[Reservas] Modificación en tu reserva recurrente de ${recurso}`;
+
+    const cuerpo = `
+Hola ${nombre},
+
+Te informamos que el administrador ha modificado tu reserva recurrente del recurso "${recurso}".
+
+Los siguientes tramos han sido eliminados:
+${tramosTexto}
+
+Se han cancelado ${reservasCanceladas} reserva(s) futura(s) de estos tramos.
+
+El resto de tus tramos de esta recurrencia siguen activos.
+
+Si tienes alguna duda, contacta con el administrador.
+
+Saludos,
+Sistema de Reservas
+    `.trim();
+
+    MailApp.sendEmail({
+      to: email,
+      subject: asunto,
+      body: cuerpo
+    });
+
+    Logger.log(`Email enviado a ${email} sobre edición de recurrencia`);
+
+  } catch (e) {
+    Logger.log('Error enviando email de edición recurrencia: ' + e.message);
+  }
+}

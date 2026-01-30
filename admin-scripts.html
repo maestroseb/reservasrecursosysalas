@@ -3906,6 +3906,239 @@ function cancelarRecurrenciaAprobada(idSolicitud) {
 }
 
 /**
+ * Abre modal para editar tramos de una recurrencia aprobada
+ */
+function abrirModalEditarTramosRecurrencia(idSolicitud) {
+  const solicitud = AdminState.solicitudesRecurrentes.find(s => s.id_solicitud === idSolicitud);
+  if (!solicitud) {
+    showToast('error', 'Solicitud no encontrada');
+    return;
+  }
+
+  // Parsear los tramos actuales
+  const diasSemanaStr = solicitud.dias_semana || '';
+  const tramosActuales = [];
+
+  if (diasSemanaStr.includes(':')) {
+    diasSemanaStr.split(',').forEach(item => {
+      const [dia, tramo] = item.trim().split(':');
+      if (dia && tramo) {
+        tramosActuales.push({ dia: dia.toUpperCase(), tramo: tramo.trim() });
+      }
+    });
+  }
+
+  if (tramosActuales.length === 0) {
+    showToast('warning', 'Esta recurrencia no tiene tramos editables');
+    return;
+  }
+
+  // Nombres de días y tramos
+  const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes' };
+
+  // Generar lista de tramos con checkboxes
+  let tramosHTML = tramosActuales.map((t, idx) => {
+    const nombreDia = diasNombres[t.dia] || t.dia;
+    const tramoInfo = AdminState.tramos?.find(tr => tr.id_tramo === t.tramo);
+    const nombreTramo = tramoInfo?.nombre_tramo || t.tramo;
+    const horaTramo = tramoInfo ? `${tramoInfo.hora_inicio} - ${tramoInfo.hora_fin}` : '';
+
+    return `
+      <label class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors tramo-editable"
+             data-dia="${t.dia}" data-tramo="${t.tramo}">
+        <input type="checkbox" checked class="w-4 h-4 accent-blue-600 checkbox-tramo">
+        <div class="flex-1">
+          <div class="font-medium text-gray-800">${escaparHTML(nombreDia)}</div>
+          <div class="text-sm text-gray-500">${escaparHTML(nombreTramo)} ${horaTramo ? `(${horaTramo})` : ''}</div>
+        </div>
+        <iconify-icon icon="mdi:calendar-clock" class="text-gray-400 text-xl"></iconify-icon>
+      </label>
+    `;
+  }).join('');
+
+  // Crear modal
+  let modal = document.getElementById('modalEditarTramosRecurrencia');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modalEditarTramosRecurrencia';
+    document.body.appendChild(modal);
+  }
+
+  modal.className = 'fixed inset-0 z-[10000] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4';
+  modal.innerHTML = `
+    <div class="bg-white rounded-xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 fade-in duration-200">
+      <!-- Header -->
+      <div class="bg-blue-50 border-b border-blue-100 px-5 py-4 flex items-center gap-3">
+        <div class="p-2 rounded-lg bg-blue-100 text-blue-600">
+          <iconify-icon icon="mdi:calendar-edit" class="text-2xl"></iconify-icon>
+        </div>
+        <div class="flex-1 min-w-0">
+          <h3 class="text-lg font-bold text-gray-900">Editar Tramos</h3>
+          <p class="text-sm text-gray-600 truncate">${escaparHTML(solicitud.nombre_recurso)} - ${escaparHTML(solicitud.nombre_usuario)}</p>
+        </div>
+        <button onclick="cerrarModalEditarTramosRecurrencia()" class="p-2 hover:bg-blue-100 rounded-lg transition-colors">
+          <iconify-icon icon="mdi:close" class="text-xl text-gray-400"></iconify-icon>
+        </button>
+      </div>
+
+      <!-- Body -->
+      <div class="p-5 overflow-y-auto flex-1">
+        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+          <div class="flex items-start gap-2">
+            <iconify-icon icon="mdi:information" class="text-amber-600 text-lg mt-0.5 shrink-0"></iconify-icon>
+            <p class="text-sm text-amber-800">
+              Desmarca los tramos que quieras eliminar. Las reservas futuras de esos tramos serán canceladas y el usuario será notificado.
+            </p>
+          </div>
+        </div>
+
+        <div class="space-y-2" id="listaTramosEditar">
+          ${tramosHTML}
+        </div>
+
+        <div id="contadorTramosSeleccionados" class="mt-3 text-center text-sm text-gray-500">
+          ${tramosActuales.length} de ${tramosActuales.length} tramos seleccionados
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="bg-gray-50 border-t border-gray-200 px-5 py-4 flex gap-3">
+        <button onclick="cerrarModalEditarTramosRecurrencia()"
+          class="flex-1 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition-colors">
+          Cancelar
+        </button>
+        <button onclick="guardarEdicionTramosRecurrencia('${idSolicitud}')" id="btnGuardarTramosRecurrencia"
+          class="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors flex items-center justify-center gap-2">
+          <iconify-icon icon="mdi:content-save"></iconify-icon>
+          Guardar cambios
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Añadir listeners para actualizar contador
+  modal.querySelectorAll('.checkbox-tramo').forEach(cb => {
+    cb.addEventListener('change', actualizarContadorTramosEditar);
+  });
+}
+
+function actualizarContadorTramosEditar() {
+  const total = document.querySelectorAll('#listaTramosEditar .checkbox-tramo').length;
+  const seleccionados = document.querySelectorAll('#listaTramosEditar .checkbox-tramo:checked').length;
+  const contador = document.getElementById('contadorTramosSeleccionados');
+  const btnGuardar = document.getElementById('btnGuardarTramosRecurrencia');
+
+  if (contador) {
+    contador.textContent = `${seleccionados} de ${total} tramos seleccionados`;
+
+    if (seleccionados === 0) {
+      contador.classList.add('text-red-500');
+      contador.classList.remove('text-gray-500');
+    } else {
+      contador.classList.remove('text-red-500');
+      contador.classList.add('text-gray-500');
+    }
+  }
+
+  // Deshabilitar botón si no hay tramos seleccionados
+  if (btnGuardar) {
+    btnGuardar.disabled = seleccionados === 0;
+    if (seleccionados === 0) {
+      btnGuardar.classList.add('opacity-50', 'cursor-not-allowed');
+    } else {
+      btnGuardar.classList.remove('opacity-50', 'cursor-not-allowed');
+    }
+  }
+}
+
+function cerrarModalEditarTramosRecurrencia() {
+  const modal = document.getElementById('modalEditarTramosRecurrencia');
+  if (modal) modal.remove();
+}
+
+async function guardarEdicionTramosRecurrencia(idSolicitud) {
+  // Obtener tramos seleccionados (los que quedan)
+  const tramosRestantes = [];
+  document.querySelectorAll('#listaTramosEditar .tramo-editable').forEach(label => {
+    const checkbox = label.querySelector('.checkbox-tramo');
+    if (checkbox && checkbox.checked) {
+      tramosRestantes.push({
+        dia: label.dataset.dia,
+        tramo: label.dataset.tramo
+      });
+    }
+  });
+
+  // Obtener tramos originales
+  const solicitud = AdminState.solicitudesRecurrentes.find(s => s.id_solicitud === idSolicitud);
+  if (!solicitud) {
+    showToast('error', 'Solicitud no encontrada');
+    return;
+  }
+
+  const diasSemanaStr = solicitud.dias_semana || '';
+  const tramosOriginales = [];
+  diasSemanaStr.split(',').forEach(item => {
+    const [dia, tramo] = item.trim().split(':');
+    if (dia && tramo) {
+      tramosOriginales.push({ dia: dia.toUpperCase(), tramo: tramo.trim() });
+    }
+  });
+
+  // Verificar si hay cambios
+  if (tramosRestantes.length === tramosOriginales.length) {
+    showToast('info', 'No hay cambios para guardar');
+    cerrarModalEditarTramosRecurrencia();
+    return;
+  }
+
+  // Calcular tramos eliminados
+  const tramosEliminados = tramosOriginales.filter(orig =>
+    !tramosRestantes.some(rest => rest.dia === orig.dia && rest.tramo === orig.tramo)
+  );
+
+  // Confirmar
+  const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes' };
+  const eliminadosTexto = tramosEliminados.map(t => {
+    const tramoInfo = AdminState.tramos?.find(tr => tr.id_tramo === t.tramo);
+    return `${diasNombres[t.dia] || t.dia} (${tramoInfo?.nombre_tramo || t.tramo})`;
+  }).join(', ');
+
+  cerrarModalEditarTramosRecurrencia();
+
+  mostrarConfirmacion(
+    '¿Confirmar cambios?',
+    `Se eliminarán los siguientes tramos: <strong>${eliminadosTexto}</strong>.<br><br>Las reservas futuras de estos tramos serán canceladas y el usuario recibirá una notificación.`,
+    async () => {
+      showLoading();
+
+      try {
+        const result = await new Promise((resolve, reject) => {
+          google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler(reject)
+            .editarTramosRecurrencia(idSolicitud, tramosRestantes, tramosEliminados);
+        });
+
+        hideLoading();
+
+        if (result && result.success) {
+          showToast('success', result.message || 'Tramos actualizados correctamente');
+          await cargarSolicitudesRecurrentes();
+          adminHaCambiadoDatos = true;
+        } else {
+          showToast('error', result?.error || 'Error al actualizar tramos');
+        }
+      } catch (error) {
+        hideLoading();
+        console.error('Error editando tramos:', error);
+        showToast('error', 'Error: ' + (error.message || error));
+      }
+    }
+  );
+}
+
+/**
  * Renderiza las solicitudes recurrentes según el filtro activo
  */
 function renderizarSolicitudesRecurrentes() {
@@ -4059,6 +4292,11 @@ function renderizarSolicitudesRecurrentes() {
               </button>
             ` : ''}
             ${(sol.estado || '').toLowerCase() === 'aprobada' ? `
+              <button onclick="abrirModalEditarTramosRecurrencia('${sol.id_solicitud}')"
+                class="px-3 py-1.5 text-xs font-medium text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-200 rounded-lg transition-colors"
+                title="Editar tramos de esta recurrencia">
+                Editar
+              </button>
               <button onclick="cancelarRecurrenciaAprobada('${sol.id_solicitud}')"
                 class="px-3 py-1.5 text-xs font-medium text-red-600 hover:text-white hover:bg-red-600 border border-red-200 rounded-lg transition-colors">
                 Cancelar
