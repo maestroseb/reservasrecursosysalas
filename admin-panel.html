@@ -678,18 +678,27 @@
 
       </div>
 
-      <!-- Filtros de fecha y tipo -->
+      <!-- Filtros de fecha, tipo y búsqueda -->
       <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-5">
-        <div class="flex flex-wrap gap-3 items-center">
+        <div class="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center">
+          <!-- Buscador -->
+          <div class="relative flex-1 min-w-0 lg:max-w-xs">
+            <iconify-icon icon="mdi:magnify" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></iconify-icon>
+            <input type="text" id="buscadorReservas"
+                 placeholder="Buscar..."
+                 class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
+                 onkeyup="renderTablaReservas()">
+          </div>
+
           <!-- Filtros de período -->
-          <div class="flex flex-wrap gap-2">
+          <div class="flex flex-wrap gap-1.5 justify-center lg:justify-start">
             <button onclick="filtrarReservasPorPeriodo('semana')" data-filtro-periodo="semana"
               class="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white transition-all">
               Esta semana
             </button>
             <button onclick="filtrarReservasPorPeriodo('2semanas')" data-filtro-periodo="2semanas"
               class="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all">
-              Próx. 2 semanas
+              Próx. 2 sem
             </button>
             <button onclick="filtrarReservasPorPeriodo('mes')" data-filtro-periodo="mes"
               class="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all">
@@ -701,36 +710,25 @@
             </button>
           </div>
 
-          <div class="h-6 w-px bg-gray-200 hidden sm:block"></div>
+          <div class="h-6 w-px bg-gray-200 hidden lg:block"></div>
 
           <!-- Filtros de tipo -->
-          <div class="flex flex-wrap gap-2">
+          <div class="flex flex-wrap gap-1.5 justify-center lg:justify-start">
             <button onclick="filtrarReservasPorTipo('todas')" data-filtro-tipo="todas"
               class="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-800 text-white transition-all">
               Todas
             </button>
             <button onclick="filtrarReservasPorTipo('normal')" data-filtro-tipo="normal"
               class="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all">
-              <iconify-icon icon="mdi:calendar" class="mr-1"></iconify-icon>
+              <iconify-icon icon="mdi:calendar" class="mr-0.5"></iconify-icon>
               Normales
             </button>
             <button onclick="filtrarReservasPorTipo('recurrente')" data-filtro-tipo="recurrente"
               class="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all">
-              <iconify-icon icon="mdi:calendar-sync" class="mr-1"></iconify-icon>
+              <iconify-icon icon="mdi:calendar-sync" class="mr-0.5"></iconify-icon>
               Recurrentes
             </button>
           </div>
-        </div>
-      </div>
-
-      <div class="mb-5">
-        <div class="relative">
-          <iconify-icon icon="mdi:magnify" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
-          </iconify-icon>
-          <input type="text" id="buscadorReservas"
-               placeholder="Buscar por email, recurso, fecha o estado..."
-               class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none shadow-sm transition-shadow"
-               onkeyup="renderTablaReservas()">
         </div>
       </div>
 
