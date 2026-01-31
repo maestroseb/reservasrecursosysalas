@@ -21,14 +21,9 @@
       <span>Recursos</span>
     </button>
 
-      <button class="admin-subtab flex-1 whitespace-nowrap flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 outline-none focus:outline-none focus:ring-0 text-gray-500 hover:text-gray-700 hover:bg-gray-200/50" data-section="disponibilidad">
-      <iconify-icon icon="mdi:calendar-lock-outline" class="text-lg"></iconify-icon>
+      <button class="admin-subtab relative flex-1 whitespace-nowrap flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 outline-none focus:outline-none focus:ring-0 text-gray-500 hover:text-gray-700 hover:bg-gray-200/50" data-section="disponibilidad">
+      <iconify-icon icon="mdi:calendar-check" class="text-lg"></iconify-icon>
       <span>Disponibilidad</span>
-    </button>
-
-      <button class="admin-subtab relative flex-1 whitespace-nowrap flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 outline-none focus:outline-none focus:ring-0 text-gray-500 hover:text-gray-700 hover:bg-gray-200/50" data-section="recurrentes">
-      <iconify-icon icon="mdi:calendar-sync" class="text-lg"></iconify-icon>
-      <span>Recurrentes</span>
       <span id="badgeSolicitudesRecurrentes" class="hidden absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center"></span>
     </button>
 
@@ -160,18 +155,37 @@
 
     <div class="max-w-4xl mx-auto">
 
-      <div
-        class="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 mb-6 border-b border-gray-100 pb-6">
+      <!-- Cabecera con título, selector y botones -->
+      <div class="flex flex-col gap-4 mb-6 border-b border-gray-100 pb-6">
 
-        <div>
-          <h2 class="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            <iconify-icon icon="mdi:calendar-check" class="text-blue-600"></iconify-icon>
-            Gestión de Recurso
-          </h2>
-          <p class="text-gray-500 text-sm mt-1">Disponibilidad y reservas recurrentes.</p>
+        <!-- Fila 1: Título y botones de acción -->
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <div>
+            <h2 class="text-2xl font-bold text-gray-800 flex items-center gap-2">
+              <iconify-icon icon="mdi:calendar-check" class="text-blue-600"></iconify-icon>
+              Gestión de Recurso
+            </h2>
+            <p class="text-gray-500 text-sm mt-1">Disponibilidad y reservas recurrentes.</p>
+          </div>
+
+          <div class="flex gap-2">
+            <!-- Botón Ver Historial -->
+            <button onclick="abrirModalHistorialRecurrencias()"
+              class="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all text-sm font-medium">
+              <iconify-icon icon="mdi:history" class="text-lg"></iconify-icon>
+              <span class="hidden sm:inline">Historial</span>
+            </button>
+            <!-- Botón Nueva Recurrente -->
+            <button onclick="abrirModalNuevaRecurrenteAdmin()"
+              class="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all text-sm font-semibold shadow-sm">
+              <iconify-icon icon="mdi:plus" class="text-lg"></iconify-icon>
+              <span>Nueva Recurrente</span>
+            </button>
+          </div>
         </div>
 
-        <div class="relative w-full sm:w-72 z-50">
+        <!-- Fila 2: Selector de recurso -->
+        <div class="relative w-full sm:w-80 z-50">
           <button onclick="toggleRecursoDropdown(event)"
           id="btnSelectorRecursoDisp"
           class="w-full flex items-center gap-3 px-4 py-2.5 bg-white border border-gray-300 rounded-xl shadow-sm hover:border-blue-400 transition-all text-left group">
@@ -423,81 +437,6 @@
       <p class="text-xs text-center text-gray-400 mt-4">
         Los cambios de nombre o email no afectan a la cuenta de Google, solo a cómo se ven aquí.
       </p>
-
-    </div>
-  </div>
-
-  <!-- ========================================
-       SECCIÓN: RESERVAS RECURRENTES
-       ======================================== -->
-  <div id="admin-section-recurrentes" class="admin-section hidden">
-
-    <div class="max-w-4xl mx-auto">
-
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <div>
-          <h2 class="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            <iconify-icon icon="mdi:calendar-sync" class="text-blue-600"></iconify-icon>
-            Reservas Recurrentes
-          </h2>
-          <p class="text-sm text-gray-500 mt-1">Gestiona solicitudes de uso recurrente de recursos</p>
-        </div>
-        <button onclick="abrirModalRecurrenteDirecta()" class="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl shadow-lg shadow-blue-600/20 transition-all transform active:scale-95 flex items-center justify-center gap-2 font-medium">
-          <iconify-icon icon="mdi:plus" class="text-xl"></iconify-icon>
-          <span>Nueva Recurrente</span>
-        </button>
-      </div>
-
-      <!-- Buscador, Filtros y botón aprobar todas -->
-      <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-6">
-        <div class="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center">
-          <!-- Buscador -->
-          <div class="relative flex-1 min-w-0">
-            <iconify-icon icon="mdi:magnify" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-lg"></iconify-icon>
-            <input type="text" id="buscadorRecurrentes" placeholder="Buscar..."
-              oninput="buscarSolicitudesRecurrentes(this.value)"
-              class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm">
-          </div>
-
-          <!-- Filtros -->
-          <div class="flex flex-wrap gap-1.5 justify-center lg:justify-start">
-            <button onclick="filtrarSolicitudesRecurrentes('todas')" data-filtro-recurrente="todas"
-              class="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white transition-colors">
-              Todas
-            </button>
-            <button onclick="filtrarSolicitudesRecurrentes('pendiente')" data-filtro-recurrente="pendiente"
-              class="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors">
-              <iconify-icon icon="mdi:clock-outline" class="mr-0.5"></iconify-icon>
-              Pendientes
-            </button>
-            <button onclick="filtrarSolicitudesRecurrentes('aprobada')" data-filtro-recurrente="aprobada"
-              class="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors">
-              <iconify-icon icon="mdi:check-circle-outline" class="mr-0.5"></iconify-icon>
-              Aprobadas
-            </button>
-            <button onclick="filtrarSolicitudesRecurrentes('rechazada')" data-filtro-recurrente="rechazada"
-              class="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors">
-              <iconify-icon icon="mdi:close-circle-outline" class="mr-0.5"></iconify-icon>
-              Rechazadas
-            </button>
-          </div>
-
-          <!-- Botón aprobar todas -->
-          <button onclick="aprobarTodasPendientes()" id="btnAprobarTodasPendientes"
-            class="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0">
-            <iconify-icon icon="mdi:check-all" class="text-base"></iconify-icon>
-            <span>Aprobar todas</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- Lista de solicitudes -->
-      <div id="listaSolicitudesRecurrentes" class="space-y-4">
-        <div class="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-400">
-          <iconify-icon icon="mdi:loading" class="text-4xl animate-spin mb-2"></iconify-icon>
-          <p>Cargando solicitudes...</p>
-        </div>
-      </div>
 
     </div>
   </div>
@@ -1436,6 +1375,68 @@
   </div>
 </div>
 
+<!-- ========================================
+   MODAL: HISTORIAL DE RECURRENCIAS
+   ======================================== -->
+<div id="modalHistorialRecurrencias" class="fixed inset-0 z-[9999] hidden">
+  <div class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm transition-opacity"></div>
+  <div class="fixed inset-0 z-10 overflow-y-auto">
+    <div class="flex min-h-full items-center justify-center p-4">
+      <div class="relative transform overflow-hidden rounded-2xl bg-white text-left shadow-xl transition-all w-full max-w-2xl">
+
+        <!-- Header -->
+        <div class="bg-gray-50 px-6 py-4 flex items-center justify-between border-b border-gray-100">
+          <div class="flex items-center gap-3">
+            <div class="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100">
+              <iconify-icon icon="mdi:history" class="text-xl text-blue-600"></iconify-icon>
+            </div>
+            <div>
+              <h3 class="text-lg font-semibold text-gray-900">Historial de Recurrencias</h3>
+              <p class="text-sm text-gray-500">Todas las solicitudes registradas</p>
+            </div>
+          </div>
+          <button onclick="cerrarModalHistorialRecurrencias()" class="p-2 hover:bg-gray-200 rounded-full transition-colors">
+            <iconify-icon icon="mdi:close" class="text-xl text-gray-500"></iconify-icon>
+          </button>
+        </div>
+
+        <!-- Filtros -->
+        <div class="px-6 py-3 border-b border-gray-100 flex flex-wrap gap-2 items-center">
+          <input type="text" id="busquedaHistorial" placeholder="Buscar..."
+            onkeyup="filtrarHistorialRecurrencias()"
+            class="flex-1 min-w-[150px] px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+          <div class="flex gap-1">
+            <button onclick="setFiltroHistorial('todas')" data-filtro="todas"
+              class="filtro-historial px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white">Todas</button>
+            <button onclick="setFiltroHistorial('pendiente')" data-filtro="pendiente"
+              class="filtro-historial px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Pendientes</button>
+            <button onclick="setFiltroHistorial('aprobada')" data-filtro="aprobada"
+              class="filtro-historial px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Aprobadas</button>
+            <button onclick="setFiltroHistorial('rechazada')" data-filtro="rechazada"
+              class="filtro-historial px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Rechazadas</button>
+          </div>
+        </div>
+
+        <!-- Lista -->
+        <div id="listaHistorialRecurrencias" class="max-h-[400px] overflow-y-auto">
+          <div class="text-center py-8 text-gray-400">
+            <iconify-icon icon="mdi:loading" class="text-3xl animate-spin"></iconify-icon>
+            <p class="mt-2 text-sm">Cargando...</p>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="bg-gray-50 px-6 py-3 border-t border-gray-100 flex justify-end">
+          <button onclick="cerrarModalHistorialRecurrencias()"
+            class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors">
+            Cerrar
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
 
 <div id="globalSaveBar"
   class="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:w-auto z-[9000] transition-all duration-500 transform translate-y-32 opacity-0 pointer-events-none">

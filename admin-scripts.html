@@ -5147,7 +5147,195 @@ async function guardarRecurrenteDirecta() {
 }
 
 /* =========================================================
-   9.3. INICIALIZACIÓN DEL ADMIN 🚀
+   9.3. MODAL HISTORIAL DE RECURRENCIAS
+   ========================================================= */
+
+let filtroHistorialActual = 'todas';
+let datosHistorialRecurrencias = [];
+
+/**
+ * Alias para abrir modal de nueva recurrente
+ */
+function abrirModalNuevaRecurrenteAdmin() {
+  abrirModalRecurrenteDirecta();
+}
+
+/**
+ * Abre el modal de historial de recurrencias
+ */
+async function abrirModalHistorialRecurrencias() {
+  const modal = document.getElementById('modalHistorialRecurrencias');
+  if (!modal) return;
+
+  modal.classList.remove('hidden');
+
+  // Mostrar loading
+  document.getElementById('listaHistorialRecurrencias').innerHTML = `
+    <div class="text-center py-8 text-gray-400">
+      <iconify-icon icon="mdi:loading" class="text-3xl animate-spin"></iconify-icon>
+      <p class="mt-2 text-sm">Cargando historial...</p>
+    </div>
+  `;
+
+  // Resetear filtros
+  filtroHistorialActual = 'todas';
+  document.getElementById('busquedaHistorial').value = '';
+  actualizarBotonesFiltroHistorial();
+
+  try {
+    // Cargar solicitudes del backend
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .getSolicitudesRecurrentes();
+    });
+
+    if (result && result.success) {
+      datosHistorialRecurrencias = result.solicitudes || [];
+      renderizarHistorialRecurrencias();
+    } else {
+      document.getElementById('listaHistorialRecurrencias').innerHTML = `
+        <div class="text-center py-8 text-red-400">
+          <iconify-icon icon="mdi:alert-circle" class="text-3xl"></iconify-icon>
+          <p class="mt-2 text-sm">${result?.error || 'Error al cargar'}</p>
+        </div>
+      `;
+    }
+  } catch (error) {
+    console.error('Error cargando historial:', error);
+    document.getElementById('listaHistorialRecurrencias').innerHTML = `
+      <div class="text-center py-8 text-red-400">
+        <iconify-icon icon="mdi:alert-circle" class="text-3xl"></iconify-icon>
+        <p class="mt-2 text-sm">Error: ${error.message || String(error)}</p>
+      </div>
+    `;
+  }
+}
+
+function cerrarModalHistorialRecurrencias() {
+  const modal = document.getElementById('modalHistorialRecurrencias');
+  if (modal) modal.classList.add('hidden');
+}
+
+function setFiltroHistorial(filtro) {
+  filtroHistorialActual = filtro;
+  actualizarBotonesFiltroHistorial();
+  renderizarHistorialRecurrencias();
+}
+
+function actualizarBotonesFiltroHistorial() {
+  document.querySelectorAll('.filtro-historial').forEach(btn => {
+    const esFiltroActivo = btn.dataset.filtro === filtroHistorialActual;
+    btn.className = `filtro-historial px-3 py-1.5 text-xs font-medium rounded-lg ${
+      esFiltroActivo ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+    }`;
+  });
+}
+
+function filtrarHistorialRecurrencias() {
+  renderizarHistorialRecurrencias();
+}
+
+function renderizarHistorialRecurrencias() {
+  const container = document.getElementById('listaHistorialRecurrencias');
+  if (!container) return;
+
+  let solicitudes = [...datosHistorialRecurrencias];
+
+  // Filtrar por estado
+  if (filtroHistorialActual !== 'todas') {
+    solicitudes = solicitudes.filter(s =>
+      (s.estado || '').toLowerCase() === filtroHistorialActual.toLowerCase()
+    );
+  }
+
+  // Filtrar por búsqueda
+  const busqueda = (document.getElementById('busquedaHistorial')?.value || '').toLowerCase();
+  if (busqueda) {
+    solicitudes = solicitudes.filter(s => {
+      const texto = [s.nombre_recurso, s.nombre_usuario, s.email_usuario, s.motivo].filter(Boolean).join(' ').toLowerCase();
+      return texto.includes(busqueda);
+    });
+  }
+
+  // Ordenar por fecha (más recientes primero)
+  solicitudes.sort((a, b) => new Date(b.fecha_solicitud) - new Date(a.fecha_solicitud));
+
+  if (solicitudes.length === 0) {
+    container.innerHTML = `
+      <div class="text-center py-8 text-gray-400">
+        <iconify-icon icon="mdi:calendar-blank" class="text-3xl"></iconify-icon>
+        <p class="mt-2 text-sm">${busqueda ? 'No se encontraron resultados' : 'No hay solicitudes'}</p>
+      </div>
+    `;
+    return;
+  }
+
+  const estadoConfig = {
+    'pendiente': { bg: 'bg-amber-100', text: 'text-amber-800', icon: 'mdi:clock-outline' },
+    'aprobada': { bg: 'bg-green-100', text: 'text-green-800', icon: 'mdi:check-circle' },
+    'rechazada': { bg: 'bg-red-100', text: 'text-red-800', icon: 'mdi:close-circle' },
+    'cancelada': { bg: 'bg-gray-100', text: 'text-gray-600', icon: 'mdi:cancel' }
+  };
+
+  container.innerHTML = solicitudes.map(sol => {
+    const config = estadoConfig[(sol.estado || '').toLowerCase()] || { bg: 'bg-gray-100', text: 'text-gray-800', icon: 'mdi:help-circle' };
+
+    // Parsear días
+    const diasStr = sol.dias_semana || '';
+    let diasDisplay = '';
+    if (diasStr.includes(':')) {
+      const diasSet = new Set();
+      diasStr.split(',').forEach(item => {
+        const [d] = item.trim().split(':');
+        if (d) diasSet.add(d.toUpperCase());
+      });
+      diasDisplay = Array.from(diasSet).join('·');
+    } else {
+      diasDisplay = diasStr.split(',').map(d => d.trim().toUpperCase()).join('·');
+    }
+
+    // Formatear fechas
+    const fechaInicio = sol.fecha_inicio ? new Date(sol.fecha_inicio).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '';
+    const fechaFin = sol.fecha_fin ? new Date(sol.fecha_fin).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '';
+
+    // Icono del recurso
+    const recurso = AdminState.recursos?.find(r => r.id_recurso === sol.id_recurso);
+    const iconoRecurso = recurso?.icono || 'mdi:cube-outline';
+
+    return `
+      <div class="px-6 py-4 border-b border-gray-100 hover:bg-gray-50/50 transition-colors flex items-center gap-4">
+        <div class="p-2 rounded-lg bg-gray-100 text-gray-600 shrink-0">
+          <iconify-icon icon="${iconoRecurso}" class="text-xl"></iconify-icon>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-semibold text-gray-800 text-sm truncate">${escaparHTML(sol.nombre_recurso)}</span>
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${config.bg} ${config.text}">
+              <iconify-icon icon="${config.icon}"></iconify-icon>
+              ${escaparHTML(sol.estado)}
+            </span>
+          </div>
+          <div class="text-xs text-gray-500 mt-0.5">
+            <span class="font-medium">${escaparHTML(sol.nombre_usuario)}</span>
+            <span class="mx-1">·</span>
+            <span>${diasDisplay}</span>
+            <span class="mx-1">·</span>
+            <span>${fechaInicio} → ${fechaFin}</span>
+          </div>
+        </div>
+        <button onclick="abrirModalGestionarSolicitud('${sol.id_solicitud}')"
+          class="p-2 hover:bg-gray-200 rounded-lg transition-colors shrink-0" title="Gestionar">
+          <iconify-icon icon="mdi:pencil-outline" class="text-gray-500"></iconify-icon>
+        </button>
+      </div>
+    `;
+  }).join('');
+}
+
+/* =========================================================
+   9.4. INICIALIZACIÓN DEL ADMIN 🚀
    ========================================================= */
 document.addEventListener('DOMContentLoaded', function() {
 
