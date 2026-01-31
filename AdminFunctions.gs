@@ -1705,5 +1705,220 @@ function migrarIdSolicitudRecurrente() {
 }
 
 /* ============================================
+   MATRIZ UNIFICADA: DISPONIBILIDAD + RECURRENCIAS
+   ============================================ */
+
+/**
+ * Carga datos combinados de disponibilidad y recurrencias para un recurso.
+ * Usado por la vista unificada en el admin-panel.
+ * @param {string} idRecurso - ID del recurso
+ * @returns {Object} { disponibilidad, recurrencias, solicitudesPendientes }
+ */
+function getDatosMatrizUnificada(idRecurso) {
+  try {
+    const email = Session.getActiveUser().getEmail();
+    const authResult = checkUserAuthorization(email);
+
+    if (!authResult || !authResult.isAdmin) {
+      return { success: false, error: "No tienes permisos de administrador." };
+    }
+
+    if (!idRecurso) {
+      return { success: false, error: "ID de recurso no especificado." };
+    }
+
+    const ss = getDB();
+    const idRecursoNorm = String(idRecurso).trim().toLowerCase();
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+
+    // 1. DISPONIBILIDAD del recurso
+    const sheetDisp = ss.getSheetByName(SHEETS.DISPONIBILIDAD);
+    let disponibilidad = [];
+    if (sheetDisp && sheetDisp.getLastRow() > 1) {
+      const data = sheetDisp.getRange(2, 1, sheetDisp.getLastRow() - 1, 6).getValues();
+      disponibilidad = data
+        .filter(row => String(row[0]).trim().toLowerCase() === idRecursoNorm)
+        .map(row => {
+          let diaRaw = String(row[1]).trim();
+          let diaFinal = diaRaw;
+          if (diaRaw.includes("Lunes")) diaFinal = "Lunes";
+          else if (diaRaw.includes("Martes")) diaFinal = "Martes";
+          else if (diaRaw.includes("Miércoles") || diaRaw.includes("Miercoles")) diaFinal = "Miércoles";
+          else if (diaRaw.includes("Jueves")) diaFinal = "Jueves";
+          else if (diaRaw.includes("Viernes")) diaFinal = "Viernes";
+
+          let permRaw = String(row[4]).trim().toLowerCase();
+          let permFinal = 'Si';
+          if (permRaw === 'no' || permRaw === 'false' || permRaw === '0') permFinal = 'No';
+
+          return {
+            id_tramo: String(row[2]).trim(),
+            dia_semana: diaFinal,
+            permitido: permFinal,
+            razon_bloqueo: String(row[5]).trim()
+          };
+        });
+    }
+
+    // 2. RECURRENCIAS APROBADAS ACTIVAS del recurso
+    const sheetSol = getOrCreateSheetSolicitudesRecurrentes();
+    let recurrencias = [];
+    let solicitudesPendientes = [];
+
+    if (sheetSol && sheetSol.getLastRow() > 1) {
+      const data = sheetSol.getRange(2, 1, sheetSol.getLastRow() - 1, 16).getValues();
+
+      // Obtener datos de usuarios para enriquecer con área
+      const sheetUsers = ss.getSheetByName(SHEETS.USUARIOS);
+      const usuariosMap = new Map();
+      if (sheetUsers && sheetUsers.getLastRow() > 1) {
+        const usersData = sheetUsers.getRange(2, 1, sheetUsers.getLastRow() - 1, 5).getValues();
+        usersData.forEach(u => {
+          usuariosMap.set(String(u[0]).trim().toLowerCase(), {
+            nombre: String(u[1]).trim(),
+            area: String(u[4]).trim() || ''
+          });
+        });
+      }
+
+      data.forEach(row => {
+        const idRec = String(row[COLS_SOLICITUDES.ID_RECURSO] || '').trim().toLowerCase();
+        if (idRec !== idRecursoNorm) return;
+
+        const estado = String(row[COLS_SOLICITUDES.ESTADO] || '').toLowerCase();
+        const fechaFin = row[COLS_SOLICITUDES.FECHA_FIN];
+        const emailUsuario = String(row[COLS_SOLICITUDES.EMAIL_USUARIO] || '').trim().toLowerCase();
+        const userData = usuariosMap.get(emailUsuario) || { nombre: '', area: '' };
+
+        const solicitud = {
+          id_solicitud: String(row[COLS_SOLICITUDES.ID_SOLICITUD] || ''),
+          nombre_usuario: String(row[COLS_SOLICITUDES.NOMBRE_USUARIO] || '') || userData.nombre,
+          email_usuario: String(row[COLS_SOLICITUDES.EMAIL_USUARIO] || ''),
+          area_usuario: userData.area,
+          dias_semana: String(row[COLS_SOLICITUDES.DIAS_SEMANA] || ''),
+          id_tramo: String(row[COLS_SOLICITUDES.ID_TRAMO] || ''),
+          nombre_tramo: String(row[COLS_SOLICITUDES.NOMBRE_TRAMO] || ''),
+          fecha_inicio: row[COLS_SOLICITUDES.FECHA_INICIO] instanceof Date ? row[COLS_SOLICITUDES.FECHA_INICIO].toISOString() : '',
+          fecha_fin: fechaFin instanceof Date ? fechaFin.toISOString() : '',
+          motivo: String(row[COLS_SOLICITUDES.MOTIVO] || ''),
+          estado: estado
+        };
+
+        // Solicitudes pendientes (para panel de aprobación)
+        if (estado === 'pendiente') {
+          solicitudesPendientes.push(solicitud);
+        }
+
+        // Recurrencias aprobadas y activas (fecha_fin >= hoy)
+        if (estado === 'aprobada') {
+          let fechaFinDate = fechaFin instanceof Date ? fechaFin : null;
+          if (!fechaFinDate && fechaFin) {
+            fechaFinDate = new Date(fechaFin);
+          }
+
+          // Solo incluir si está vigente
+          if (fechaFinDate && fechaFinDate >= hoy) {
+            recurrencias.push(solicitud);
+          }
+        }
+      });
+    }
+
+    return {
+      success: true,
+      disponibilidad: disponibilidad,
+      recurrencias: recurrencias,
+      solicitudesPendientes: solicitudesPendientes
+    };
+
+  } catch (error) {
+    Logger.log('Error en getDatosMatrizUnificada: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Obtiene TODAS las solicitudes pendientes de todos los recursos.
+ * Para el badge global y el panel de pendientes.
+ */
+function getSolicitudesPendientesGlobal() {
+  try {
+    const email = Session.getActiveUser().getEmail();
+    const authResult = checkUserAuthorization(email);
+
+    if (!authResult || !authResult.isAdmin) {
+      return { success: false, error: "No tienes permisos de administrador." };
+    }
+
+    const sheetSol = getOrCreateSheetSolicitudesRecurrentes();
+    let pendientes = [];
+
+    if (sheetSol && sheetSol.getLastRow() > 1) {
+      const data = sheetSol.getRange(2, 1, sheetSol.getLastRow() - 1, 16).getValues();
+      const ss = getDB();
+
+      // Mapa de recursos para obtener iconos y nombres
+      const sheetRec = ss.getSheetByName(SHEETS.RECURSOS);
+      const recursosMap = new Map();
+      if (sheetRec && sheetRec.getLastRow() > 1) {
+        const recData = sheetRec.getRange(2, 1, sheetRec.getLastRow() - 1, 4).getValues();
+        recData.forEach(r => {
+          recursosMap.set(String(r[0]).trim(), {
+            nombre: String(r[1]).trim(),
+            icono: String(r[3]).trim() || 'mdi:cube-outline'
+          });
+        });
+      }
+
+      // Mapa de usuarios para obtener área
+      const sheetUsers = ss.getSheetByName(SHEETS.USUARIOS);
+      const usuariosMap = new Map();
+      if (sheetUsers && sheetUsers.getLastRow() > 1) {
+        const usersData = sheetUsers.getRange(2, 1, sheetUsers.getLastRow() - 1, 5).getValues();
+        usersData.forEach(u => {
+          usuariosMap.set(String(u[0]).trim().toLowerCase(), {
+            area: String(u[4]).trim() || ''
+          });
+        });
+      }
+
+      data.forEach(row => {
+        const estado = String(row[COLS_SOLICITUDES.ESTADO] || '').toLowerCase();
+        if (estado !== 'pendiente') return;
+
+        const idRecurso = String(row[COLS_SOLICITUDES.ID_RECURSO] || '');
+        const recursoData = recursosMap.get(idRecurso) || { nombre: idRecurso, icono: 'mdi:cube-outline' };
+        const emailUsuario = String(row[COLS_SOLICITUDES.EMAIL_USUARIO] || '').toLowerCase();
+        const userData = usuariosMap.get(emailUsuario) || { area: '' };
+
+        pendientes.push({
+          id_solicitud: String(row[COLS_SOLICITUDES.ID_SOLICITUD] || ''),
+          id_recurso: idRecurso,
+          nombre_recurso: String(row[COLS_SOLICITUDES.NOMBRE_RECURSO] || '') || recursoData.nombre,
+          icono_recurso: recursoData.icono,
+          nombre_usuario: String(row[COLS_SOLICITUDES.NOMBRE_USUARIO] || ''),
+          email_usuario: String(row[COLS_SOLICITUDES.EMAIL_USUARIO] || ''),
+          area_usuario: userData.area,
+          dias_semana: String(row[COLS_SOLICITUDES.DIAS_SEMANA] || ''),
+          id_tramo: String(row[COLS_SOLICITUDES.ID_TRAMO] || ''),
+          nombre_tramo: String(row[COLS_SOLICITUDES.NOMBRE_TRAMO] || ''),
+          fecha_inicio: row[COLS_SOLICITUDES.FECHA_INICIO] instanceof Date ? row[COLS_SOLICITUDES.FECHA_INICIO].toISOString() : '',
+          fecha_fin: row[COLS_SOLICITUDES.FECHA_FIN] instanceof Date ? row[COLS_SOLICITUDES.FECHA_FIN].toISOString() : '',
+          motivo: String(row[COLS_SOLICITUDES.MOTIVO] || ''),
+          fecha_solicitud: row[COLS_SOLICITUDES.FECHA_SOLICITUD] instanceof Date ? row[COLS_SOLICITUDES.FECHA_SOLICITUD].toISOString() : ''
+        });
+      });
+    }
+
+    return { success: true, pendientes: pendientes };
+
+  } catch (error) {
+    Logger.log('Error en getSolicitudesPendientesGlobal: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/* ============================================
    FIN DEL ARCHIVO AdminFunctions.gs
    ============================================ */

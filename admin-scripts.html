@@ -1218,10 +1218,14 @@ const DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'];
 
 let DispState = {
   recursoId: null,
-  datosOriginales: [], 
-  datosActuales: [],   
+  datosOriginales: [],
+  datosActuales: [],
   cambiosPendientes: false,
-  tramosCache: null
+  tramosCache: null,
+  // Nuevos campos para matriz unificada
+  recurrencias: [],      // Recurrencias aprobadas activas
+  pendientes: [],        // Solicitudes pendientes del recurso
+  mapaRecurrencias: null // Map para búsqueda rápida por celda
 };
 
 // 1. SELECTOR DE RECURSOS
@@ -1301,34 +1305,170 @@ function seleccionarRecursoDisp(id, nombre, icon, colorClass) {
 }
 
 
-// 2. LÓGICA DE DATOS
-function cargarMatrizDisponibilidad(idRecurso) {
+// 2. LÓGICA DE DATOS (MATRIZ UNIFICADA)
+async function cargarMatrizDisponibilidad(idRecurso) {
   if (!idRecurso) return;
-  
+
   DispState.recursoId = idRecurso;
-  const idTarget = String(idRecurso).trim().toLowerCase();
-  
-  const datosRaw = AdminState.disponibilidad.filter(d => {
-      const dId = String(d.id_recurso || '').trim().toLowerCase();
-      return dId === idTarget;
-  });
 
-  const datosNormalizados = datosRaw.map(d => ({
-    id_tramo: String(d.id_tramo).trim(),
-    dia_semana: String(d.dia_semana).trim(),
-    permitido: d.permitido || 'Si',
-    razon_bloqueo: d.razon_bloqueo || ''
-  }));
-
-  DispState.datosOriginales = JSON.parse(JSON.stringify(datosNormalizados));
-  DispState.datosActuales = JSON.parse(JSON.stringify(datosNormalizados));
-  
+  // Mostrar UI de carga
   document.getElementById('emptyStateDisp').classList.add('hidden');
   document.getElementById('contenedorMatriz').classList.remove('hidden');
+  document.getElementById('contenedorMatriz').style.position = 'relative';
   document.getElementById('leyendaDisp').classList.remove('hidden');
-  
-  renderMatrizHTML();
-  checkDispChanges(); 
+
+  const spinner = document.getElementById('spinnerMatrizUnificada');
+  if (spinner) spinner.classList.remove('hidden');
+
+  try {
+    // Llamar al backend para obtener datos combinados
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .getDatosMatrizUnificada(idRecurso);
+    });
+
+    if (spinner) spinner.classList.add('hidden');
+
+    if (!result || !result.success) {
+      showToast('error', result?.error || 'Error al cargar datos');
+      return;
+    }
+
+    // Procesar disponibilidad
+    const datosNormalizados = (result.disponibilidad || []).map(d => ({
+      id_tramo: String(d.id_tramo).trim(),
+      dia_semana: String(d.dia_semana).trim(),
+      permitido: d.permitido || 'Si',
+      razon_bloqueo: d.razon_bloqueo || ''
+    }));
+
+    DispState.datosOriginales = JSON.parse(JSON.stringify(datosNormalizados));
+    DispState.datosActuales = JSON.parse(JSON.stringify(datosNormalizados));
+
+    // Procesar recurrencias aprobadas
+    DispState.recurrencias = result.recurrencias || [];
+    DispState.mapaRecurrencias = construirMapaRecurrencias(DispState.recurrencias);
+
+    // Procesar pendientes del recurso
+    DispState.pendientes = result.solicitudesPendientes || [];
+    actualizarPanelPendientesRecurso();
+
+    renderMatrizHTML();
+    checkDispChanges();
+
+  } catch (error) {
+    if (spinner) spinner.classList.add('hidden');
+    console.error('Error cargando matriz unificada:', error);
+    showToast('error', 'Error al cargar: ' + (error.message || String(error)));
+  }
+}
+
+/**
+ * Construye un mapa de recurrencias por celda (dia:tramo) para búsqueda rápida
+ */
+function construirMapaRecurrencias(recurrencias) {
+  const mapa = new Map();
+  const diasMap = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes', 'S': 'Sábado', 'D': 'Domingo' };
+
+  recurrencias.forEach(rec => {
+    const diasStr = rec.dias_semana || '';
+
+    if (diasStr.includes(':')) {
+      // Formato nuevo: "L:T001,M:T002"
+      diasStr.split(',').forEach(item => {
+        const [diaCorto, idTramo] = item.trim().split(':');
+        if (diaCorto && idTramo) {
+          const diaLargo = diasMap[diaCorto.toUpperCase()] || diaCorto;
+          const key = `${idTramo.trim()}-${diaLargo}`;
+          if (!mapa.has(key)) mapa.set(key, []);
+          mapa.get(key).push(rec);
+        }
+      });
+    } else {
+      // Formato antiguo: "L,M,X" con un solo id_tramo
+      const idTramo = rec.id_tramo;
+      if (idTramo) {
+        diasStr.split(',').forEach(diaCorto => {
+          const diaLargo = diasMap[diaCorto.trim().toUpperCase()] || diaCorto.trim();
+          const key = `${idTramo}-${diaLargo}`;
+          if (!mapa.has(key)) mapa.set(key, []);
+          mapa.get(key).push(rec);
+        });
+      }
+    }
+  });
+
+  return mapa;
+}
+
+/**
+ * Actualiza el panel de solicitudes pendientes del recurso
+ */
+function actualizarPanelPendientesRecurso() {
+  const panel = document.getElementById('panelPendientesRecurso');
+  const badge = document.getElementById('badgePendientesRecurso');
+  const lista = document.getElementById('listaPendientesRecurso');
+
+  if (!panel || !badge || !lista) return;
+
+  const pendientes = DispState.pendientes || [];
+
+  if (pendientes.length === 0) {
+    panel.classList.add('hidden');
+    return;
+  }
+
+  panel.classList.remove('hidden');
+  badge.textContent = pendientes.length;
+
+  lista.innerHTML = pendientes.map(sol => {
+    const diasStr = sol.dias_semana || '';
+    let diasDisplay = '';
+    if (diasStr.includes(':')) {
+      const diasSet = new Set();
+      diasStr.split(',').forEach(item => {
+        const [d] = item.trim().split(':');
+        if (d) diasSet.add(d.toUpperCase());
+      });
+      diasDisplay = Array.from(diasSet).join('·');
+    } else {
+      diasDisplay = diasStr.split(',').map(d => d.trim().toUpperCase()).join('·');
+    }
+
+    return `
+      <div class="px-4 py-3 flex items-center justify-between gap-3 border-b border-amber-100 last:border-b-0 hover:bg-amber-100/30 transition-colors">
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-medium text-gray-800 truncate">${escaparHTML(sol.nombre_usuario)}</div>
+          <div class="text-xs text-gray-500">${diasDisplay} | ${escaparHTML(sol.nombre_tramo || sol.id_tramo)}</div>
+        </div>
+        <div class="flex gap-1.5 shrink-0">
+          <button onclick="aprobarSolicitudRapida('${sol.id_solicitud}')"
+            class="p-1.5 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg transition-colors" title="Aprobar">
+            <iconify-icon icon="mdi:check" class="text-base"></iconify-icon>
+          </button>
+          <button onclick="rechazarSolicitudRapida('${sol.id_solicitud}')"
+            class="p-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors" title="Rechazar">
+            <iconify-icon icon="mdi:close" class="text-base"></iconify-icon>
+          </button>
+          <button onclick="verDetalleSolicitud('${sol.id_solicitud}')"
+            class="p-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg transition-colors" title="Ver detalles">
+            <iconify-icon icon="mdi:eye-outline" class="text-base"></iconify-icon>
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function togglePanelPendientes() {
+  const lista = document.getElementById('listaPendientesRecurso');
+  const icon = document.getElementById('iconExpandPendientes');
+  if (!lista || !icon) return;
+
+  lista.classList.toggle('hidden');
+  icon.style.transform = lista.classList.contains('hidden') ? '' : 'rotate(180deg)';
 }
 
 
@@ -1400,44 +1540,90 @@ function renderMatrizHTML() {
   }
 }
 
-// ✅ HELPER VISUAL
+// ✅ HELPER VISUAL (MATRIZ UNIFICADA - 3 ESTADOS)
 function getConfigVisualCelda(dato, idTramo, dia, esPrimeraFila) {
     const esBloqueado = dato && dato.permitido === 'No';
     const razon = dato ? (dato.razon_bloqueo || '') : '';
-    
-    const bgClass = esBloqueado ? "bg-red-50 hover:bg-red-100" : "bg-white hover:bg-green-50";
-    const className = `p-1 border border-gray-100 h-14 text-center transition-all duration-200 relative group min-w-[110px] ${bgClass}`;
+
+    // Buscar recurrencias en esta celda
+    const key = `${idTramo}-${dia}`;
+    const recurrencias = DispState.mapaRecurrencias?.get(key) || [];
+    const tieneRecurrencia = recurrencias.length > 0;
+
+    // Determinar clase de fondo según estado
+    let bgClass = "bg-white hover:bg-green-50"; // Disponible
+    if (esBloqueado) {
+      bgClass = "bg-red-50 hover:bg-red-100"; // Bloqueado
+    } else if (tieneRecurrencia) {
+      bgClass = "bg-blue-50 hover:bg-blue-100"; // Recurrencia
+    }
+
+    const className = `p-1 border border-gray-100 h-16 text-center transition-all duration-200 relative group min-w-[110px] cursor-pointer ${bgClass}`;
 
     const tooltipPos = esPrimeraFila ? 'top-full mt-2' : 'bottom-full mb-2';
     const arrowBorder = esPrimeraFila ? 'border-l-transparent border-r-transparent border-b-gray-800' : 'border-l-transparent border-r-transparent border-t-gray-800';
     const arrowPosClass = esPrimeraFila ? 'bottom-full' : 'top-full';
 
-    const tooltipHTML = razon ? `
-        <div class="absolute ${tooltipPos} left-1/2 -translate-x-1/2 px-3 py-2 bg-gray-800 text-white text-[11px] font-medium rounded-lg shadow-xl opacity-0 group-hover/btn:opacity-100 transition-all duration-200 pointer-events-none whitespace-normal w-48 text-center z-[100]">
-            ${razon}
-            <div class="absolute left-1/2 -translate-x-1/2 border-4 ${arrowBorder} ${arrowPosClass}"></div>
-        </div>
-    ` : '';
-
     let innerHTML = '';
+
     if (esBloqueado) {
+        // ESTADO: BLOQUEADO (Rojo)
+        const tooltipHTML = razon ? `
+            <div class="absolute ${tooltipPos} left-1/2 -translate-x-1/2 px-3 py-2 bg-gray-800 text-white text-[11px] font-medium rounded-lg shadow-xl opacity-0 group-hover/btn:opacity-100 transition-all duration-200 pointer-events-none whitespace-normal w-48 text-center z-[100]">
+                ${escaparHTML(razon)}
+                <div class="absolute left-1/2 -translate-x-1/2 border-4 ${arrowBorder} ${arrowPosClass}"></div>
+            </div>
+        ` : '';
+
         innerHTML = `
           <div class="relative w-full h-full flex flex-col items-center justify-center gap-1">
              <div class="flex items-center gap-1">
-                 <iconify-icon icon="mdi:lock" class="text-red-500 text-lg animate-pulse-subtle"></iconify-icon>
+                 <iconify-icon icon="mdi:lock" class="text-red-500 text-lg"></iconify-icon>
                  <span class="text-[10px] font-bold text-red-600 uppercase">Bloq.</span>
              </div>
-             <div class="absolute top-1 right-1 group/btn"> 
+             <div class="absolute top-1 right-1 group/btn">
                  ${tooltipHTML}
-                 <button onclick="editarNota('${idTramo}', '${dia}')" 
+                 <button onclick="event.stopPropagation(); editarNota('${idTramo}', '${dia}')"
                          title="Editar motivo"
-                         class="btn-info w-6 h-6 rounded-full bg-white hover:bg-blue-50 text-red-400 hover:text-blue-600 border border-red-100 hover:border-blue-200 shadow-sm flex items-center justify-center transition-all transform hover:scale-110">
-                    <iconify-icon icon="${razon ? 'mdi:message-text' : 'mdi:pencil-outline'}" class="text-xs"></iconify-icon>
+                         class="btn-info w-5 h-5 rounded-full bg-white hover:bg-blue-50 text-red-400 hover:text-blue-600 border border-red-100 hover:border-blue-200 shadow-sm flex items-center justify-center transition-all transform hover:scale-110">
+                    <iconify-icon icon="${razon ? 'mdi:message-text' : 'mdi:pencil-outline'}" class="text-[10px]"></iconify-icon>
                  </button>
              </div>
           </div>
         `;
+    } else if (tieneRecurrencia) {
+        // ESTADO: RECURRENCIA (Azul)
+        const rec = recurrencias[0]; // Mostrar la primera (generalmente solo hay una)
+        const nombreCorto = (rec.nombre_usuario || '').split(' ')[0] || 'Usuario';
+        const area = rec.area_usuario || '';
+
+        // Tooltip con info completa
+        const tooltipContent = `
+          <strong>${escaparHTML(rec.nombre_usuario)}</strong><br>
+          ${area ? `<span class="text-blue-200">${escaparHTML(area)}</span><br>` : ''}
+          ${rec.motivo ? `<em>"${escaparHTML(rec.motivo)}"</em>` : ''}
+        `;
+
+        innerHTML = `
+          <div class="relative w-full h-full flex flex-col items-center justify-center gap-0.5 group/rec">
+             <iconify-icon icon="mdi:account-circle" class="text-blue-500 text-lg"></iconify-icon>
+             <span class="text-[10px] font-semibold text-blue-700 truncate max-w-[90px] leading-tight">${escaparHTML(nombreCorto)}</span>
+             ${area ? `<span class="text-[8px] text-blue-500/70 truncate max-w-[90px] leading-tight">${escaparHTML(area)}</span>` : ''}
+             <!-- Tooltip -->
+             <div class="absolute ${tooltipPos} left-1/2 -translate-x-1/2 px-3 py-2 bg-gray-800 text-white text-[11px] rounded-lg shadow-xl opacity-0 group-hover/rec:opacity-100 transition-all duration-200 pointer-events-none whitespace-normal w-52 text-center z-[100]">
+                 ${tooltipContent}
+                 <div class="absolute left-1/2 -translate-x-1/2 border-4 ${arrowBorder} ${arrowPosClass}"></div>
+             </div>
+             <!-- Botón gestionar -->
+             <button onclick="event.stopPropagation(); abrirMenuRecurrencia('${idTramo}', '${dia}')"
+                     title="Gestionar recurrencia"
+                     class="btn-info absolute top-1 right-1 w-5 h-5 rounded-full bg-white hover:bg-blue-100 text-blue-500 hover:text-blue-700 border border-blue-200 shadow-sm flex items-center justify-center transition-all transform hover:scale-110 opacity-0 group-hover:opacity-100">
+                <iconify-icon icon="mdi:dots-vertical" class="text-[10px]"></iconify-icon>
+             </button>
+          </div>
+        `;
     } else {
+        // ESTADO: DISPONIBLE (Verde/Blanco)
         innerHTML = `
           <div class="w-full h-full flex items-center justify-center opacity-0 group-hover:opacity-40 transition-opacity">
              <iconify-icon icon="mdi:check-circle" class="text-green-500 text-2xl"></iconify-icon>
@@ -1452,11 +1638,20 @@ function getConfigVisualCelda(dato, idTramo, dia, esPrimeraFila) {
 // 4. INTERACCIÓN (ACTUALIZACIÓN QUIRÚRGICA 💉)
 function toggleCelda(idTramo, dia, esPrimeraFila = false) {
   idTramo = String(idTramo);
-  
-  let index = DispState.datosActuales.findIndex(d => 
+
+  // Verificar si hay recurrencia en esta celda (no permitir toggle directo)
+  const key = `${idTramo}-${dia}`;
+  const recurrencias = DispState.mapaRecurrencias?.get(key) || [];
+  if (recurrencias.length > 0) {
+    // Si hay recurrencia, abrir menú contextual en lugar de toggle
+    abrirMenuRecurrencia(idTramo, dia);
+    return;
+  }
+
+  let index = DispState.datosActuales.findIndex(d =>
     d.id_tramo === idTramo && d.dia_semana === dia
   );
-  
+
   let datoActualizado = null;
 
   if (index === -1) {
@@ -1466,20 +1661,90 @@ function toggleCelda(idTramo, dia, esPrimeraFila = false) {
   } else {
     // Si existe, lo modificamos (PERO NO LO BORRAMOS)
     const actual = DispState.datosActuales[index];
-    
+
     if (actual.permitido === 'No') {
         // Desbloquear
         actual.permitido = 'Si';
-        datoActualizado = actual; // Mantenemos el objeto para enviarlo al backend
+        datoActualizado = actual;
     } else {
         // Bloquear
         actual.permitido = 'No';
         datoActualizado = actual;
     }
   }
-  
+
   actualizarCeldaVisualmente(idTramo, dia, datoActualizado, esPrimeraFila);
   checkDispChanges();
+}
+
+// ============================================
+// GESTIÓN DE RECURRENCIAS DESDE LA MATRIZ
+// ============================================
+
+/**
+ * Abre el menú contextual para gestionar una recurrencia
+ */
+function abrirMenuRecurrencia(idTramo, dia) {
+  const key = `${idTramo}-${dia}`;
+  const recurrencias = DispState.mapaRecurrencias?.get(key) || [];
+
+  if (recurrencias.length === 0) return;
+
+  const rec = recurrencias[0];
+
+  // Buscar el id_solicitud para poder gestionar
+  if (rec.id_solicitud) {
+    // Abrir el modal existente de gestión de recurrencia
+    abrirModalGestionarSolicitud(rec.id_solicitud);
+  }
+}
+
+/**
+ * Aprueba una solicitud rápidamente desde el panel de pendientes
+ */
+async function aprobarSolicitudRapida(idSolicitud) {
+  if (!idSolicitud) return;
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .aprobarSolicitudRecurrente(idSolicitud, '');
+    });
+
+    if (result && result.success) {
+      showToast('success', 'Solicitud aprobada correctamente');
+      // Recargar la matriz
+      if (DispState.recursoId) {
+        cargarMatrizDisponibilidad(DispState.recursoId);
+      }
+      // También actualizar la lista global de recurrentes
+      cargarSolicitudesRecurrentes();
+    } else {
+      showToast('error', result?.error || 'Error al aprobar');
+    }
+  } catch (error) {
+    console.error('Error aprobando solicitud:', error);
+    showToast('error', 'Error: ' + (error.message || String(error)));
+  }
+}
+
+/**
+ * Rechaza una solicitud rápidamente (abre modal para motivo)
+ */
+function rechazarSolicitudRapida(idSolicitud) {
+  if (!idSolicitud) return;
+  // Abrir el modal de gestión para que el admin escriba el motivo
+  abrirModalGestionarSolicitud(idSolicitud);
+}
+
+/**
+ * Ver detalles de una solicitud
+ */
+function verDetalleSolicitud(idSolicitud) {
+  if (!idSolicitud) return;
+  abrirModalGestionarSolicitud(idSolicitud);
 }
 
 function actualizarCeldaVisualmente(idTramo, dia, dato, esPrimeraFila) {
