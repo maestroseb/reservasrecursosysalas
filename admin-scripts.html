@@ -1423,25 +1423,52 @@ function actualizarPanelPendientesRecurso() {
   panel.classList.remove('hidden');
   badge.textContent = pendientes.length;
 
-  lista.innerHTML = pendientes.map(sol => {
+  // Helper para obtener nombre de tramo
+  const getNombreTramo = (idTramo) => {
+    const tramo = AdminState.tramos?.find(t => t.id_tramo === idTramo);
+    return tramo?.Nombre_Tramo || tramo?.nombre_tramo || idTramo;
+  };
+
+  // Botón "Aprobar todas" al principio
+  let htmlContent = pendientes.length > 1 ? `
+    <div class="px-4 py-2 bg-amber-100/50 border-b border-amber-200 flex justify-end">
+      <button onclick="aprobarTodasPendientesRecurso()"
+        class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors">
+        <iconify-icon icon="mdi:check-all" class="text-sm"></iconify-icon>
+        Aprobar todas
+      </button>
+    </div>
+  ` : '';
+
+  htmlContent += pendientes.map(sol => {
     const diasStr = sol.dias_semana || '';
     let diasDisplay = '';
+    let tramosDisplay = '';
+
     if (diasStr.includes(':')) {
+      // Formato nuevo: "L:T001,M:T002,J:T003"
       const diasSet = new Set();
+      const tramosSet = new Set();
       diasStr.split(',').forEach(item => {
-        const [d] = item.trim().split(':');
+        const [d, t] = item.trim().split(':');
         if (d) diasSet.add(d.toUpperCase());
+        if (t) tramosSet.add(t);
       });
       diasDisplay = Array.from(diasSet).join('·');
+      // Convertir IDs de tramos a nombres
+      const tramosNombres = Array.from(tramosSet).map(getNombreTramo);
+      tramosDisplay = tramosNombres.join(', ');
     } else {
+      // Formato antiguo
       diasDisplay = diasStr.split(',').map(d => d.trim().toUpperCase()).join('·');
+      tramosDisplay = sol.nombre_tramo || getNombreTramo(sol.id_tramo);
     }
 
     return `
       <div class="px-4 py-3 flex items-center justify-between gap-3 border-b border-amber-100 last:border-b-0 hover:bg-amber-100/30 transition-colors">
         <div class="flex-1 min-w-0">
           <div class="text-sm font-medium text-gray-800 truncate">${escaparHTML(sol.nombre_usuario)}</div>
-          <div class="text-xs text-gray-500">${diasDisplay} | ${escaparHTML(sol.nombre_tramo || sol.id_tramo)}</div>
+          <div class="text-xs text-gray-500">${diasDisplay} | ${escaparHTML(tramosDisplay)}</div>
         </div>
         <div class="flex gap-1.5 shrink-0">
           <button onclick="aprobarSolicitudRapida('${sol.id_solicitud}')"
@@ -1460,6 +1487,51 @@ function actualizarPanelPendientesRecurso() {
       </div>
     `;
   }).join('');
+
+  lista.innerHTML = htmlContent;
+}
+
+/**
+ * Aprobar todas las pendientes del recurso actual
+ */
+async function aprobarTodasPendientesRecurso() {
+  const pendientes = DispState.pendientes || [];
+  if (pendientes.length === 0) return;
+
+  if (!confirm(`¿Aprobar las ${pendientes.length} solicitudes pendientes?`)) return;
+
+  let aprobadas = 0;
+  let errores = 0;
+
+  for (const sol of pendientes) {
+    try {
+      const result = await new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)
+          .aprobarSolicitudRecurrente(sol.id_solicitud, '');
+      });
+      if (result && result.success) {
+        aprobadas++;
+      } else {
+        errores++;
+      }
+    } catch (e) {
+      errores++;
+    }
+  }
+
+  if (aprobadas > 0) {
+    showToast('success', `${aprobadas} solicitud(es) aprobada(s)`);
+  }
+  if (errores > 0) {
+    showToast('error', `${errores} error(es) al aprobar`);
+  }
+
+  // Recargar la matriz
+  if (DispState.recursoId) {
+    cargarMatrizDisponibilidad(DispState.recursoId);
+  }
 }
 
 function togglePanelPendientes() {
@@ -4578,7 +4650,21 @@ function renderizarSolicitudesRecurrentes() {
  * Abre el modal para gestionar (aprobar/rechazar) una solicitud
  */
 function abrirModalGestionarSolicitud(idSolicitud) {
-  const solicitud = AdminState.solicitudesRecurrentes.find(s => s.id_solicitud === idSolicitud);
+  // Buscar en múltiples fuentes de datos
+  let solicitud = AdminState.solicitudesRecurrentes?.find(s => s.id_solicitud === idSolicitud);
+
+  // Si no está en AdminState, buscar en DispState (datos de la matriz)
+  if (!solicitud && DispState.recurrencias) {
+    solicitud = DispState.recurrencias.find(s => s.id_solicitud === idSolicitud);
+  }
+  if (!solicitud && DispState.pendientes) {
+    solicitud = DispState.pendientes.find(s => s.id_solicitud === idSolicitud);
+  }
+  // Buscar también en el historial si está cargado
+  if (!solicitud && typeof datosHistorialRecurrencias !== 'undefined' && datosHistorialRecurrencias) {
+    solicitud = datosHistorialRecurrencias.find(s => s.id_solicitud === idSolicitud);
+  }
+
   if (!solicitud) {
     showToast('error', 'Solicitud no encontrada');
     return;

@@ -184,43 +184,46 @@
           </div>
         </div>
 
-        <!-- Fila 2: Selector de recurso -->
-        <div class="relative w-full sm:w-80 z-50">
-          <button onclick="toggleRecursoDropdown(event)"
-          id="btnSelectorRecursoDisp"
-          class="w-full flex items-center gap-3 px-4 py-2.5 bg-white border border-gray-300 rounded-xl shadow-sm hover:border-blue-400 transition-all text-left group">
+        <!-- Fila 2: Selector de recurso + Panel de pendientes en la misma línea -->
+        <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+          <!-- Selector de recurso -->
+          <div class="relative w-full sm:w-72 z-50 shrink-0">
+            <button onclick="toggleRecursoDropdown(event)"
+            id="btnSelectorRecursoDisp"
+            class="w-full flex items-center gap-3 px-4 py-2.5 bg-white border border-gray-300 rounded-xl shadow-sm hover:border-blue-400 transition-all text-left group">
 
-      <div class="p-1.5 rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
-          <iconify-icon icon="mdi:cube-outline" class="text-lg"></iconify-icon>
-      </div>
-
-      <span class="flex-1 text-sm font-medium text-gray-700 truncate" id="labelSelectorRecursoDisp">Selecciona Recurso...</span>
-
-      <iconify-icon icon="mdi:chevron-down" class="text-gray-400 group-hover:text-blue-500 transition-colors"></iconify-icon>
-    </button>
-
-          <div id="dropdownRecursoDisp"
-            class="hidden absolute top-full left-0 mt-2 w-full bg-white border border-gray-100 rounded-xl shadow-xl overflow-hidden animate-fade-in-up max-h-80 overflow-y-auto z-60">
-          </div>
+        <div class="p-1.5 rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
+            <iconify-icon icon="mdi:cube-outline" class="text-lg"></iconify-icon>
         </div>
 
-      </div>
+        <span class="flex-1 text-sm font-medium text-gray-700 truncate" id="labelSelectorRecursoDisp">Selecciona Recurso...</span>
 
-      <!-- Panel de Solicitudes Pendientes (Colapsable) -->
-      <div id="panelPendientesRecurso" class="hidden mb-4">
-        <div class="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden">
-          <button onclick="togglePanelPendientes()" class="w-full px-4 py-3 flex items-center justify-between hover:bg-amber-100/50 transition-colors">
-            <div class="flex items-center gap-2">
-              <iconify-icon icon="mdi:clock-alert-outline" class="text-amber-600 text-lg"></iconify-icon>
-              <span class="font-semibold text-amber-800 text-sm">Solicitudes pendientes</span>
-              <span id="badgePendientesRecurso" class="px-2 py-0.5 bg-amber-500 text-white text-xs font-bold rounded-full">0</span>
+        <iconify-icon icon="mdi:chevron-down" class="text-gray-400 group-hover:text-blue-500 transition-colors"></iconify-icon>
+      </button>
+
+            <div id="dropdownRecursoDisp"
+              class="hidden absolute top-full left-0 mt-2 w-full bg-white border border-gray-100 rounded-xl shadow-xl overflow-hidden animate-fade-in-up max-h-80 overflow-y-auto z-60">
             </div>
-            <iconify-icon id="iconExpandPendientes" icon="mdi:chevron-down" class="text-amber-500 text-xl transition-transform"></iconify-icon>
-          </button>
-          <div id="listaPendientesRecurso" class="hidden border-t border-amber-200 max-h-60 overflow-y-auto">
-            <!-- Se llena dinámicamente -->
+          </div>
+
+          <!-- Panel de Solicitudes Pendientes (compacto, misma línea) -->
+          <div id="panelPendientesRecurso" class="hidden flex-1">
+            <div class="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden">
+              <button onclick="togglePanelPendientes()" class="w-full px-4 py-2 flex items-center justify-between hover:bg-amber-100/50 transition-colors">
+                <div class="flex items-center gap-2">
+                  <iconify-icon icon="mdi:clock-alert-outline" class="text-amber-600 text-lg"></iconify-icon>
+                  <span class="font-semibold text-amber-800 text-sm">Pendientes</span>
+                  <span id="badgePendientesRecurso" class="px-2 py-0.5 bg-amber-500 text-white text-xs font-bold rounded-full">0</span>
+                </div>
+                <iconify-icon id="iconExpandPendientes" icon="mdi:chevron-down" class="text-amber-500 text-xl transition-transform"></iconify-icon>
+              </button>
+              <div id="listaPendientesRecurso" class="hidden border-t border-amber-200 max-h-60 overflow-y-auto">
+                <!-- Se llena dinámicamente -->
+              </div>
+            </div>
           </div>
         </div>
+
       </div>
 
       <!-- Contenedor de la Matriz -->
