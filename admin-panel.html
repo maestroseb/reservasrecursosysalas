@@ -185,7 +185,7 @@
         </div>
 
         <!-- Fila 2: Selector de recurso + Panel de pendientes en la misma línea -->
-        <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+        <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-start">
           <!-- Selector de recurso -->
           <div class="relative w-full sm:w-72 z-50 shrink-0">
             <button onclick="toggleRecursoDropdown(event)"
@@ -206,17 +206,24 @@
             </div>
           </div>
 
-          <!-- Panel de Solicitudes Pendientes (compacto, misma línea) -->
-          <div id="panelPendientesRecurso" class="hidden flex-1">
+          <!-- Panel de Solicitudes Pendientes (compacto, max 50%) -->
+          <div id="panelPendientesRecurso" class="hidden w-full sm:max-w-[50%] sm:flex-1">
             <div class="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden">
-              <button onclick="togglePanelPendientes()" class="w-full px-4 py-2 flex items-center justify-between hover:bg-amber-100/50 transition-colors">
+              <div class="px-4 py-2 flex items-center justify-between hover:bg-amber-100/50 transition-colors cursor-pointer" onclick="togglePanelPendientes()">
                 <div class="flex items-center gap-2">
                   <iconify-icon icon="mdi:clock-alert-outline" class="text-amber-600 text-lg"></iconify-icon>
                   <span class="font-semibold text-amber-800 text-sm">Pendientes</span>
                   <span id="badgePendientesRecurso" class="px-2 py-0.5 bg-amber-500 text-white text-xs font-bold rounded-full">0</span>
                 </div>
-                <iconify-icon id="iconExpandPendientes" icon="mdi:chevron-down" class="text-amber-500 text-xl transition-transform"></iconify-icon>
-              </button>
+                <div class="flex items-center gap-2">
+                  <button id="btnAprobarTodasHeader" onclick="event.stopPropagation(); aprobarTodasPendientesRecurso()"
+                    class="hidden px-2.5 py-1 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded-lg flex items-center gap-1 transition-colors">
+                    <iconify-icon icon="mdi:check-all" class="text-sm"></iconify-icon>
+                    <span class="hidden sm:inline">Aprobar todas</span>
+                  </button>
+                  <iconify-icon id="iconExpandPendientes" icon="mdi:chevron-down" class="text-amber-500 text-xl transition-transform"></iconify-icon>
+                </div>
+              </div>
               <div id="listaPendientesRecurso" class="hidden border-t border-amber-200 max-h-60 overflow-y-auto">
                 <!-- Se llena dinámicamente -->
               </div>

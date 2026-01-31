@@ -1410,6 +1410,7 @@ function actualizarPanelPendientesRecurso() {
   const panel = document.getElementById('panelPendientesRecurso');
   const badge = document.getElementById('badgePendientesRecurso');
   const lista = document.getElementById('listaPendientesRecurso');
+  const btnAprobarHeader = document.getElementById('btnAprobarTodasHeader');
 
   if (!panel || !badge || !lista) return;
 
@@ -1417,11 +1418,23 @@ function actualizarPanelPendientesRecurso() {
 
   if (pendientes.length === 0) {
     panel.classList.add('hidden');
+    if (btnAprobarHeader) btnAprobarHeader.classList.add('hidden');
     return;
   }
 
   panel.classList.remove('hidden');
   badge.textContent = pendientes.length;
+
+  // Mostrar botón "Aprobar todas" en header solo si hay más de 1
+  if (btnAprobarHeader) {
+    if (pendientes.length > 1) {
+      btnAprobarHeader.classList.remove('hidden');
+      btnAprobarHeader.classList.add('flex');
+    } else {
+      btnAprobarHeader.classList.add('hidden');
+      btnAprobarHeader.classList.remove('flex');
+    }
+  }
 
   // Helper para obtener nombre de tramo
   const getNombreTramo = (idTramo) => {
@@ -1429,18 +1442,16 @@ function actualizarPanelPendientesRecurso() {
     return tramo?.Nombre_Tramo || tramo?.nombre_tramo || idTramo;
   };
 
-  // Botón "Aprobar todas" al principio
-  let htmlContent = pendientes.length > 1 ? `
-    <div class="px-4 py-2 bg-amber-100/50 border-b border-amber-200 flex justify-end">
-      <button onclick="aprobarTodasPendientesRecurso()"
-        class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors">
-        <iconify-icon icon="mdi:check-all" class="text-sm"></iconify-icon>
-        Aprobar todas
-      </button>
-    </div>
-  ` : '';
+  // Obtener nombre del recurso actual
+  const recursoActual = AdminState.recursos?.find(r => r.id_recurso === DispState.recursoId);
+  const nombreRecursoActual = recursoActual?.nombre || '';
 
-  htmlContent += pendientes.map(sol => {
+  const htmlContent = pendientes.map(sol => {
+    // Enriquecer con nombre de recurso si no lo tiene
+    if (!sol.nombre_recurso && nombreRecursoActual) {
+      sol.nombre_recurso = nombreRecursoActual;
+    }
+
     const diasStr = sol.dias_semana || '';
     let diasDisplay = '';
     let tramosDisplay = '';
@@ -1764,10 +1775,183 @@ function abrirMenuRecurrencia(idTramo, dia) {
 
   const rec = recurrencias[0];
 
-  // Buscar el id_solicitud para poder gestionar
-  if (rec.id_solicitud) {
-    // Abrir el modal existente de gestión de recurrencia
+  if (!rec.id_solicitud) return;
+
+  // Diferenciar por estado
+  const estado = (rec.estado || '').toLowerCase();
+
+  if (estado === 'aprobada') {
+    // Abrir modal de detalle/gestión de recurrencia aprobada
+    abrirModalDetalleRecurrencia(rec);
+  } else if (estado === 'pendiente') {
+    // Abrir modal de aprobar/rechazar
     abrirModalGestionarSolicitud(rec.id_solicitud);
+  } else {
+    // Cualquier otro estado, mostrar detalles
+    abrirModalDetalleRecurrencia(rec);
+  }
+}
+
+/**
+ * Abre el modal de detalle para recurrencias aprobadas
+ */
+function abrirModalDetalleRecurrencia(rec) {
+  // Construir contenido del modal
+  const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes', 'S': 'Sábado', 'D': 'Domingo' };
+  const diasStr = rec.dias_semana || '';
+  let diasFormateados = '';
+  let tramosFormateados = '';
+
+  const getNombreTramo = (idTramo) => {
+    const tramo = AdminState.tramos?.find(t => t.id_tramo === idTramo);
+    return tramo?.Nombre_Tramo || tramo?.nombre_tramo || idTramo;
+  };
+
+  if (diasStr.includes(':')) {
+    const items = diasStr.split(',');
+    const diasSet = new Set();
+    const tramosSet = new Set();
+    items.forEach(item => {
+      const [dia, tramo] = item.trim().split(':');
+      if (dia) diasSet.add(dia.toUpperCase());
+      if (tramo) tramosSet.add(tramo);
+    });
+    diasFormateados = Array.from(diasSet).map(d => diasNombres[d] || d).join(', ');
+    tramosFormateados = Array.from(tramosSet).map(getNombreTramo).join(', ');
+  } else {
+    diasFormateados = diasStr.split(',').map(d => diasNombres[d.trim().toUpperCase()] || d).join(', ');
+    tramosFormateados = rec.nombre_tramo || getNombreTramo(rec.id_tramo);
+  }
+
+  // Obtener nombre del recurso
+  const recurso = AdminState.recursos?.find(r => r.id_recurso === rec.id_recurso || r.id_recurso === DispState.recursoId);
+  const nombreRecurso = rec.nombre_recurso || recurso?.nombre || '';
+
+  const fechaInicio = rec.fecha_inicio ? new Date(rec.fecha_inicio).toLocaleDateString('es-ES') : '-';
+  const fechaFin = rec.fecha_fin ? new Date(rec.fecha_fin).toLocaleDateString('es-ES') : '-';
+
+  const modalHTML = `
+    <div id="modalDetalleRecurrencia" class="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      <div class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm" onclick="cerrarModalDetalleRecurrencia()"></div>
+      <div class="relative bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-fade-in-up">
+        <!-- Header -->
+        <div class="bg-blue-50 px-6 py-4 flex items-center justify-between border-b border-blue-100">
+          <div class="flex items-center gap-3">
+            <div class="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100">
+              <iconify-icon icon="mdi:calendar-account" class="text-xl text-blue-600"></iconify-icon>
+            </div>
+            <div>
+              <h3 class="text-lg font-semibold text-gray-900">Recurrencia Activa</h3>
+              <p class="text-sm text-blue-600">${escaparHTML(nombreRecurso)}</p>
+            </div>
+          </div>
+          <button onclick="cerrarModalDetalleRecurrencia()" class="p-2 hover:bg-blue-100 rounded-full transition-colors">
+            <iconify-icon icon="mdi:close" class="text-xl text-gray-500"></iconify-icon>
+          </button>
+        </div>
+
+        <!-- Contenido -->
+        <div class="px-6 py-5 space-y-4">
+          <div class="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+            <p><span class="font-medium text-gray-700">Usuario:</span> ${escaparHTML(rec.nombre_usuario)}</p>
+            <p><span class="font-medium text-gray-700">Email:</span> ${escaparHTML(rec.email_usuario)}</p>
+            ${rec.area_usuario ? `<p><span class="font-medium text-gray-700">Área:</span> ${escaparHTML(rec.area_usuario)}</p>` : ''}
+            <p><span class="font-medium text-gray-700">Días:</span> ${escaparHTML(diasFormateados)}</p>
+            <p><span class="font-medium text-gray-700">Tramos:</span> ${escaparHTML(tramosFormateados)}</p>
+            <p><span class="font-medium text-gray-700">Período:</span> ${fechaInicio} → ${fechaFin}</p>
+            ${rec.motivo ? `<p><span class="font-medium text-gray-700">Motivo:</span> ${escaparHTML(rec.motivo)}</p>` : ''}
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+              <iconify-icon icon="mdi:note-edit-outline" class="text-base"></iconify-icon>
+              Notas del administrador
+            </label>
+            <textarea id="notasRecurrenciaDetalle" rows="2"
+              class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+              placeholder="Añadir notas...">${escaparHTML(rec.notas_admin || '')}</textarea>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="bg-gray-50 px-6 py-4 flex gap-3 border-t border-gray-100">
+          <button onclick="cerrarModalDetalleRecurrencia()"
+            class="flex-1 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors">
+            Cerrar
+          </button>
+          <button onclick="guardarNotasRecurrencia('${rec.id_solicitud}')"
+            class="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-2">
+            <iconify-icon icon="mdi:content-save"></iconify-icon>
+            Guardar notas
+          </button>
+          <button onclick="revocarRecurrencia('${rec.id_solicitud}')"
+            class="px-4 py-2.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl text-sm font-medium transition-colors flex items-center gap-2">
+            <iconify-icon icon="mdi:cancel"></iconify-icon>
+            Revocar
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Eliminar modal anterior si existe
+  const modalExistente = document.getElementById('modalDetalleRecurrencia');
+  if (modalExistente) modalExistente.remove();
+
+  // Insertar y mostrar
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function cerrarModalDetalleRecurrencia() {
+  const modal = document.getElementById('modalDetalleRecurrencia');
+  if (modal) modal.remove();
+}
+
+async function guardarNotasRecurrencia(idSolicitud) {
+  const notas = document.getElementById('notasRecurrenciaDetalle')?.value || '';
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .actualizarNotasRecurrencia(idSolicitud, notas);
+    });
+
+    if (result && result.success) {
+      showToast('success', 'Notas guardadas');
+      cerrarModalDetalleRecurrencia();
+      // Recargar matriz
+      if (DispState.recursoId) cargarMatrizDisponibilidad(DispState.recursoId);
+    } else {
+      showToast('error', result?.error || 'Error al guardar');
+    }
+  } catch (error) {
+    showToast('error', 'Error: ' + (error.message || String(error)));
+  }
+}
+
+async function revocarRecurrencia(idSolicitud) {
+  if (!confirm('¿Revocar esta recurrencia? Se cancelarán todas las reservas futuras asociadas.')) return;
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .cancelarRecurrenciaAprobada(idSolicitud);
+    });
+
+    if (result && result.success) {
+      showToast('success', 'Recurrencia revocada');
+      cerrarModalDetalleRecurrencia();
+      // Recargar matriz
+      if (DispState.recursoId) cargarMatrizDisponibilidad(DispState.recursoId);
+    } else {
+      showToast('error', result?.error || 'Error al revocar');
+    }
+  } catch (error) {
+    showToast('error', 'Error: ' + (error.message || String(error)));
   }
 }
 

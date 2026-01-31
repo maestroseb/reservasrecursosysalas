@@ -475,6 +475,37 @@ function rechazarSolicitudRecurrente(idSolicitud, motivoRechazo) {
 }
 
 /**
+ * Actualiza las notas de administrador de una solicitud recurrente
+ * @param {string} idSolicitud - ID de la solicitud
+ * @param {string} notas - Nuevas notas
+ */
+function actualizarNotasRecurrencia(idSolicitud, notas) {
+  try {
+    const adminEmail = Session.getActiveUser().getEmail();
+    if (!checkIfAdmin(adminEmail)) {
+      return { success: false, error: 'No tienes permisos para esta acción' };
+    }
+
+    const sheet = getOrCreateSheetSolicitudesRecurrentes();
+    const data = sheet.getDataRange().getValues();
+
+    // Buscar la solicitud
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][COLS_SOLICITUDES.ID_SOLICITUD] === idSolicitud) {
+        sheet.getRange(i + 1, COLS_SOLICITUDES.NOTAS_ADMIN + 1).setValue(notas || '');
+        return { success: true };
+      }
+    }
+
+    return { success: false, error: 'Solicitud no encontrada' };
+
+  } catch (error) {
+    Logger.log('Error actualizando notas: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
  * Cancela una recurrencia aprobada (admin)
  * Cambia el estado a Cancelada y cancela todas las reservas futuras
  * @param {string} idSolicitud - ID de la solicitud
