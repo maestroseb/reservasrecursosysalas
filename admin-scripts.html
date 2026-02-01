@@ -1504,12 +1504,21 @@ function actualizarPanelPendientesRecurso() {
  * Ver detalles de solicitud directamente desde los datos locales
  */
 function verDetalleSolicitudDirecto(idSolicitud) {
-  // Buscar en DispState.pendientes
-  const sol = DispState.pendientes?.find(s => s.id_solicitud === idSolicitud);
+  // Buscar en múltiples fuentes de datos
+  let sol = DispState.pendientes?.find(s => s.id_solicitud === idSolicitud);
+
+  if (!sol) {
+    sol = AdminState.solicitudesRecurrentes?.find(s => s.id_solicitud === idSolicitud);
+  }
+
+  if (!sol) {
+    sol = DispState.recurrencias?.find(s => s.id_solicitud === idSolicitud);
+  }
+
   if (sol) {
     abrirModalGestionarSolicitud(idSolicitud);
   } else {
-    showToast('error', 'Solicitud no encontrada en datos locales');
+    showToast('error', 'Solicitud no encontrada');
   }
 }
 
