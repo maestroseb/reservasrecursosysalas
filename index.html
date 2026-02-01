@@ -720,7 +720,7 @@
     <!-- Panel -->
     <div class="fixed inset-0 z-10 flex items-center justify-center p-4">
       <div onclick="event.stopPropagation()"
-        class="relative bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        class="relative bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto overflow-x-hidden">
 
         <!-- Header -->
         <div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-xl z-10">
@@ -821,9 +821,9 @@
                   <span class="text-sm font-medium">Fecha concreta</span>
                 </label>
               </div>
-              <div id="fechaFinContainer" class="hidden sm:flex-1">
+              <div id="fechaFinContainer" class="hidden w-full sm:w-auto sm:flex-1">
                 <input type="date" id="recurrenteFechaFin"
-                  class="w-full sm:w-auto px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+                  class="w-full max-w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
               </div>
             </div>
           </div>
