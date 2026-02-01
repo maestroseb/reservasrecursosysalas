@@ -216,8 +216,17 @@
                 </div>
                 <iconify-icon id="iconExpandPendientes" icon="mdi:chevron-down" class="text-amber-500 text-lg transition-transform"></iconify-icon>
               </div>
-              <div id="listaPendientesRecurso" class="hidden border-t border-amber-200 max-h-60 overflow-y-auto">
-                <!-- Se llena dinámicamente -->
+              <div id="contenidoPendientesExpandido" class="hidden border-t border-amber-200">
+                <div id="listaPendientesRecurso" class="max-h-48 overflow-y-auto">
+                  <!-- Se llena dinámicamente -->
+                </div>
+                <div class="px-3 py-2 border-t border-amber-200 bg-amber-100/50">
+                  <button onclick="aprobarTodasPendientesGlobal()"
+                    class="w-full py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-200 rounded-lg transition-colors flex items-center justify-center gap-1">
+                    <iconify-icon icon="mdi:check-all"></iconify-icon>
+                    Aprobar todas
+                  </button>
+                </div>
               </div>
             </div>
           </div>

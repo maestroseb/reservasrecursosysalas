@@ -329,6 +329,11 @@ function setupAdminListeners() {
         if (sectionName === 'tramos') renderTablaTramos();
         
         if (sectionName === 'disponibilidad') {
+            // Cargar solicitudes recurrentes para badge y panel pendientes global
+            if (typeof cargarSolicitudesRecurrentesGlobal === 'function') {
+              cargarSolicitudesRecurrentesGlobal();
+            }
+
             if(typeof DispState !== 'undefined' && DispState.recursoId) {
                 cargarMatrizDisponibilidad(DispState.recursoId);
             } else {
@@ -1597,12 +1602,12 @@ async function aprobarTodasPendientesRecurso() {
 }
 
 function togglePanelPendientes() {
-  const lista = document.getElementById('listaPendientesRecurso');
+  const contenido = document.getElementById('contenidoPendientesExpandido');
   const icon = document.getElementById('iconExpandPendientes');
-  if (!lista || !icon) return;
+  if (!contenido || !icon) return;
 
-  lista.classList.toggle('hidden');
-  icon.style.transform = lista.classList.contains('hidden') ? '' : 'rotate(180deg)';
+  contenido.classList.toggle('hidden');
+  icon.style.transform = contenido.classList.contains('hidden') ? '' : 'rotate(180deg)';
 }
 
 
@@ -4309,6 +4314,142 @@ function fixMenusFlotantes() {
 
 let filtroEstadoRecurrente = 'todas';
 let busquedaRecurrente = '';
+
+/**
+ * Carga las solicitudes recurrentes globales para el badge y panel de pendientes
+ * Se llama al abrir la pestaña Disponibilidad
+ */
+async function cargarSolicitudesRecurrentesGlobal() {
+  try {
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler((res) => resolve(res || { success: true, solicitudes: [] }))
+        .withFailureHandler(reject)
+        .getSolicitudesRecurrentes();
+    });
+
+    if (result && result.success) {
+      AdminState.solicitudesRecurrentes = result.solicitudes || [];
+      actualizarBadgeRecurrentes();
+      actualizarPanelPendientesGlobal();
+    }
+  } catch (error) {
+    console.error('Error cargando solicitudes recurrentes globales:', error);
+  }
+}
+
+/**
+ * Actualiza el panel de pendientes con TODAS las solicitudes pendientes (global)
+ */
+function actualizarPanelPendientesGlobal() {
+  const panel = document.getElementById('panelPendientesRecurso');
+  const lista = document.getElementById('listaPendientesRecurso');
+  const badge = document.getElementById('badgePendientesRecurso');
+
+  if (!panel || !lista || !badge) return;
+
+  // Filtrar solicitudes pendientes de todos los recursos
+  const pendientes = (AdminState.solicitudesRecurrentes || []).filter(s =>
+    (s.estado || '').toLowerCase() === 'pendiente'
+  );
+
+  if (pendientes.length === 0) {
+    panel.classList.add('hidden');
+    return;
+  }
+
+  // Mostrar panel
+  panel.classList.remove('hidden');
+  badge.textContent = pendientes.length;
+
+  // Renderizar lista
+  lista.innerHTML = pendientes.map(sol => {
+    const diasStr = sol.dias_semana || '';
+    let diasDisplay = '';
+    if (diasStr.includes(':')) {
+      const diasSet = new Set();
+      diasStr.split(',').forEach(item => {
+        const [d] = item.trim().split(':');
+        if (d) diasSet.add(d.toUpperCase());
+      });
+      diasDisplay = Array.from(diasSet).join('·');
+    } else {
+      diasDisplay = diasStr.split(',').map(d => d.trim().toUpperCase()).join('·');
+    }
+
+    return `
+      <div class="px-3 py-2 border-b border-amber-100 last:border-b-0 hover:bg-amber-100/50 transition-colors">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex-1 min-w-0">
+            <div class="font-medium text-gray-800 text-xs truncate">${escaparHTML(sol.nombre_usuario)}</div>
+            <div class="text-[10px] text-gray-500">${escaparHTML(sol.nombre_recurso)} · ${diasDisplay}</div>
+          </div>
+          <div class="flex gap-1 shrink-0">
+            <button onclick="verDetalleSolicitudDirecto('${sol.id_solicitud}')"
+              class="p-1.5 hover:bg-amber-200 rounded-lg transition-colors" title="Ver detalles">
+              <iconify-icon icon="mdi:eye-outline" class="text-amber-700 text-sm"></iconify-icon>
+            </button>
+            <button onclick="aprobarSolicitudRapidaConSpinner('${sol.id_solicitud}', this)"
+              class="p-1.5 hover:bg-green-200 rounded-lg transition-colors" title="Aprobar">
+              <iconify-icon icon="mdi:check" class="text-green-600 text-sm"></iconify-icon>
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+/**
+ * Aprueba todas las solicitudes pendientes de una vez
+ */
+async function aprobarTodasPendientesGlobal() {
+  const pendientes = (AdminState.solicitudesRecurrentes || []).filter(s =>
+    (s.estado || '').toLowerCase() === 'pendiente'
+  );
+
+  if (pendientes.length === 0) {
+    showToast('info', 'No hay solicitudes pendientes');
+    return;
+  }
+
+  if (!confirm(`¿Aprobar las ${pendientes.length} solicitudes pendientes?`)) return;
+
+  let aprobadas = 0;
+  let errores = 0;
+
+  for (const sol of pendientes) {
+    try {
+      const result = await new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)
+          .aprobarSolicitudRecurrente(sol.id_solicitud);
+      });
+
+      if (result && result.success) {
+        aprobadas++;
+      } else {
+        errores++;
+      }
+    } catch (error) {
+      errores++;
+    }
+  }
+
+  if (aprobadas > 0) {
+    showToast('success', `${aprobadas} solicitudes aprobadas`);
+  }
+  if (errores > 0) {
+    showToast('warning', `${errores} solicitudes con error`);
+  }
+
+  // Recargar datos
+  await cargarSolicitudesRecurrentesGlobal();
+  if (DispState.recursoId) {
+    cargarMatrizDisponibilidad(DispState.recursoId);
+  }
+}
 
 /**
  * Carga las solicitudes recurrentes desde el servidor
