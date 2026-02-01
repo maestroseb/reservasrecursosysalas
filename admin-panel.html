@@ -226,8 +226,8 @@
       </div>
 
       <!-- Contenedor de la Matriz -->
-      <div id="contenedorMatriz" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hidden">
-        <!-- Spinner de carga -->
+      <div id="contenedorMatriz" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden relative">
+        <!-- Spinner de carga (overlay) -->
         <div id="spinnerMatrizUnificada" class="absolute inset-0 bg-white/80 z-10 flex items-center justify-center hidden">
           <div class="flex flex-col items-center gap-2">
             <iconify-icon icon="mdi:loading" class="text-3xl text-blue-500 animate-spin"></iconify-icon>
@@ -250,17 +250,21 @@
               </tr>
             </thead>
             <tbody id="cuerpoMatriz" class="bg-white divide-y divide-gray-200">
+              <!-- Estado inicial: mensaje para seleccionar recurso -->
+              <tr id="filaPlaceholderMatriz">
+                <td colspan="6" class="py-16 text-center">
+                  <div class="flex flex-col items-center gap-3 text-gray-400">
+                    <div class="bg-gray-50 p-5 rounded-full">
+                      <iconify-icon icon="mdi:cursor-pointer" class="text-3xl text-blue-300"></iconify-icon>
+                    </div>
+                    <p class="text-base font-medium text-gray-500">Selecciona un recurso arriba</p>
+                    <p class="text-sm">Verás la disponibilidad y las reservas recurrentes.</p>
+                  </div>
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
-      </div>
-
-      <div id="emptyStateDisp" class="flex flex-col items-center justify-center py-20 text-gray-400">
-        <div class="bg-gray-50 p-6 rounded-full mb-4">
-          <iconify-icon icon="mdi:cursor-pointer" class="text-4xl text-blue-200"></iconify-icon>
-        </div>
-        <p class="text-lg font-medium text-gray-500">Selecciona un recurso arriba</p>
-        <p class="text-sm">Verás la disponibilidad y las reservas recurrentes.</p>
       </div>
 
       <!-- Leyenda actualizada con 3 estados -->
