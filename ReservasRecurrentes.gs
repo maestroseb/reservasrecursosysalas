@@ -500,7 +500,36 @@ function actualizarNotasRecurrencia(idSolicitud, notas) {
     return { success: false, error: 'Solicitud no encontrada' };
 
   } catch (error) {
-    Logger.log('Error actualizando notas: ' + error.message);
+    console.error('Error actualizando notas:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Actualiza el motivo de una solicitud de recurrencia
+ */
+function actualizarMotivoRecurrencia(idSolicitud, motivo) {
+  try {
+    const adminEmail = Session.getActiveUser().getEmail();
+    if (!checkIfAdmin(adminEmail)) {
+      return { success: false, error: 'No tienes permisos para esta acción' };
+    }
+
+    const sheet = getOrCreateSheetSolicitudesRecurrentes();
+    const data = sheet.getDataRange().getValues();
+
+    // Buscar la solicitud
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][COLS_SOLICITUDES.ID_SOLICITUD] === idSolicitud) {
+        sheet.getRange(i + 1, COLS_SOLICITUDES.MOTIVO + 1).setValue(motivo || '');
+        return { success: true };
+      }
+    }
+
+    return { success: false, error: 'Solicitud no encontrada' };
+
+  } catch (error) {
+    Logger.log('Error actualizando motivo: ' + error.message);
     return { success: false, error: error.message };
   }
 }
