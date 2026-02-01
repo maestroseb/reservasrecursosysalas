@@ -158,8 +158,8 @@
       <!-- Cabecera con título, selector y botones -->
       <div class="flex flex-col gap-4 mb-6 border-b border-gray-100 pb-6">
 
-        <!-- Fila 1: Título y botones de acción -->
-        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <!-- Fila 1: Título y zona derecha (botones + pendientes) -->
+        <div class="flex flex-col sm:flex-row justify-between items-start gap-3">
           <div>
             <h2 class="text-2xl font-bold text-gray-800 flex items-center gap-2">
               <iconify-icon icon="mdi:calendar-check" class="text-blue-600"></iconify-icon>
@@ -168,29 +168,46 @@
             <p class="text-gray-500 text-sm mt-1">Disponibilidad y reservas recurrentes.</p>
           </div>
 
-          <div class="flex gap-2">
-            <!-- Botón Ver Historial -->
-            <button onclick="abrirModalHistorialRecurrencias()"
-              class="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all text-sm font-medium">
-              <iconify-icon icon="mdi:history" class="text-lg"></iconify-icon>
-              <span class="hidden sm:inline">Historial</span>
-            </button>
-            <!-- Botón Nueva Recurrente -->
-            <button onclick="abrirModalNuevaRecurrenteAdmin()"
-              class="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all text-sm font-semibold shadow-sm">
-              <iconify-icon icon="mdi:plus" class="text-lg"></iconify-icon>
-              <span>Nueva Recurrente</span>
-            </button>
+          <!-- Zona derecha: botones arriba, pendientes debajo -->
+          <div class="flex flex-col gap-2 items-end w-full sm:w-auto">
+            <!-- Botones -->
+            <div class="flex gap-2">
+              <button onclick="abrirModalHistorialRecurrencias()"
+                class="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all text-sm font-medium">
+                <iconify-icon icon="mdi:history" class="text-lg"></iconify-icon>
+                <span class="hidden sm:inline">Historial</span>
+              </button>
+              <button onclick="abrirModalNuevaRecurrenteAdmin()"
+                class="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all text-sm font-semibold shadow-sm">
+                <iconify-icon icon="mdi:plus" class="text-lg"></iconify-icon>
+                <span>Nueva Recurrente</span>
+              </button>
+            </div>
+
+            <!-- Panel de Solicitudes Pendientes (bajo los botones, alineado derecha) -->
+            <div id="panelPendientesRecurso" class="hidden w-full sm:w-auto sm:min-w-[280px]">
+              <div class="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden">
+                <div class="px-3 py-2 flex items-center justify-between hover:bg-amber-100/50 transition-colors cursor-pointer" onclick="togglePanelPendientes()">
+                  <div class="flex items-center gap-2">
+                    <iconify-icon icon="mdi:clock-alert-outline" class="text-amber-600 text-base"></iconify-icon>
+                    <span class="font-semibold text-amber-800 text-sm">Pendientes</span>
+                    <span id="badgePendientesRecurso" class="px-2 py-0.5 bg-amber-500 text-white text-xs font-bold rounded-full">0</span>
+                  </div>
+                  <iconify-icon id="iconExpandPendientes" icon="mdi:chevron-down" class="text-amber-500 text-lg transition-transform"></iconify-icon>
+                </div>
+                <div id="listaPendientesRecurso" class="hidden border-t border-amber-200 max-h-60 overflow-y-auto">
+                  <!-- Se llena dinámicamente -->
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- Fila 2: Selector de recurso + Panel de pendientes en la misma línea -->
-        <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-start">
-          <!-- Selector de recurso -->
-          <div class="relative w-full sm:w-72 z-50 shrink-0">
-            <button onclick="toggleRecursoDropdown(event)"
-            id="btnSelectorRecursoDisp"
-            class="w-full flex items-center gap-3 px-4 py-2.5 bg-white border border-gray-300 rounded-xl shadow-sm hover:border-blue-400 transition-all text-left group">
+        <!-- Fila 2: Selector de recurso -->
+        <div class="relative w-full sm:w-72 z-50">
+          <button onclick="toggleRecursoDropdown(event)"
+          id="btnSelectorRecursoDisp"
+          class="w-full flex items-center gap-3 px-4 py-2.5 bg-white border border-gray-300 rounded-xl shadow-sm hover:border-blue-400 transition-all text-left group">
 
         <div class="p-1.5 rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
             <iconify-icon icon="mdi:cube-outline" class="text-lg"></iconify-icon>
@@ -201,33 +218,8 @@
         <iconify-icon icon="mdi:chevron-down" class="text-gray-400 group-hover:text-blue-500 transition-colors"></iconify-icon>
       </button>
 
-            <div id="dropdownRecursoDisp"
-              class="hidden absolute top-full left-0 mt-2 w-full bg-white border border-gray-100 rounded-xl shadow-xl overflow-hidden animate-fade-in-up max-h-80 overflow-y-auto z-60">
-            </div>
-          </div>
-
-          <!-- Panel de Solicitudes Pendientes (compacto, max 50%) -->
-          <div id="panelPendientesRecurso" class="hidden w-full sm:max-w-[50%] sm:flex-1">
-            <div class="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden">
-              <div class="px-4 py-2 flex items-center justify-between hover:bg-amber-100/50 transition-colors cursor-pointer" onclick="togglePanelPendientes()">
-                <div class="flex items-center gap-2">
-                  <iconify-icon icon="mdi:clock-alert-outline" class="text-amber-600 text-lg"></iconify-icon>
-                  <span class="font-semibold text-amber-800 text-sm">Pendientes</span>
-                  <span id="badgePendientesRecurso" class="px-2 py-0.5 bg-amber-500 text-white text-xs font-bold rounded-full">0</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <button id="btnAprobarTodasHeader" onclick="event.stopPropagation(); aprobarTodasPendientesRecurso()"
-                    class="hidden px-2.5 py-1 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded-lg flex items-center gap-1 transition-colors">
-                    <iconify-icon icon="mdi:check-all" class="text-sm"></iconify-icon>
-                    <span class="hidden sm:inline">Aprobar todas</span>
-                  </button>
-                  <iconify-icon id="iconExpandPendientes" icon="mdi:chevron-down" class="text-amber-500 text-xl transition-transform"></iconify-icon>
-                </div>
-              </div>
-              <div id="listaPendientesRecurso" class="hidden border-t border-amber-200 max-h-60 overflow-y-auto">
-                <!-- Se llena dinámicamente -->
-              </div>
-            </div>
+          <div id="dropdownRecursoDisp"
+            class="hidden absolute top-full left-0 mt-2 w-full bg-white border border-gray-100 rounded-xl shadow-xl overflow-hidden animate-fade-in-up max-h-80 overflow-y-auto z-60">
           </div>
         </div>
 

@@ -1410,7 +1410,6 @@ function actualizarPanelPendientesRecurso() {
   const panel = document.getElementById('panelPendientesRecurso');
   const badge = document.getElementById('badgePendientesRecurso');
   const lista = document.getElementById('listaPendientesRecurso');
-  const btnAprobarHeader = document.getElementById('btnAprobarTodasHeader');
 
   if (!panel || !badge || !lista) return;
 
@@ -1418,23 +1417,11 @@ function actualizarPanelPendientesRecurso() {
 
   if (pendientes.length === 0) {
     panel.classList.add('hidden');
-    if (btnAprobarHeader) btnAprobarHeader.classList.add('hidden');
     return;
   }
 
   panel.classList.remove('hidden');
   badge.textContent = pendientes.length;
-
-  // Mostrar botón "Aprobar todas" en header solo si hay más de 1
-  if (btnAprobarHeader) {
-    if (pendientes.length > 1) {
-      btnAprobarHeader.classList.remove('hidden');
-      btnAprobarHeader.classList.add('flex');
-    } else {
-      btnAprobarHeader.classList.add('hidden');
-      btnAprobarHeader.classList.remove('flex');
-    }
-  }
 
   // Helper para obtener nombre de tramo
   const getNombreTramo = (idTramo) => {
@@ -1446,7 +1433,18 @@ function actualizarPanelPendientesRecurso() {
   const recursoActual = AdminState.recursos?.find(r => r.id_recurso === DispState.recursoId);
   const nombreRecursoActual = recursoActual?.nombre || '';
 
-  const htmlContent = pendientes.map(sol => {
+  // Botón "Aprobar todas" dentro del contenido expandido si hay más de 1
+  let htmlContent = pendientes.length > 1 ? `
+    <div class="px-3 py-2 bg-amber-100/50 border-b border-amber-200 flex justify-end">
+      <button onclick="aprobarTodasPendientesRecurso()"
+        class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors">
+        <iconify-icon icon="mdi:check-all" class="text-sm"></iconify-icon>
+        Aprobar todas
+      </button>
+    </div>
+  ` : '';
+
+  htmlContent += pendientes.map((sol, idx) => {
     // Enriquecer con nombre de recurso si no lo tiene
     if (!sol.nombre_recurso && nombreRecursoActual) {
       sol.nombre_recurso = nombreRecursoActual;
@@ -1457,7 +1455,6 @@ function actualizarPanelPendientesRecurso() {
     let tramosDisplay = '';
 
     if (diasStr.includes(':')) {
-      // Formato nuevo: "L:T001,M:T002,J:T003"
       const diasSet = new Set();
       const tramosSet = new Set();
       diasStr.split(',').forEach(item => {
@@ -1466,23 +1463,20 @@ function actualizarPanelPendientesRecurso() {
         if (t) tramosSet.add(t);
       });
       diasDisplay = Array.from(diasSet).join('·');
-      // Convertir IDs de tramos a nombres
-      const tramosNombres = Array.from(tramosSet).map(getNombreTramo);
-      tramosDisplay = tramosNombres.join(', ');
+      tramosDisplay = Array.from(tramosSet).map(getNombreTramo).join(', ');
     } else {
-      // Formato antiguo
       diasDisplay = diasStr.split(',').map(d => d.trim().toUpperCase()).join('·');
       tramosDisplay = sol.nombre_tramo || getNombreTramo(sol.id_tramo);
     }
 
     return `
-      <div class="px-4 py-3 flex items-center justify-between gap-3 border-b border-amber-100 last:border-b-0 hover:bg-amber-100/30 transition-colors">
+      <div id="pendiente-row-${sol.id_solicitud}" class="px-3 py-2.5 flex items-center justify-between gap-2 border-b border-amber-100 last:border-b-0 hover:bg-amber-100/30 transition-colors">
         <div class="flex-1 min-w-0">
           <div class="text-sm font-medium text-gray-800 truncate">${escaparHTML(sol.nombre_usuario)}</div>
           <div class="text-xs text-gray-500">${diasDisplay} | ${escaparHTML(tramosDisplay)}</div>
         </div>
-        <div class="flex gap-1.5 shrink-0">
-          <button onclick="aprobarSolicitudRapida('${sol.id_solicitud}')"
+        <div class="flex gap-1 shrink-0">
+          <button id="btn-aprobar-${sol.id_solicitud}" onclick="aprobarSolicitudRapidaConSpinner('${sol.id_solicitud}', this)"
             class="p-1.5 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg transition-colors" title="Aprobar">
             <iconify-icon icon="mdi:check" class="text-base"></iconify-icon>
           </button>
@@ -1490,7 +1484,7 @@ function actualizarPanelPendientesRecurso() {
             class="p-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors" title="Rechazar">
             <iconify-icon icon="mdi:close" class="text-base"></iconify-icon>
           </button>
-          <button onclick="verDetalleSolicitud('${sol.id_solicitud}')"
+          <button onclick="verDetalleSolicitudDirecto('${sol.id_solicitud}')"
             class="p-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg transition-colors" title="Ver detalles">
             <iconify-icon icon="mdi:eye-outline" class="text-base"></iconify-icon>
           </button>
@@ -1500,6 +1494,64 @@ function actualizarPanelPendientesRecurso() {
   }).join('');
 
   lista.innerHTML = htmlContent;
+}
+
+/**
+ * Ver detalles de solicitud directamente desde los datos locales
+ */
+function verDetalleSolicitudDirecto(idSolicitud) {
+  // Buscar en DispState.pendientes
+  const sol = DispState.pendientes?.find(s => s.id_solicitud === idSolicitud);
+  if (sol) {
+    abrirModalGestionarSolicitud(idSolicitud);
+  } else {
+    showToast('error', 'Solicitud no encontrada en datos locales');
+  }
+}
+
+/**
+ * Aprobar solicitud con spinner visual
+ */
+async function aprobarSolicitudRapidaConSpinner(idSolicitud, btnElement) {
+  if (!idSolicitud) return;
+
+  // Mostrar spinner en el botón
+  const originalContent = btnElement.innerHTML;
+  btnElement.innerHTML = '<iconify-icon icon="mdi:loading" class="text-base animate-spin"></iconify-icon>';
+  btnElement.disabled = true;
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .aprobarSolicitudRecurrente(idSolicitud, '');
+    });
+
+    if (result && result.success) {
+      showToast('success', 'Solicitud aprobada');
+      // Eliminar la fila visualmente
+      const row = document.getElementById(`pendiente-row-${idSolicitud}`);
+      if (row) row.remove();
+      // Actualizar badge
+      const badge = document.getElementById('badgePendientesRecurso');
+      const count = parseInt(badge?.textContent || '1') - 1;
+      if (badge) badge.textContent = count;
+      if (count === 0) {
+        document.getElementById('panelPendientesRecurso')?.classList.add('hidden');
+      }
+      // Recargar matriz
+      if (DispState.recursoId) cargarMatrizDisponibilidad(DispState.recursoId);
+    } else {
+      btnElement.innerHTML = originalContent;
+      btnElement.disabled = false;
+      showToast('error', result?.error || 'Error al aprobar');
+    }
+  } catch (error) {
+    btnElement.innerHTML = originalContent;
+    btnElement.disabled = false;
+    showToast('error', 'Error: ' + (error.message || String(error)));
+  }
 }
 
 /**
@@ -5513,7 +5565,12 @@ function renderizarHistorialRecurrencias() {
 
   let solicitudes = [...datosHistorialRecurrencias];
 
-  // Filtrar por estado
+  // Siempre excluir canceladas del historial
+  solicitudes = solicitudes.filter(s =>
+    (s.estado || '').toLowerCase() !== 'cancelada'
+  );
+
+  // Filtrar por estado adicional si hay filtro activo
   if (filtroHistorialActual !== 'todas') {
     solicitudes = solicitudes.filter(s =>
       (s.estado || '').toLowerCase() === filtroHistorialActual.toLowerCase()
@@ -5595,13 +5652,33 @@ function renderizarHistorialRecurrencias() {
             <span>${fechaInicio} → ${fechaFin}</span>
           </div>
         </div>
-        <button onclick="abrirModalGestionarSolicitud('${sol.id_solicitud}')"
-          class="p-2 hover:bg-gray-200 rounded-lg transition-colors shrink-0" title="Gestionar">
-          <iconify-icon icon="mdi:pencil-outline" class="text-gray-500"></iconify-icon>
+        <button onclick="abrirDetalleDesdeHistorial('${sol.id_solicitud}')"
+          class="p-2 hover:bg-gray-200 rounded-lg transition-colors shrink-0" title="${(sol.estado || '').toLowerCase() === 'aprobada' ? 'Ver detalles' : 'Gestionar'}">
+          <iconify-icon icon="${(sol.estado || '').toLowerCase() === 'aprobada' ? 'mdi:eye-outline' : 'mdi:pencil-outline'}" class="text-gray-500"></iconify-icon>
         </button>
       </div>
     `;
   }).join('');
+}
+
+// Función auxiliar para abrir el modal correcto desde el historial
+function abrirDetalleDesdeHistorial(idSolicitud) {
+  // Buscar la solicitud en los datos del historial
+  const sol = datosHistorialRecurrencias.find(s => s.id_solicitud === idSolicitud);
+  if (!sol) {
+    console.error('Solicitud no encontrada en historial:', idSolicitud);
+    mostrarToast('Solicitud no encontrada', 'error');
+    return;
+  }
+
+  const estado = (sol.estado || '').toLowerCase();
+  if (estado === 'aprobada') {
+    // Usar el modal de detalle de recurrencia activa
+    abrirModalDetalleRecurrencia(sol);
+  } else {
+    // Para pendientes y rechazadas, usar el modal de gestión
+    abrirModalGestionarSolicitud(idSolicitud);
+  }
 }
 
 /* =========================================================
