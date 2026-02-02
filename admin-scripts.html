@@ -4449,7 +4449,18 @@ async function aprobarTodasPendientesGlobal() {
     return;
   }
 
-  if (!confirm(`¿Aprobar las ${pendientes.length} solicitudes pendientes?`)) return;
+  // Usar modal de confirmación en lugar de confirm()
+  mostrarConfirmacion(
+    '¿Aprobar todas las solicitudes?',
+    `Se aprobarán <strong>${pendientes.length}</strong> solicitudes pendientes.<br>Esta acción no se puede deshacer.`,
+    () => ejecutarAprobarTodasPendientes(pendientes)
+  );
+}
+
+/**
+ * Ejecuta la aprobación masiva de solicitudes
+ */
+async function ejecutarAprobarTodasPendientes(pendientes) {
 
   let aprobadas = 0;
   let errores = 0;
