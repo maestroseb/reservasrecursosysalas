@@ -5692,6 +5692,11 @@ async function abrirModalHistorialRecurrencias() {
   const modal = document.getElementById('modalHistorialRecurrencias');
   if (!modal) return;
 
+  // FIX: Mover al body si está atrapado dentro de otro contenedor
+  if (modal.parentNode !== document.body) {
+    document.body.appendChild(modal);
+  }
+
   modal.classList.remove('hidden');
 
   // Mostrar loading
