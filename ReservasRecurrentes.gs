@@ -1253,6 +1253,10 @@ function enviarEmailNuevaSolicitudRecurrente(datos) {
 
     const fechaFinFormateada = Utilities.formatDate(new Date(datos.fechaFin), Session.getScriptTimeZone(), 'dd/MM/yyyy');
 
+    // URL para aprobar directamente desde el email
+    const urlApp = ScriptApp.getService().getUrl();
+    const urlAprobar = `${urlApp}?action=aprobar_recurrente&id=${datos.id}`;
+
     const asunto = `🔄 Nueva solicitud de reserva recurrente - ${datos.recurso}`;
     const cuerpo = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -1283,7 +1287,11 @@ function enviarEmailNuevaSolicitudRecurrente(datos) {
           </tr>
         </table>
 
-        <p style="color: #6b7280;">Accede al panel de administración para aprobar o rechazar esta solicitud.</p>
+        <div style="text-align: center; margin: 25px 0;">
+          <a href="${urlAprobar}" style="display: inline-block; padding: 12px 24px; background-color: #10b981; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; margin-right: 10px;">✓ Aprobar Solicitud</a>
+        </div>
+
+        <p style="color: #6b7280; font-size: 0.9em;">O accede al panel de administración para más opciones (rechazar, añadir notas, etc.)</p>
       </div>
     `;
 

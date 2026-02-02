@@ -644,6 +644,11 @@ function doGet(e) {
     return handleAdminApproval(e.parameter.email, e.parameter.nombre);
   }
 
+  // 1.3. Aprobación de solicitud recurrente desde email
+  if (e.parameter.action === "aprobar_recurrente" && e.parameter.id) {
+    return handleAprobarRecurrenteDesdeEmail(e.parameter.id);
+  }
+
   // (LA ANTIGUA FASE 2 SE ELIMINA PORQUE ERA REDUNDANTE Y PROVOCABA ERROR)
 
   // --- FASE 2: AUTENTICACIÓN Y AUTORIZACIÓN ---
@@ -1470,6 +1475,78 @@ function buildHtmlCancelPage(titulo, mensaje, details) {
     </body>
     </html>
   `;
+}
+
+/* ============================================
+   APROBACIÓN DE SOLICITUD RECURRENTE DESDE EMAIL
+   ============================================ */
+function handleAprobarRecurrenteDesdeEmail(idSolicitud) {
+  try {
+    // Obtener datos de la solicitud
+    const sheet = getOrCreateSheetSolicitudesRecurrentes();
+    const data = sheet.getDataRange().getValues();
+
+    let filaEncontrada = -1;
+    let solicitud = null;
+
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === String(idSolicitud).trim()) {
+        filaEncontrada = i + 1;
+        solicitud = {
+          id: data[i][0],
+          recurso: data[i][2],
+          usuario: data[i][4],
+          email: data[i][3],
+          dias: data[i][5],
+          tramo: data[i][7],
+          estado: data[i][11]
+        };
+        break;
+      }
+    }
+
+    if (!solicitud) {
+      return HtmlService.createHtmlOutput(buildHtmlCancelPage(
+        "Solicitud no encontrada",
+        "No se ha encontrado la solicitud de reserva recurrente."
+      ));
+    }
+
+    // Verificar que está pendiente
+    if (solicitud.estado && solicitud.estado.toLowerCase() !== 'pendiente') {
+      return HtmlService.createHtmlOutput(buildHtmlCancelPage(
+        "Solicitud ya procesada",
+        `Esta solicitud ya fue ${solicitud.estado.toLowerCase()}.`
+      ));
+    }
+
+    // Aprobar la solicitud
+    const resultado = aprobarSolicitudRecurrente(idSolicitud, 'Aprobada desde email');
+
+    if (resultado && resultado.success) {
+      return HtmlService.createHtmlOutput(buildHtmlCancelPage(
+        "Solicitud Aprobada",
+        `La solicitud de reserva recurrente de <strong>${solicitud.usuario}</strong> para <strong>${solicitud.recurso}</strong> ha sido aprobada correctamente.`,
+        {
+          recursoNombre: solicitud.recurso,
+          fechaFormateada: `${solicitud.dias}`,
+          tramoNombre: solicitud.tramo
+        }
+      ));
+    } else {
+      return HtmlService.createHtmlOutput(buildHtmlCancelPage(
+        "Error al aprobar",
+        resultado?.error || "Ha ocurrido un error al aprobar la solicitud."
+      ));
+    }
+
+  } catch (error) {
+    Logger.log('❌ Error en handleAprobarRecurrenteDesdeEmail: ' + error.message);
+    return HtmlService.createHtmlOutput(buildHtmlCancelPage(
+      "Error",
+      "Ha ocurrido un error al procesar la aprobación: " + error.message
+    ));
+  }
 }
 
 
