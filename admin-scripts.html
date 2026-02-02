@@ -3507,6 +3507,7 @@ function renderConfiguracion() {
   setCfgCheck('cfg_permitir_multitramo',  configMap['permitir_multitramo']);
   setCfgCheck('cfg_exigir_motivo',        configMap['exigir_motivo']);
   setCfgCheck('cfg_modo_mantenimiento',   configMap['modo_mantenimiento']);
+  setCfgCheck('cfg_admin_recibir_copia_reservas', configMap['admin_recibir_copia_reservas']);
 }
 
 // --- LISTENERS ---
@@ -3517,7 +3518,7 @@ function attachConfigListeners() {
     'cfg_dias_vista_maximo', 'cfg_minutos_antelacion', 'cfg_limite_reservas',
     'cfg_horas_cancelacion', 'cfg_email_admin', 'cfg_nombre_centro',
     'cfg_url_logo', 'cfg_max_tramos_simultaneos', 'cfg_permitir_multitramo',
-    'cfg_exigir_motivo', 'cfg_modo_mantenimiento'
+    'cfg_exigir_motivo', 'cfg_modo_mantenimiento', 'cfg_admin_recibir_copia_reservas'
   ];
   
   ids.forEach(id => {
@@ -3563,7 +3564,8 @@ function construirConfigDesdeInputs() {
     { clave: 'max_tramos_simultaneos', valor: getCfgVal('cfg_max_tramos_simultaneos') },
     { clave: 'permitir_multitramo',    valor: getCfgCheck('cfg_permitir_multitramo') },
     { clave: 'exigir_motivo',      valor: getCfgCheck('cfg_exigir_motivo') },
-    { clave: 'modo_mantenimiento', valor: getCfgCheck('cfg_modo_mantenimiento') }
+    { clave: 'modo_mantenimiento', valor: getCfgCheck('cfg_modo_mantenimiento') },
+    { clave: 'admin_recibir_copia_reservas', valor: getCfgCheck('cfg_admin_recibir_copia_reservas') }
   ];
 }
 
@@ -3703,10 +3705,11 @@ function descartarCambiosConfiguracion() {
       setCfgVal('cfg_nombre_centro',       configMap['nombre_centro']);
       setCfgVal('cfg_url_logo',            configMap['url_logo']);
       setCfgVal('cfg_max_tramos_simultaneos', configMap['max_tramos_simultaneos']);
-      
+
       setCfgCheck('cfg_permitir_multitramo',  configMap['permitir_multitramo']);
       setCfgCheck('cfg_exigir_motivo',        configMap['exigir_motivo']);
       setCfgCheck('cfg_modo_mantenimiento',   configMap['modo_mantenimiento']);
+      setCfgCheck('cfg_admin_recibir_copia_reservas', configMap['admin_recibir_copia_reservas']);
       
       ConfigState.cambiosPendientes = false;
       SaveBarManager.hide();

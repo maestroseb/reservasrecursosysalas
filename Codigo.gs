@@ -1050,11 +1050,22 @@ function sendConfirmationEmail(email, userName, details) {
   `;
 
   try {
-    MailApp.sendEmail({
+    // Verificar si el admin quiere recibir copia oculta
+    const adminEmail = getConfigValue('email_admin', '');
+    const recibirCopia = getConfigValue('admin_recibir_copia_reservas', 'FALSE');
+
+    const emailOptions = {
       to: email,
       subject: asunto,
       htmlBody: cuerpoHtml
-    });
+    };
+
+    // Añadir BCC solo si el admin lo tiene activado y hay email configurado
+    if (adminEmail && recibirCopia.toUpperCase() === 'TRUE') {
+      emailOptions.bcc = adminEmail;
+    }
+
+    MailApp.sendEmail(emailOptions);
     Logger.log(`Correo de confirmación enviado a ${email} para reserva ${details.idReserva}`);
   } catch (e) {
     Logger.log(`Error al enviar correo de confirmación a ${email}: ${e.message}`);
