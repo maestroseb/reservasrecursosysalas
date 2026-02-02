@@ -1568,6 +1568,25 @@ async function aprobarSolicitudRapidaConSpinner(idSolicitud, btnElement) {
 }
 
 /**
+ * Rechazar solicitud rápida con spinner visual
+ */
+function rechazarSolicitudRapidaConSpinner(idSolicitud, btnElement) {
+  if (!idSolicitud) return;
+
+  // Mostrar spinner breve para feedback visual
+  const originalContent = btnElement.innerHTML;
+  btnElement.innerHTML = '<iconify-icon icon="mdi:loading" class="text-sm animate-spin"></iconify-icon>';
+  btnElement.disabled = true;
+
+  // Abrir el modal de gestión para que el admin escriba el motivo
+  setTimeout(() => {
+    btnElement.innerHTML = originalContent;
+    btnElement.disabled = false;
+    abrirModalGestionarSolicitud(idSolicitud);
+  }, 200);
+}
+
+/**
  * Aprobar todas las pendientes del recurso actual
  */
 async function aprobarTodasPendientesRecurso() {
@@ -4390,18 +4409,23 @@ function actualizarPanelPendientesGlobal() {
     }
 
     return `
-      <div class="px-3 py-2 border-b border-amber-100 last:border-b-0 hover:bg-amber-100/50 transition-colors">
+      <div class="px-3 py-2 border-b border-amber-100 last:border-b-0 hover:bg-amber-100/50 transition-colors cursor-pointer"
+           onclick="verDetalleSolicitudDirecto('${sol.id_solicitud}')">
         <div class="flex items-center justify-between gap-2">
           <div class="flex-1 min-w-0">
             <div class="font-medium text-gray-800 text-xs truncate">${escaparHTML(sol.nombre_usuario)}</div>
             <div class="text-[10px] text-gray-500">${escaparHTML(sol.nombre_recurso)} · ${diasDisplay}</div>
           </div>
           <div class="flex gap-1 shrink-0">
-            <button onclick="verDetalleSolicitudDirecto('${sol.id_solicitud}')"
+            <button onclick="event.stopPropagation(); verDetalleSolicitudDirecto('${sol.id_solicitud}')"
               class="p-1.5 hover:bg-amber-200 rounded-lg transition-colors" title="Ver detalles">
               <iconify-icon icon="mdi:eye-outline" class="text-amber-700 text-sm"></iconify-icon>
             </button>
-            <button onclick="aprobarSolicitudRapidaConSpinner('${sol.id_solicitud}', this)"
+            <button onclick="event.stopPropagation(); rechazarSolicitudRapidaConSpinner('${sol.id_solicitud}', this)"
+              class="p-1.5 hover:bg-red-200 rounded-lg transition-colors" title="Rechazar">
+              <iconify-icon icon="mdi:close" class="text-red-600 text-sm"></iconify-icon>
+            </button>
+            <button onclick="event.stopPropagation(); aprobarSolicitudRapidaConSpinner('${sol.id_solicitud}', this)"
               class="p-1.5 hover:bg-green-200 rounded-lg transition-colors" title="Aprobar">
               <iconify-icon icon="mdi:check" class="text-green-600 text-sm"></iconify-icon>
             </button>
@@ -5800,7 +5824,8 @@ function renderizarHistorialRecurrencias() {
     const iconoRecurso = recurso?.icono || 'mdi:cube-outline';
 
     return `
-      <div class="px-6 py-4 border-b border-gray-100 hover:bg-gray-50/50 transition-colors flex items-center gap-4">
+      <div class="px-6 py-4 border-b border-gray-100 hover:bg-gray-50/50 transition-colors flex items-center gap-4 cursor-pointer"
+           onclick="abrirDetalleDesdeHistorial('${sol.id_solicitud}')">
         <div class="p-2 rounded-lg bg-gray-100 text-gray-600 shrink-0">
           <iconify-icon icon="${iconoRecurso}" class="text-xl"></iconify-icon>
         </div>
@@ -5820,7 +5845,7 @@ function renderizarHistorialRecurrencias() {
             <span>${fechaInicio} → ${fechaFin}</span>
           </div>
         </div>
-        <button onclick="abrirDetalleDesdeHistorial('${sol.id_solicitud}')"
+        <button onclick="event.stopPropagation(); abrirDetalleDesdeHistorial('${sol.id_solicitud}')"
           class="p-2 hover:bg-gray-200 rounded-lg transition-colors shrink-0" title="${(sol.estado || '').toLowerCase() === 'aprobada' ? 'Ver detalles' : 'Gestionar'}">
           <iconify-icon icon="${(sol.estado || '').toLowerCase() === 'aprobada' ? 'mdi:eye-outline' : 'mdi:pencil-outline'}" class="text-gray-500"></iconify-icon>
         </button>
