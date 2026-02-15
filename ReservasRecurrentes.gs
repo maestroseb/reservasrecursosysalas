@@ -562,6 +562,10 @@ function cancelarRecurrenciaAprobada(idSolicitud) {
           email_usuario: data[i][COLS_SOLICITUDES.EMAIL_USUARIO],
           nombre_usuario: data[i][COLS_SOLICITUDES.NOMBRE_USUARIO],
           nombre_recurso: data[i][COLS_SOLICITUDES.NOMBRE_RECURSO],
+          dias_semana: data[i][COLS_SOLICITUDES.DIAS_SEMANA],
+          nombre_tramo: data[i][COLS_SOLICITUDES.NOMBRE_TRAMO],
+          fecha_inicio: data[i][COLS_SOLICITUDES.FECHA_INICIO],
+          fecha_fin: data[i][COLS_SOLICITUDES.FECHA_FIN],
           estado: data[i][COLS_SOLICITUDES.ESTADO]
         };
         break;
@@ -605,20 +609,45 @@ function cancelarRecurrenciaAprobada(idSolicitud) {
 }
 
 /**
- * Envía email notificando la cancelación de una recurrencia
+ * Envía email notificando la cancelación/revocación de una recurrencia
  */
 function enviarEmailCancelacionRecurrente(solicitud, numReservas) {
   const config = getConfig();
   const tituloApp = config.TITULO_APP || 'Sistema de Reservas';
 
+  // Formatear días
+  const diasMap = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes', 'S': 'Sábado', 'D': 'Domingo' };
+  let diasDisplay = solicitud.dias_semana || '';
+  if (diasDisplay.includes(':')) {
+    const diasSet = new Set();
+    diasDisplay.split(',').forEach(item => {
+      const [d] = item.trim().split(':');
+      if (d && diasMap[d.toUpperCase()]) diasSet.add(diasMap[d.toUpperCase()]);
+    });
+    diasDisplay = Array.from(diasSet).join(', ');
+  } else {
+    diasDisplay = diasDisplay.split(',').map(d => diasMap[d.trim().toUpperCase()] || d.trim()).join(', ');
+  }
+
+  // Formatear fechas
+  const formatFecha = (f) => {
+    if (!f) return '';
+    const fecha = new Date(f);
+    return fecha.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+  };
+
   const htmlBody = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #dc2626;">Recurrencia Cancelada</h2>
+      <h2 style="color: #dc2626;">Reserva Recurrente Revocada</h2>
       <p>Hola ${solicitud.nombre_usuario},</p>
-      <p>Tu reserva recurrente ha sido <strong>cancelada</strong> por un administrador:</p>
-      <div style="background: #fef2f2; padding: 15px; border-radius: 8px; margin: 15px 0;">
-        <p><strong>Recurso:</strong> ${solicitud.nombre_recurso}</p>
-        <p><strong>Reservas canceladas:</strong> ${numReservas}</p>
+      <p>Tu reserva recurrente ha sido <strong>revocada</strong> por un administrador.</p>
+      <p>Todas las reservas futuras asociadas han sido canceladas.</p>
+      <div style="background: #fef2f2; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #dc2626;">
+        <p style="margin: 5px 0;"><strong>Recurso:</strong> ${solicitud.nombre_recurso}</p>
+        <p style="margin: 5px 0;"><strong>Días:</strong> ${diasDisplay}</p>
+        <p style="margin: 5px 0;"><strong>Tramo:</strong> ${solicitud.nombre_tramo || ''}</p>
+        <p style="margin: 5px 0;"><strong>Periodo:</strong> ${formatFecha(solicitud.fecha_inicio)} - ${formatFecha(solicitud.fecha_fin)}</p>
+        <p style="margin: 5px 0;"><strong>Reservas canceladas:</strong> ${numReservas}</p>
       </div>
       <p>Si tienes alguna duda, contacta con el administrador.</p>
       <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
@@ -628,9 +657,11 @@ function enviarEmailCancelacionRecurrente(solicitud, numReservas) {
 
   MailApp.sendEmail({
     to: solicitud.email_usuario,
-    subject: `${tituloApp} - Recurrencia Cancelada`,
+    subject: `${tituloApp} - Reserva Recurrente Revocada`,
     htmlBody: htmlBody
   });
+
+  Logger.log('📧 Email de revocación enviado a: ' + solicitud.email_usuario);
 }
 
 /* ============================================

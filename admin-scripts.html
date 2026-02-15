@@ -5826,11 +5826,6 @@ function renderizarHistorialRecurrencias() {
 
   let solicitudes = [...datosHistorialRecurrencias];
 
-  // Siempre excluir canceladas del historial
-  solicitudes = solicitudes.filter(s =>
-    (s.estado || '').toLowerCase() !== 'cancelada'
-  );
-
   // Filtrar por estado adicional si hay filtro activo
   if (filtroHistorialActual !== 'todas') {
     solicitudes = solicitudes.filter(s =>
