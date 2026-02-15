@@ -357,11 +357,6 @@ dialog::backdrop {
   animation: spin 1s linear infinite;
 }
 
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
 /* Confirm dialog */
 .confirm-backdrop {
   position: fixed;
@@ -495,16 +490,6 @@ dialog[open] {
 .tab-content.active {
   display: block;
   animation: fadeIn 0.3s ease-out;
-}
-
-/* Animación sutil para botón flotante */
-@keyframes bounce-subtle {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-5px); }
-}
-
-.animate-bounce-subtle {
-  animation: bounce-subtle 2s infinite;
 }
 
 /* ============================================
@@ -645,16 +630,6 @@ dialog[open] {
 .disp-cell {
   height: 60px;
   vertical-align: middle;
-}
-
-/* Animación sutil para botón flotante */
-@keyframes bounce-subtle {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-5px); }
-}
-
-.animate-bounce-subtle {
-  animation: bounce-subtle 2s infinite;
 }
 
 /* ============================================

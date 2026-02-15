@@ -2127,14 +2127,6 @@ function rechazarSolicitudRapida(idSolicitud) {
   abrirModalGestionarSolicitud(idSolicitud);
 }
 
-/**
- * Ver detalles de una solicitud
- */
-function verDetalleSolicitud(idSolicitud) {
-  if (!idSolicitud) return;
-  abrirModalGestionarSolicitud(idSolicitud);
-}
-
 function actualizarCeldaVisualmente(idTramo, dia, dato, esPrimeraFila) {
     const tdId = `td-${idTramo}-${dia}`;
     const td = document.getElementById(tdId);
