@@ -1915,7 +1915,7 @@ function abrirModalDetalleRecurrencia(rec) {
   const fechaFin = rec.fecha_fin ? new Date(rec.fecha_fin).toLocaleDateString('es-ES') : '-';
 
   const modalHTML = `
-    <div id="modalDetalleRecurrencia" class="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+    <div id="modalDetalleRecurrencia" class="fixed inset-0 z-[10100] flex items-center justify-center p-4">
       <div class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm" onclick="cerrarModalDetalleRecurrencia()"></div>
       <div class="relative bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-fade-in-up">
         <!-- Header -->
