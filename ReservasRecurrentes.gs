@@ -913,8 +913,9 @@ function cancelarGrupoRecurrente(idSolicitud) {
       const estadoReserva = data[i][colEstado];
       const fechaReserva = new Date(data[i][colFecha]);
 
+      const estadoNorm = String(estadoReserva || '').toLowerCase().trim();
       if (String(idSolReserva) === String(idSolicitud) &&
-          estadoReserva === 'Confirmada' &&
+          estadoNorm === 'confirmada' &&
           fechaReserva >= hoy) {
 
         // Verificar que el usuario es el dueño o es admin
@@ -1703,7 +1704,8 @@ function cancelarReservasFuturasDeTramos(idRecurso, idSolicitudRecurrente, tramo
 
       // Verificar si este tramo está en los eliminados
       const debeEliminar = tramosEliminados.some(t =>
-        t.dia === diaSemana && t.tramo === idTramo
+        String(t.dia).trim().toUpperCase() === String(diaSemana).trim().toUpperCase() &&
+        String(t.tramo).trim() === String(idTramo).trim()
       );
 
       if (debeEliminar) {

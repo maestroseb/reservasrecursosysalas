@@ -560,7 +560,8 @@ function getActiveReservations() {
     cantidad: parseInt(r.cantidad, 10) || 1,
     estado: r.estado,
     notas: r.notas || '',
-    curso: r.curso || ''
+    curso: r.curso || '',
+    id_solicitud_recurrente: r.id_solicitud_recurrente || ''
   }));
 }
 
@@ -1869,14 +1870,17 @@ function validarAntelacionMinima(fechaISO, tramoId) {
  */
 function validarLimiteReservas(email) {
   const limiteReservas = getConfigValue('limite_reservas', 3);
-  
+
   const reservasActivas = getActiveReservations();
-  const reservasUsuario = reservasActivas.filter(r => r.email_usuario === email);
-  
+  // Solo contar reservas manuales (excluir las generadas por recurrencias)
+  const reservasUsuario = reservasActivas.filter(r =>
+    r.email_usuario === email && !r.id_solicitud_recurrente
+  );
+
   if (reservasUsuario.length >= limiteReservas) {
     throw new Error(`Has alcanzado el límite de ${limiteReservas} reservas activas. Cancela alguna para continuar.`);
   }
-  
+
   Logger.log(`✅ Límite de reservas: ${reservasUsuario.length}/${limiteReservas}`);
   return true;
 }
