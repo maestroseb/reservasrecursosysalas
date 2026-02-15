@@ -1967,10 +1967,10 @@ function abrirModalDetalleRecurrencia(rec) {
             <iconify-icon id="iconGuardarMotivo" icon="mdi:content-save"></iconify-icon>
             <span id="textoGuardarMotivo">Guardar</span>
           </button>
-          <button onclick="revocarRecurrencia('${rec.id_solicitud}')"
-            class="px-4 py-2.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl text-sm font-medium transition-colors flex items-center gap-2">
-            <iconify-icon icon="mdi:cancel"></iconify-icon>
-            Revocar
+          <button id="btnRevocarRecurrencia" onclick="confirmarRevocarRecurrencia('${rec.id_solicitud}')"
+            class="px-4 py-2.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+            <iconify-icon id="iconRevocarRecurrencia" icon="mdi:cancel"></iconify-icon>
+            <span id="textoRevocarRecurrencia">Revocar</span>
           </button>
         </div>
       </div>
@@ -2031,8 +2031,26 @@ async function guardarMotivoRecurrencia(idSolicitud) {
   }
 }
 
+/**
+ * Muestra el modal de confirmacion antes de revocar
+ */
+function confirmarRevocarRecurrencia(idSolicitud) {
+  mostrarConfirmacion(
+    'Revocar recurrencia',
+    '¿Revocar esta recurrencia? Se cancelaran todas las reservas futuras asociadas.',
+    () => revocarRecurrencia(idSolicitud)
+  );
+}
+
 async function revocarRecurrencia(idSolicitud) {
-  if (!confirm('¿Revocar esta recurrencia? Se cancelarán todas las reservas futuras asociadas.')) return;
+  const btn = document.getElementById('btnRevocarRecurrencia');
+  const icon = document.getElementById('iconRevocarRecurrencia');
+  const texto = document.getElementById('textoRevocarRecurrencia');
+
+  // Mostrar spinner
+  if (btn) btn.disabled = true;
+  if (icon) { icon.setAttribute('icon', 'mdi:loading'); icon.classList.add('animate-spin'); }
+  if (texto) texto.textContent = 'Revocando...';
 
   try {
     const result = await new Promise((resolve, reject) => {
@@ -2049,9 +2067,17 @@ async function revocarRecurrencia(idSolicitud) {
       if (DispState.recursoId) cargarMatrizDisponibilidad(DispState.recursoId);
     } else {
       showToast('error', result?.error || 'Error al revocar');
+      // Restaurar boton
+      if (btn) btn.disabled = false;
+      if (icon) { icon.setAttribute('icon', 'mdi:cancel'); icon.classList.remove('animate-spin'); }
+      if (texto) texto.textContent = 'Revocar';
     }
   } catch (error) {
     showToast('error', 'Error: ' + (error.message || String(error)));
+    // Restaurar boton
+    if (btn) btn.disabled = false;
+    if (icon) { icon.setAttribute('icon', 'mdi:cancel'); icon.classList.remove('animate-spin'); }
+    if (texto) texto.textContent = 'Revocar';
   }
 }
 
@@ -5883,8 +5909,8 @@ function renderizarHistorialRecurrencias() {
           </div>
         </div>
         <button onclick="event.stopPropagation(); abrirDetalleDesdeHistorial('${sol.id_solicitud}')"
-          class="p-2 hover:bg-gray-200 rounded-lg transition-colors shrink-0" title="${(sol.estado || '').toLowerCase() === 'aprobada' ? 'Ver detalles' : 'Gestionar'}">
-          <iconify-icon icon="${(sol.estado || '').toLowerCase() === 'aprobada' ? 'mdi:eye-outline' : 'mdi:pencil-outline'}" class="text-gray-500"></iconify-icon>
+          class="p-2 hover:bg-gray-200 rounded-lg transition-colors shrink-0" title="${(sol.estado || '').toLowerCase() === 'pendiente' ? 'Gestionar' : 'Ver detalles'}">
+          <iconify-icon icon="${(sol.estado || '').toLowerCase() === 'pendiente' ? 'mdi:pencil-outline' : 'mdi:eye-outline'}" class="text-gray-500"></iconify-icon>
         </button>
       </div>
     `;
@@ -5905,10 +5931,131 @@ function abrirDetalleDesdeHistorial(idSolicitud) {
   if (estado === 'aprobada') {
     // Usar el modal de detalle de recurrencia activa
     abrirModalDetalleRecurrencia(sol);
+  } else if (estado === 'rechazada') {
+    // Para rechazadas, mostrar modal de solo lectura
+    abrirModalDetalleRecurrenciaRechazada(sol);
   } else {
-    // Para pendientes y rechazadas, usar el modal de gestión
+    // Solo para pendientes, usar el modal de gestión
     abrirModalGestionarSolicitud(idSolicitud);
   }
+}
+
+/**
+ * Abre el modal de detalle para recurrencias rechazadas (solo lectura)
+ */
+function abrirModalDetalleRecurrenciaRechazada(rec) {
+  // Construir contenido del modal
+  const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miercoles', 'J': 'Jueves', 'V': 'Viernes', 'S': 'Sabado', 'D': 'Domingo' };
+  const diasStr = rec.dias_semana || '';
+  let diasFormateados = '';
+  let tramosFormateados = '';
+
+  const getNombreTramo = (idTramo) => {
+    const tramo = AdminState.tramos?.find(t => t.id_tramo === idTramo);
+    return tramo?.Nombre_Tramo || tramo?.nombre_tramo || idTramo;
+  };
+
+  if (diasStr.includes(':')) {
+    const items = diasStr.split(',');
+    const diasSet = new Set();
+    const tramosSet = new Set();
+    items.forEach(item => {
+      const [dia, tramo] = item.trim().split(':');
+      if (dia) diasSet.add(dia.toUpperCase());
+      if (tramo) tramosSet.add(tramo);
+    });
+    diasFormateados = Array.from(diasSet).map(d => diasNombres[d] || d).join(', ');
+    tramosFormateados = Array.from(tramosSet).map(getNombreTramo).join(', ');
+  } else {
+    diasFormateados = diasStr.split(',').map(d => diasNombres[d.trim().toUpperCase()] || d).join(', ');
+    tramosFormateados = rec.nombre_tramo || getNombreTramo(rec.id_tramo);
+  }
+
+  // Obtener nombre del recurso
+  const recurso = AdminState.recursos?.find(r => r.id_recurso === rec.id_recurso);
+  const nombreRecurso = rec.nombre_recurso || recurso?.nombre || '';
+
+  const fechaInicio = rec.fecha_inicio ? new Date(rec.fecha_inicio).toLocaleDateString('es-ES') : '-';
+  const fechaFin = rec.fecha_fin ? new Date(rec.fecha_fin).toLocaleDateString('es-ES') : '-';
+
+  const modalHTML = `
+    <div id="modalDetalleRecurrenciaRechazada" class="fixed inset-0 z-[10100] flex items-center justify-center p-4">
+      <div class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm" onclick="cerrarModalDetalleRecurrenciaRechazada()"></div>
+      <div class="relative bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-fade-in-up">
+        <!-- Header -->
+        <div class="bg-red-50 px-6 py-4 flex items-center justify-between border-b border-red-100">
+          <div class="flex items-center gap-3">
+            <div class="flex h-10 w-10 items-center justify-center rounded-full bg-red-100">
+              <iconify-icon icon="mdi:close-circle" class="text-xl text-red-600"></iconify-icon>
+            </div>
+            <div>
+              <h3 class="text-lg font-semibold text-gray-900">Solicitud Rechazada</h3>
+              <p class="text-sm text-red-600">${escaparHTML(nombreRecurso)}</p>
+            </div>
+          </div>
+          <button onclick="cerrarModalDetalleRecurrenciaRechazada()" class="p-2 hover:bg-red-100 rounded-full transition-colors">
+            <iconify-icon icon="mdi:close" class="text-xl text-gray-500"></iconify-icon>
+          </button>
+        </div>
+
+        <!-- Contenido -->
+        <div class="px-6 py-5 space-y-4">
+          <div class="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+            <p><span class="font-medium text-gray-700">Usuario:</span> ${escaparHTML(rec.nombre_usuario)}</p>
+            <p><span class="font-medium text-gray-700">Email:</span> ${escaparHTML(rec.email_usuario)}</p>
+            ${rec.area_usuario ? `<p><span class="font-medium text-gray-700">Area:</span> ${escaparHTML(rec.area_usuario)}</p>` : ''}
+            <p><span class="font-medium text-gray-700">Dias:</span> ${escaparHTML(diasFormateados)}</p>
+            <p><span class="font-medium text-gray-700">Tramos:</span> ${escaparHTML(tramosFormateados)}</p>
+            <p><span class="font-medium text-gray-700">Periodo:</span> ${fechaInicio} → ${fechaFin}</p>
+          </div>
+
+          ${rec.motivo ? `
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+              <iconify-icon icon="mdi:text-box-outline" class="text-base"></iconify-icon>
+              Motivo de la solicitud
+            </label>
+            <div class="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-600">
+              ${escaparHTML(rec.motivo)}
+            </div>
+          </div>
+          ` : ''}
+
+          ${rec.motivo_rechazo ? `
+          <div>
+            <label class="block text-sm font-medium text-red-700 mb-2 flex items-center gap-1">
+              <iconify-icon icon="mdi:alert-circle-outline" class="text-base"></iconify-icon>
+              Motivo del rechazo
+            </label>
+            <div class="w-full px-3 py-2 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+              ${escaparHTML(rec.motivo_rechazo)}
+            </div>
+          </div>
+          ` : ''}
+        </div>
+
+        <!-- Footer -->
+        <div class="bg-gray-50 px-6 py-4 border-t border-gray-100">
+          <button onclick="cerrarModalDetalleRecurrenciaRechazada()"
+            class="w-full px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors">
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Eliminar modal anterior si existe
+  const modalExistente = document.getElementById('modalDetalleRecurrenciaRechazada');
+  if (modalExistente) modalExistente.remove();
+
+  // Insertar y mostrar
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function cerrarModalDetalleRecurrenciaRechazada() {
+  const modal = document.getElementById('modalDetalleRecurrenciaRechazada');
+  if (modal) modal.remove();
 }
 
 /* =========================================================
