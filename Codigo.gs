@@ -496,6 +496,34 @@ function getStaticData() {
     // 4. MIS RESERVAS ACTIVAS
     const misReservasActivas = getMyActiveReservationsData(email);
 
+    // 4b. MOTIVOS DE RECURRENCIAS (para mostrar en "Mis Reservas")
+    const misRecurrencias = {};
+    const idsSolicitudes = [...new Set(
+      misReservasActivas
+        .filter(r => r.id_solicitud_recurrente)
+        .map(r => String(r.id_solicitud_recurrente))
+    )];
+
+    if (idsSolicitudes.length > 0) {
+      try {
+        const sheetSol = getDB().getSheetByName('SolicitudesRecurrentes');
+        if (sheetSol && sheetSol.getLastRow() > 1) {
+          const dataSol = sheetSol.getDataRange().getValues();
+          for (let i = 1; i < dataSol.length; i++) {
+            const idSol = String(dataSol[i][0] || '').trim();
+            if (idsSolicitudes.includes(idSol)) {
+              misRecurrencias[idSol] = {
+                motivo: String(dataSol[i][10] || '').trim(),
+                dias_semana: String(dataSol[i][5] || '').trim()
+              };
+            }
+          }
+        }
+      } catch (e) {
+        Logger.log('⚠️ Error cargando motivos recurrencias: ' + e.message);
+      }
+    }
+
     // 5. RESPUESTA COMPLETA
     return {
       success: true,
@@ -509,6 +537,7 @@ function getStaticData() {
       usuariosMap: usuariosMap,
       reservas: reservas,
       misReservasActivas: misReservasActivas,
+      misRecurrencias: misRecurrencias,
       configuracion: configuracion  // ✅ AÑADIDO
     };
 
