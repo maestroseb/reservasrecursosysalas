@@ -1597,6 +1597,7 @@ async function aprobarTodasPendientesRecurso() {
 
   let aprobadas = 0;
   let errores = 0;
+  let todasLasReservasNuevas = [];
 
   for (const sol of pendientes) {
     try {
@@ -1608,6 +1609,7 @@ async function aprobarTodasPendientesRecurso() {
       });
       if (result && result.success) {
         aprobadas++;
+        if (result.reservas) todasLasReservasNuevas = todasLasReservasNuevas.concat(result.reservas);
       } else {
         errores++;
       }
@@ -1627,11 +1629,24 @@ async function aprobarTodasPendientesRecurso() {
   if (DispState.recursoId) {
     cargarMatrizDisponibilidad(DispState.recursoId);
   }
-  // Recargar reservas para que el historial refleje las nuevas
-  if (aprobadas > 0) {
-    adminDataReady = false;
-    adminDataLoading = false;
-    loadAdminData(true);
+  // Inyectar reservas nuevas en AdminState y globalState
+  if (todasLasReservasNuevas.length > 0) {
+    AdminState.reservas = AdminState.reservas.concat(todasLasReservasNuevas);
+    if (typeof renderTablaReservas === 'function') renderTablaReservas();
+    if (typeof globalState !== 'undefined') {
+      const nuevasParaGlobal = todasLasReservasNuevas.map(r => ({
+        id_reserva: r.ID_Reserva,
+        id_recurso: r.ID_Recurso,
+        email_usuario: r.Email_Usuario,
+        fecha: r.Fecha,
+        id_tramo: r.ID_Tramo,
+        cantidad: r.Cantidad,
+        estado: r.Estado,
+        notas: r.Notas,
+        id_solicitud_recurrente: r.ID_Solicitud_Recurrente
+      }));
+      globalState.reservas = globalState.reservas.concat(nuevasParaGlobal);
+    }
   }
 }
 
@@ -2129,10 +2144,25 @@ async function aprobarSolicitudRapida(idSolicitud) {
       }
       // También actualizar la lista global de recurrentes
       cargarSolicitudesRecurrentes();
-      // Recargar reservas para que el historial refleje las nuevas
-      adminDataReady = false;
-      adminDataLoading = false;
-      loadAdminData(true);
+      // Inyectar reservas nuevas en AdminState y globalState
+      if (result.reservas && result.reservas.length > 0) {
+        AdminState.reservas = AdminState.reservas.concat(result.reservas);
+        if (typeof renderTablaReservas === 'function') renderTablaReservas();
+        if (typeof globalState !== 'undefined') {
+          const nuevasParaGlobal = result.reservas.map(r => ({
+            id_reserva: r.ID_Reserva,
+            id_recurso: r.ID_Recurso,
+            email_usuario: r.Email_Usuario,
+            fecha: r.Fecha,
+            id_tramo: r.ID_Tramo,
+            cantidad: r.Cantidad,
+            estado: r.Estado,
+            notas: r.Notas,
+            id_solicitud_recurrente: r.ID_Solicitud_Recurrente
+          }));
+          globalState.reservas = globalState.reservas.concat(nuevasParaGlobal);
+        }
+      }
     } else {
       showToast('error', result?.error || 'Error al aprobar');
     }

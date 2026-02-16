@@ -412,7 +412,8 @@ function aprobarSolicitudRecurrente(idSolicitud, notasAdmin) {
       success: true,
       message: `Solicitud aprobada. Se han creado ${resultado.reservasCreadas} reservas.`,
       reservasCreadas: resultado.reservasCreadas,
-      fechasSaltadas: resultado.fechasSaltadas
+      fechasSaltadas: resultado.fechasSaltadas,
+      reservas: resultado.reservas || []
     };
 
   } catch (error) {
@@ -812,6 +813,7 @@ function generarReservasDesdeRecurrente(solicitud) {
     let reservasCreadas = 0;
     let fechasSaltadas = [];
     const nuevasReservas = [];
+    const reservasObjetos = [];
 
     Logger.log(`[generarReservas] Rango: ${Utilities.formatDate(fechaInicio, Session.getScriptTimeZone(), 'yyyy-MM-dd')} → ${Utilities.formatDate(fechaFin, Session.getScriptTimeZone(), 'yyyy-MM-dd')}`);
     Logger.log(`[generarReservas] seleccionesMap: ${JSON.stringify(seleccionesMap)}`);
@@ -865,6 +867,19 @@ function generarReservasDesdeRecurrente(solicitud) {
             if (headerMap['id_solicitud_recurrente'] !== undefined) nuevaFila[headerMap['id_solicitud_recurrente']] = solicitud.id_solicitud;
 
             nuevasReservas.push(nuevaFila);
+            // Objeto para devolver al frontend (mismo formato que getAdminData)
+            reservasObjetos.push({
+              ID_Reserva: idReserva,
+              ID_Recurso: String(solicitud.id_recurso),
+              Email_Usuario: String(solicitud.email_usuario),
+              Fecha: fechaISO,
+              Curso: '',
+              ID_Tramo: String(tramoActual),
+              Cantidad: 1,
+              Estado: 'Confirmada',
+              Notas: 'Reserva recurrente: ' + solicitud.id_solicitud,
+              ID_Solicitud_Recurrente: String(solicitud.id_solicitud)
+            });
             reservasCreadas++;
             Logger.log(`[generarReservas] CREADA: ${fechaISO} ${diaLetra}:${tramoActual} → ${idReserva}`);
           }
@@ -890,7 +905,8 @@ function generarReservasDesdeRecurrente(solicitud) {
     return {
       success: true,
       reservasCreadas: reservasCreadas,
-      fechasSaltadas: fechasSaltadas
+      fechasSaltadas: fechasSaltadas,
+      reservas: reservasObjetos
     };
 
   } catch (error) {
