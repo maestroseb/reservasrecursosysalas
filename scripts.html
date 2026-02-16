@@ -1435,10 +1435,8 @@ function onMyReservationsSuccess(response) {
           const fechaBonita = fechaObj.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' }).replace('.', '');
           const fechaFinal = fechaBonita.charAt(0).toUpperCase() + fechaBonita.slice(1);
 
-          // Mostrar nombre de tramo si hay múltiples tramos en el grupo
-          const tramoInfo = tramosUnicos.length > 1
-            ? (() => { const t = globalState.tramos.find(t => t.id_tramo === res.id_tramo); return t ? t.nombre_tramo : ''; })()
-            : '';
+          // Mostrar horario del tramo siempre
+          const tramoInfo = (() => { const t = globalState.tramos.find(t => t.id_tramo === res.id_tramo); return t ? `${t.hora_inicio}-${t.hora_fin}` : ''; })();
 
           html += `
               <div id="reserva-item-${res.id_reserva}" class="flex items-center justify-between bg-white p-2 rounded-lg border border-gray-100">
