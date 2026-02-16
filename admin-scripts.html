@@ -2071,6 +2071,19 @@ async function revocarRecurrencia(idSolicitud) {
         datosHistorialRecurrencias[idx].estado = 'Cancelada';
         renderizarHistorialRecurrencias();
       }
+      // Actualizar estado global del usuario (para que no haga falta recargar)
+      if (typeof globalState !== 'undefined') {
+        globalState.reservas = globalState.reservas.filter(
+          r => r.id_solicitud_recurrente !== idSolicitud
+        );
+        globalState.misReservasActivas = globalState.misReservasActivas.filter(
+          r => r.id_solicitud_recurrente !== idSolicitud
+        );
+      }
+      // Actualizar reservas en AdminState
+      AdminState.reservas = AdminState.reservas.filter(
+        r => r.id_solicitud_recurrente !== idSolicitud
+      );
     } else {
       showToast('error', result?.error || 'Error al revocar');
       // Restaurar boton
