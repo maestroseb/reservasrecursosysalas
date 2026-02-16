@@ -760,14 +760,16 @@ function generarReservasDesdeRecurrente(solicitud) {
 
     // Parsear días y tramos según el formato
     const diasSemanaStr = String(solicitud.dias_semana || '');
-    let seleccionesMap = {}; // { 'L': 'T001', 'M': 'T002', ... }
+    let seleccionesMap = {}; // { 'L': ['T001', 'T002'], 'M': ['T003'], ... }
 
     if (diasSemanaStr.includes(':')) {
-      // Formato nuevo: "L:T001,M:T002"
+      // Formato nuevo: "L:T001,L:T002,M:T003"
       diasSemanaStr.split(',').forEach(item => {
         const [dia, tramo] = item.trim().split(':');
         if (dia && tramo) {
-          seleccionesMap[dia.toUpperCase()] = tramo;
+          const d = dia.toUpperCase();
+          if (!seleccionesMap[d]) seleccionesMap[d] = [];
+          seleccionesMap[d].push(tramo);
         }
       });
     } else {
@@ -775,7 +777,7 @@ function generarReservasDesdeRecurrente(solicitud) {
       diasSemanaStr.split(',').forEach(dia => {
         const d = dia.trim().toUpperCase();
         if (d && mapaDiasNum[d] !== undefined) {
-          seleccionesMap[d] = solicitud.id_tramo;
+          seleccionesMap[d] = [solicitud.id_tramo];
         }
       });
     }
@@ -809,39 +811,41 @@ function generarReservasDesdeRecurrente(solicitud) {
 
       if (diasSeleccionados.includes(diaSemana) && seleccionesMap[diaLetra]) {
         const fechaISO = Utilities.formatDate(fechaActual, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-        const tramoParaEsteDia = seleccionesMap[diaLetra];
+        const tramosParaEsteDia = seleccionesMap[diaLetra]; // Array de tramos
 
-        // Verificar si ya hay una reserva para ese recurso/fecha/tramo
-        const yaReservado = reservasExistentes.some(r =>
-          String(r.id_recurso) === String(solicitud.id_recurso) &&
-          r.fecha === fechaISO &&
-          String(r.id_tramo) === String(tramoParaEsteDia)
-        );
+        for (const tramoActual of tramosParaEsteDia) {
+          // Verificar si ya hay una reserva para ese recurso/fecha/tramo
+          const yaReservado = reservasExistentes.some(r =>
+            String(r.id_recurso) === String(solicitud.id_recurso) &&
+            r.fecha === fechaISO &&
+            String(r.id_tramo) === String(tramoActual)
+          );
 
-        if (yaReservado) {
-          fechasSaltadas.push(fechaISO + ' (' + tramoParaEsteDia + ')');
-        } else {
-          // Generar ID único para la reserva
-          const idReserva = 'RES-' + Utilities.getUuid().substring(0, 8).toUpperCase();
+          if (yaReservado) {
+            fechasSaltadas.push(fechaISO + ' (' + tramoActual + ')');
+          } else {
+            // Generar ID único para la reserva
+            const idReserva = 'RES-' + Utilities.getUuid().substring(0, 8).toUpperCase();
 
-          // Crear fila de reserva
-          const numCols = sheetReservas.getLastColumn();
-          const nuevaFila = new Array(numCols).fill('');
+            // Crear fila de reserva
+            const numCols = sheetReservas.getLastColumn();
+            const nuevaFila = new Array(numCols).fill('');
 
-          if (headerMap['id_reserva'] !== undefined) nuevaFila[headerMap['id_reserva']] = idReserva;
-          if (headerMap['id_recurso'] !== undefined) nuevaFila[headerMap['id_recurso']] = solicitud.id_recurso;
-          if (headerMap['email_usuario'] !== undefined) nuevaFila[headerMap['email_usuario']] = solicitud.email_usuario;
-          if (headerMap['fecha'] !== undefined) nuevaFila[headerMap['fecha']] = new Date(fechaActual);
-          if (headerMap['curso'] !== undefined) nuevaFila[headerMap['curso']] = '';
-          if (headerMap['id_tramo'] !== undefined) nuevaFila[headerMap['id_tramo']] = tramoParaEsteDia;
-          if (headerMap['cantidad'] !== undefined) nuevaFila[headerMap['cantidad']] = 1;
-          if (headerMap['estado'] !== undefined) nuevaFila[headerMap['estado']] = 'Confirmada';
-          if (headerMap['notas'] !== undefined) nuevaFila[headerMap['notas']] = 'Reserva recurrente: ' + solicitud.id_solicitud;
-          if (headerMap['timestamp'] !== undefined) nuevaFila[headerMap['timestamp']] = new Date();
-          if (headerMap['id_solicitud_recurrente'] !== undefined) nuevaFila[headerMap['id_solicitud_recurrente']] = solicitud.id_solicitud;
+            if (headerMap['id_reserva'] !== undefined) nuevaFila[headerMap['id_reserva']] = idReserva;
+            if (headerMap['id_recurso'] !== undefined) nuevaFila[headerMap['id_recurso']] = solicitud.id_recurso;
+            if (headerMap['email_usuario'] !== undefined) nuevaFila[headerMap['email_usuario']] = solicitud.email_usuario;
+            if (headerMap['fecha'] !== undefined) nuevaFila[headerMap['fecha']] = new Date(fechaActual);
+            if (headerMap['curso'] !== undefined) nuevaFila[headerMap['curso']] = '';
+            if (headerMap['id_tramo'] !== undefined) nuevaFila[headerMap['id_tramo']] = tramoActual;
+            if (headerMap['cantidad'] !== undefined) nuevaFila[headerMap['cantidad']] = 1;
+            if (headerMap['estado'] !== undefined) nuevaFila[headerMap['estado']] = 'Confirmada';
+            if (headerMap['notas'] !== undefined) nuevaFila[headerMap['notas']] = 'Reserva recurrente: ' + solicitud.id_solicitud;
+            if (headerMap['timestamp'] !== undefined) nuevaFila[headerMap['timestamp']] = new Date();
+            if (headerMap['id_solicitud_recurrente'] !== undefined) nuevaFila[headerMap['id_solicitud_recurrente']] = solicitud.id_solicitud;
 
-          nuevasReservas.push(nuevaFila);
-          reservasCreadas++;
+            nuevasReservas.push(nuevaFila);
+            reservasCreadas++;
+          }
         }
       }
 
