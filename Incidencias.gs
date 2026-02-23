@@ -429,38 +429,3 @@ function enviarEmailIncidenciaResuelta(datos) {
   }
 }
 
-function testGetIncidencias() {
-  const resultado = getIncidencias();
-  Logger.log('Resultado completo:');
-  Logger.log(resultado);
-
-  if (resultado === null) {
-    Logger.log('❌ La función devuelve NULL');
-  } else if (resultado === undefined) {
-    Logger.log('❌ La función devuelve UNDEFINED');
-  } else {
-    Logger.log('✅ Resultado válido:', resultado);
-  }
-}
-
-function quickTest() {
-  // Test 1: ¿Existe la hoja?
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName('INCIDENCIAS');
-
-  if (!sheet) {
-    Logger.log('❌ La hoja INCIDENCIAS no existe');
-    return;
-  } else {
-    Logger.log('✅ Hoja encontrada');
-  }
-
-  // Test 2: ¿Funciona getIncidencias?
-  if (typeof getIncidencias === 'function') {
-    Logger.log('✅ Función getIncidencias existe');
-    const result = getIncidencias();
-    Logger.log('Resultado:', result);
-  } else {
-    Logger.log('❌ Función getIncidencias NO existe');
-  }
-}

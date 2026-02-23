@@ -28,6 +28,13 @@ function getAdminData() {
       return { success: false, error: "No tienes permisos de administrador." };
     }
 
+    // Ejecutar migración de ID_Solicitud_Recurrente si es necesario
+    try {
+      migrarIdSolicitudRecurrente();
+    } catch (migErr) {
+      Logger.log('⚠️ Error en migración (no crítico): ' + migErr.message);
+    }
+
     const ss = getDB();
 
     // 1. RECURSOS
@@ -101,24 +108,37 @@ function getAdminData() {
       }));
     }
 
-    // 5. RESERVAS
+    // 5. RESERVAS (con soporte para id_solicitud_recurrente)
     const sheetReservas = ss.getSheetByName(SHEETS.RESERVAS);
     let reservas = [];
     if (sheetReservas && sheetReservas.getLastRow() > 1) {
-      const dataReservas = sheetReservas.getRange(2, 1, sheetReservas.getLastRow() - 1, 10).getValues();
+      // Leer todas las columnas dinámicamente
+      const lastCol = sheetReservas.getLastColumn();
+      const headers = sheetReservas.getRange(1, 1, 1, lastCol).getValues()[0];
+      const headerMap = {};
+      headers.forEach((h, i) => { headerMap[h.toString().toLowerCase().trim()] = i; });
+
+      const dataReservas = sheetReservas.getRange(2, 1, sheetReservas.getLastRow() - 1, lastCol).getValues();
       reservas = dataReservas.map(row => {
         let fechaStr = '';
-        try { fechaStr = Utilities.formatDate(new Date(row[3]), Session.getScriptTimeZone(), 'yyyy-MM-dd'); } catch (e) { fechaStr = String(row[3]); }
+        const fechaCol = headerMap['fecha'] !== undefined ? headerMap['fecha'] : 3;
+        try { fechaStr = Utilities.formatDate(new Date(row[fechaCol]), Session.getScriptTimeZone(), 'yyyy-MM-dd'); } catch (e) { fechaStr = String(row[fechaCol]); }
+
+        // Obtener id_solicitud_recurrente si existe
+        const idSolRecCol = headerMap['id_solicitud_recurrente'];
+        const idSolicitudRecurrente = idSolRecCol !== undefined ? String(row[idSolRecCol] || '').trim() : '';
+
         return {
-          ID_Reserva: String(row[0]), 
-          ID_Recurso: String(row[1]).trim(), 
-          Email_Usuario: String(row[2]).trim(),
-          Fecha: fechaStr, 
-          Curso: String(row[4]), 
-          ID_Tramo: String(row[5]).trim(),
-          Cantidad: Number(row[6]), 
-          Estado: String(row[7]), 
-          Notas: String(row[8])
+          ID_Reserva: String(row[headerMap['id_reserva'] || 0]),
+          ID_Recurso: String(row[headerMap['id_recurso'] || 1]).trim(),
+          Email_Usuario: String(row[headerMap['email_usuario'] || 2]).trim(),
+          Fecha: fechaStr,
+          Curso: String(row[headerMap['curso'] || 4]),
+          ID_Tramo: String(row[headerMap['id_tramo'] || 5]).trim(),
+          Cantidad: Number(row[headerMap['cantidad'] || 6] || 1),
+          Estado: String(row[headerMap['estado'] || 7]),
+          Notas: String(row[headerMap['notas'] || 8] || ''),
+          ID_Solicitud_Recurrente: idSolicitudRecurrente
         };
       });
     }
@@ -1043,8 +1063,338 @@ function saveBatchDisponibilidad(cambios) {
     
     purgarCache();
     return { success: true };
-    
+
   } catch (e) { return { success: false, error: e.toString() }; }
+}
+
+/* ===========================================
+   DETECTAR CONFLICTOS CON RECURRENCIAS AL CAMBIAR DISPONIBILIDAD
+   =========================================== */
+
+/**
+ * Detecta si los cambios de disponibilidad afectan a recurrencias aprobadas
+ * @param {Array} cambios - Lista de cambios [{id_recurso, dia_semana, id_tramo, permitido, ...}]
+ * @returns {Object} - {tieneConflictos: boolean, afectados: Array}
+ */
+function detectarConflictosDisponibilidad(cambios) {
+  try {
+    if (!isUserAdmin()) throw new Error("Permiso denegado");
+
+    // Filtrar solo los cambios que BLOQUEAN (de Sí a No)
+    const bloqueos = cambios.filter(c =>
+      c.permitido === 'No' || c.permitido === false || c.permitido === 'FALSE'
+    );
+
+    if (bloqueos.length === 0) {
+      return { tieneConflictos: false, afectados: [] };
+    }
+
+    // Obtener recurrencias aprobadas
+    const sheetRecurrentes = getOrCreateSheetSolicitudesRecurrentes();
+    const data = sheetRecurrentes.getDataRange().getValues();
+
+    if (data.length <= 1) {
+      return { tieneConflictos: false, afectados: [] };
+    }
+
+    // Mapeo de días: nombre completo -> letra
+    const diaALetra = {
+      'Lunes': 'L', 'Martes': 'M', 'Miércoles': 'X', 'Miercoles': 'X',
+      'Jueves': 'J', 'Viernes': 'V'
+    };
+
+    const afectados = [];
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+
+    // Revisar cada recurrencia aprobada
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const estado = String(row[COLS_SOLICITUDES.ESTADO] || '').toLowerCase();
+
+      if (estado !== 'aprobada') continue;
+
+      const idRecurso = String(row[COLS_SOLICITUDES.ID_RECURSO] || '').trim();
+      const diasSemana = String(row[COLS_SOLICITUDES.DIAS_SEMANA] || '');
+      const emailUsuario = row[COLS_SOLICITUDES.EMAIL_USUARIO] || '';
+      const nombreUsuario = row[COLS_SOLICITUDES.NOMBRE_USUARIO] || emailUsuario;
+      const nombreRecurso = row[COLS_SOLICITUDES.NOMBRE_RECURSO] || idRecurso;
+      const fechaFin = row[COLS_SOLICITUDES.FECHA_FIN];
+
+      // Verificar que la recurrencia siga activa
+      if (fechaFin) {
+        const fechaFinDate = new Date(fechaFin);
+        if (fechaFinDate < hoy) continue; // Ya terminó
+      }
+
+      // Parsear días:tramos del formato "L:T001,M:T002,X:T003"
+      const tramosRecurrencia = [];
+      diasSemana.split(',').forEach(entry => {
+        const [dia, tramo] = entry.trim().split(':');
+        if (dia && tramo) {
+          tramosRecurrencia.push({ dia: dia.trim(), tramo: tramo.trim() });
+        }
+      });
+
+      // Verificar cada bloqueo contra esta recurrencia
+      for (const bloqueo of bloqueos) {
+        if (String(bloqueo.id_recurso).trim() !== idRecurso) continue;
+
+        const letraDia = diaALetra[bloqueo.dia_semana] || bloqueo.dia_semana;
+        const idTramo = String(bloqueo.id_tramo).trim();
+
+        // Buscar si este día:tramo está en la recurrencia
+        const afectado = tramosRecurrencia.find(t =>
+          t.dia === letraDia && t.tramo === idTramo
+        );
+
+        if (afectado) {
+          afectados.push({
+            id_solicitud: row[COLS_SOLICITUDES.ID_SOLICITUD],
+            id_recurso: idRecurso,
+            email_usuario: emailUsuario,
+            nombre_usuario: nombreUsuario,
+            nombre_recurso: nombreRecurso,
+            dia_semana: bloqueo.dia_semana,
+            id_tramo: idTramo,
+            dia_letra: letraDia
+          });
+        }
+      }
+    }
+
+    return {
+      tieneConflictos: afectados.length > 0,
+      afectados: afectados
+    };
+
+  } catch (e) {
+    Logger.log('Error en detectarConflictosDisponibilidad: ' + e.message);
+    return { tieneConflictos: false, afectados: [], error: e.message };
+  }
+}
+
+/**
+ * Guarda disponibilidad con opción de forzar (cancela recurrencias afectadas)
+ * @param {Array} cambios - Lista de cambios de disponibilidad
+ * @param {boolean} forzar - Si true, cancela los tramos afectados de las recurrencias
+ * @returns {Object}
+ */
+function saveBatchDisponibilidadConValidacion(cambios, forzar = false) {
+  try {
+    if (!isUserAdmin()) throw new Error("Permiso denegado");
+
+    // Primero detectar conflictos
+    const conflictos = detectarConflictosDisponibilidad(cambios);
+
+    if (conflictos.tieneConflictos && !forzar) {
+      // Hay conflictos y no se fuerza: devolver para confirmación
+      return {
+        success: false,
+        requiereConfirmacion: true,
+        afectados: conflictos.afectados
+      };
+    }
+
+    // Si hay conflictos y se fuerza, procesar las cancelaciones
+    if (conflictos.tieneConflictos && forzar) {
+      const resultadoCancelaciones = procesarCancelacionesPorDisponibilidad(conflictos.afectados);
+      if (!resultadoCancelaciones.success) {
+        return resultadoCancelaciones;
+      }
+    }
+
+    // Guardar los cambios de disponibilidad
+    return saveBatchDisponibilidad(cambios);
+
+  } catch (e) {
+    Logger.log('Error en saveBatchDisponibilidadConValidacion: ' + e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Procesa las cancelaciones de tramos en recurrencias afectadas
+ * @param {Array} afectados - Lista de tramos afectados
+ * @returns {Object}
+ */
+function procesarCancelacionesPorDisponibilidad(afectados) {
+  try {
+    const sheetRecurrentes = getOrCreateSheetSolicitudesRecurrentes();
+    const data = sheetRecurrentes.getDataRange().getValues();
+
+    // Agrupar afectados por solicitud
+    const porSolicitud = {};
+    afectados.forEach(a => {
+      if (!porSolicitud[a.id_solicitud]) {
+        porSolicitud[a.id_solicitud] = {
+          email: a.email_usuario,
+          nombre: a.nombre_usuario,
+          recurso: a.nombre_recurso,
+          tramosAfectados: []
+        };
+      }
+      porSolicitud[a.id_solicitud].tramosAfectados.push({
+        dia: a.dia_semana,
+        dia_letra: a.dia_letra,
+        tramo: a.id_tramo
+      });
+    });
+
+    // Procesar cada solicitud afectada
+    for (let i = 1; i < data.length; i++) {
+      const idSolicitud = data[i][COLS_SOLICITUDES.ID_SOLICITUD];
+
+      if (!porSolicitud[idSolicitud]) continue;
+
+      const diasActuales = String(data[i][COLS_SOLICITUDES.DIAS_SEMANA] || '');
+      const tramosAfectados = porSolicitud[idSolicitud].tramosAfectados;
+
+      // Eliminar los tramos afectados
+      const tramosList = diasActuales.split(',').map(e => e.trim()).filter(e => e);
+      const tramosRestantes = tramosList.filter(entry => {
+        const [dia, tramo] = entry.split(':');
+        // Mantener si NO está en los afectados
+        return !tramosAfectados.some(t => t.dia_letra === dia && t.tramo === tramo);
+      });
+
+      const fila = i + 1;
+
+      if (tramosRestantes.length === 0) {
+        // Sin tramos restantes: marcar como cancelada
+        sheetRecurrentes.getRange(fila, COLS_SOLICITUDES.ESTADO + 1).setValue('cancelada');
+        sheetRecurrentes.getRange(fila, COLS_SOLICITUDES.NOTAS_ADMIN + 1).setValue(
+          'Cancelada automáticamente por cambio de disponibilidad del recurso'
+        );
+      } else {
+        // Actualizar con los tramos restantes
+        sheetRecurrentes.getRange(fila, COLS_SOLICITUDES.DIAS_SEMANA + 1).setValue(tramosRestantes.join(','));
+
+        // Añadir nota
+        const notaActual = data[i][COLS_SOLICITUDES.NOTAS_ADMIN] || '';
+        const nuevaNota = notaActual + (notaActual ? '\n' : '') +
+          `Tramos cancelados por disponibilidad: ${tramosAfectados.map(t => t.dia_letra + ':' + t.tramo).join(', ')}`;
+        sheetRecurrentes.getRange(fila, COLS_SOLICITUDES.NOTAS_ADMIN + 1).setValue(nuevaNota);
+      }
+
+      // Enviar notificación al usuario
+      enviarNotificacionCancelacionDisponibilidad(porSolicitud[idSolicitud]);
+    }
+
+    // También cancelar las reservas individuales futuras de esos tramos
+    cancelarReservasFuturasPorDisponibilidad(afectados);
+
+    return { success: true };
+
+  } catch (e) {
+    Logger.log('Error en procesarCancelacionesPorDisponibilidad: ' + e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Cancela reservas futuras individuales afectadas por cambio de disponibilidad
+ */
+function cancelarReservasFuturasPorDisponibilidad(afectados) {
+  try {
+    const ss = getDB();
+    const sheetReservas = ss.getSheetByName(SHEETS.RESERVAS);
+    if (!sheetReservas) return;
+
+    const data = sheetReservas.getDataRange().getValues();
+    const headers = data[0].map(h => String(h).toLowerCase().trim());
+
+    const colIdRecurso = headers.indexOf('id_recurso');
+    const colFecha = headers.indexOf('fecha');
+    const colIdTramo = headers.indexOf('id_tramo');
+    const colEstado = headers.indexOf('estado');
+    const colTipoReserva = headers.indexOf('tipo_reserva');
+
+    if (colIdRecurso < 0 || colFecha < 0 || colIdTramo < 0 || colEstado < 0) return;
+
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+
+    // Mapeo de día de semana JS a letra
+    const jsToLetra = { 0: 'D', 1: 'L', 2: 'M', 3: 'X', 4: 'J', 5: 'V', 6: 'S' };
+
+    for (let i = data.length - 1; i >= 1; i--) {
+      const row = data[i];
+      const estado = String(row[colEstado] || '').toLowerCase().trim();
+
+      // Aceptar tanto 'activa' como 'confirmada'
+      if (estado !== 'activa' && estado !== 'confirmada') continue;
+
+      const tipoReserva = String(row[colTipoReserva] || '').toLowerCase();
+      if (tipoReserva !== 'recurrente') continue;
+
+      const fechaReserva = new Date(row[colFecha]);
+      if (isNaN(fechaReserva.getTime())) continue;
+      if (fechaReserva < hoy) continue;
+
+      const idRecurso = String(row[colIdRecurso]).trim();
+      const idTramo = String(row[colIdTramo]).trim();
+      const diaSemana = jsToLetra[fechaReserva.getDay()];
+
+      // Verificar si está afectada (debe coincidir recurso, día Y tramo)
+      const esAfectada = afectados.some(a =>
+        String(a.id_recurso || '').trim() === idRecurso &&
+        a.dia_letra === diaSemana &&
+        String(a.id_tramo).trim() === idTramo
+      );
+
+      if (esAfectada) {
+        // Cancelar la reserva
+        sheetReservas.getRange(i + 1, colEstado + 1).setValue('Cancelada');
+      }
+    }
+
+  } catch (e) {
+    Logger.log('Error en cancelarReservasFuturasPorDisponibilidad: ' + e.message);
+  }
+}
+
+/**
+ * Envía notificación al usuario sobre cancelación por disponibilidad
+ */
+function enviarNotificacionCancelacionDisponibilidad(info) {
+  try {
+    const email = info.email;
+    const nombre = info.nombre || email;
+    const recurso = info.recurso;
+    const tramos = info.tramosAfectados;
+
+    const tramosTexto = tramos.map(t => `${t.dia} (${t.tramo})`).join(', ');
+
+    const asunto = `[Reservas] Cambio en tu reserva recurrente de ${recurso}`;
+
+    const cuerpo = `
+Hola ${nombre},
+
+Te informamos que el administrador ha modificado la disponibilidad del recurso "${recurso}".
+
+Como consecuencia, los siguientes tramos de tu reserva recurrente han sido cancelados:
+${tramosTexto}
+
+Las reservas futuras de esos tramos ya no están activas.
+
+Si tienes alguna duda, contacta con el administrador.
+
+Saludos,
+Sistema de Reservas
+    `.trim();
+
+    MailApp.sendEmail({
+      to: email,
+      subject: asunto,
+      body: cuerpo
+    });
+
+    Logger.log(`Email enviado a ${email} sobre cancelación de tramos`);
+
+  } catch (e) {
+    Logger.log('Error enviando email de cancelación: ' + e.message);
+  }
 }
 
 /* ===========================================
@@ -1273,6 +1623,300 @@ function saveBatchConfig(configList) {
     return { success: true };
     
   } catch (e) { return { success: false, error: e.toString() }; }
+}
+
+/* ============================================
+   MIGRACIÓN: ID_Solicitud_Recurrente
+   ============================================ */
+
+/**
+ * Migra las reservas recurrentes existentes para añadir el ID_Solicitud_Recurrente
+ * basándose en el campo Notas que contiene "Reserva recurrente: [ID]"
+ */
+function migrarIdSolicitudRecurrente() {
+  try {
+    const ss = getDB();
+    const sheet = ss.getSheetByName(SHEETS.RESERVAS);
+    if (!sheet || sheet.getLastRow() < 2) {
+      return { success: true, message: 'No hay reservas que migrar', migradas: 0 };
+    }
+
+    // Obtener headers
+    const lastCol = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    const headerMap = {};
+    headers.forEach((h, i) => {
+      headerMap[h.toString().toLowerCase().trim()] = i;
+    });
+
+    // Verificar si existe la columna ID_Solicitud_Recurrente
+    let colIdSolicitud = headerMap['id_solicitud_recurrente'];
+    if (colIdSolicitud === undefined) {
+      // Crear la columna
+      const nuevaCol = lastCol + 1;
+      sheet.getRange(1, nuevaCol).setValue('ID_Solicitud_Recurrente');
+      colIdSolicitud = nuevaCol - 1; // índice 0-based
+      Logger.log('✅ Columna ID_Solicitud_Recurrente creada');
+    }
+
+    const colNotas = headerMap['notas'];
+    if (colNotas === undefined) {
+      return { success: false, error: 'No se encontró la columna Notas' };
+    }
+
+    // Leer todos los datos
+    const numFilas = sheet.getLastRow() - 1;
+    const data = sheet.getRange(2, 1, numFilas, sheet.getLastColumn()).getValues();
+
+    let migradas = 0;
+    const updates = [];
+
+    data.forEach((row, idx) => {
+      const notas = String(row[colNotas] || '');
+      const idSolicitudActual = String(row[colIdSolicitud] || '').trim();
+
+      // Si ya tiene valor, saltar
+      if (idSolicitudActual) return;
+
+      // Buscar patrón "Reserva recurrente: XXXXX"
+      const match = notas.match(/Reserva recurrente:\s*([A-Za-z0-9_-]+)/i);
+      if (match && match[1]) {
+        const idSolicitud = match[1].trim();
+        updates.push({
+          fila: idx + 2, // +2 porque empezamos en fila 2
+          valor: idSolicitud
+        });
+        migradas++;
+      }
+    });
+
+    // Aplicar actualizaciones
+    updates.forEach(u => {
+      sheet.getRange(u.fila, colIdSolicitud + 1).setValue(u.valor);
+    });
+
+    Logger.log(`✅ Migración completada: ${migradas} reservas actualizadas`);
+    return { success: true, message: `Migración completada`, migradas: migradas };
+
+  } catch (error) {
+    Logger.log('❌ Error en migración: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/* ============================================
+   MATRIZ UNIFICADA: DISPONIBILIDAD + RECURRENCIAS
+   ============================================ */
+
+/**
+ * Carga datos combinados de disponibilidad y recurrencias para un recurso.
+ * Usado por la vista unificada en el admin-panel.
+ * @param {string} idRecurso - ID del recurso
+ * @returns {Object} { disponibilidad, recurrencias, solicitudesPendientes }
+ */
+function getDatosMatrizUnificada(idRecurso) {
+  try {
+    const email = Session.getActiveUser().getEmail();
+    const authResult = checkUserAuthorization(email);
+
+    if (!authResult || !authResult.isAdmin) {
+      return { success: false, error: "No tienes permisos de administrador." };
+    }
+
+    if (!idRecurso) {
+      return { success: false, error: "ID de recurso no especificado." };
+    }
+
+    const ss = getDB();
+    const idRecursoNorm = String(idRecurso).trim().toLowerCase();
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+
+    // 1. DISPONIBILIDAD del recurso
+    const sheetDisp = ss.getSheetByName(SHEETS.DISPONIBILIDAD);
+    let disponibilidad = [];
+    if (sheetDisp && sheetDisp.getLastRow() > 1) {
+      const data = sheetDisp.getRange(2, 1, sheetDisp.getLastRow() - 1, 6).getValues();
+      disponibilidad = data
+        .filter(row => String(row[0]).trim().toLowerCase() === idRecursoNorm)
+        .map(row => {
+          let diaRaw = String(row[1]).trim();
+          let diaFinal = diaRaw;
+          if (diaRaw.includes("Lunes")) diaFinal = "Lunes";
+          else if (diaRaw.includes("Martes")) diaFinal = "Martes";
+          else if (diaRaw.includes("Miércoles") || diaRaw.includes("Miercoles")) diaFinal = "Miércoles";
+          else if (diaRaw.includes("Jueves")) diaFinal = "Jueves";
+          else if (diaRaw.includes("Viernes")) diaFinal = "Viernes";
+
+          let permRaw = String(row[4]).trim().toLowerCase();
+          let permFinal = 'Si';
+          if (permRaw === 'no' || permRaw === 'false' || permRaw === '0') permFinal = 'No';
+
+          return {
+            id_tramo: String(row[2]).trim(),
+            dia_semana: diaFinal,
+            permitido: permFinal,
+            razon_bloqueo: String(row[5]).trim()
+          };
+        });
+    }
+
+    // 2. RECURRENCIAS APROBADAS ACTIVAS del recurso
+    const sheetSol = getOrCreateSheetSolicitudesRecurrentes();
+    let recurrencias = [];
+    let solicitudesPendientes = [];
+
+    if (sheetSol && sheetSol.getLastRow() > 1) {
+      const data = sheetSol.getRange(2, 1, sheetSol.getLastRow() - 1, 16).getValues();
+
+      // Obtener datos de usuarios para enriquecer con área
+      const sheetUsers = ss.getSheetByName(SHEETS.USUARIOS);
+      const usuariosMap = new Map();
+      if (sheetUsers && sheetUsers.getLastRow() > 1) {
+        const usersData = sheetUsers.getRange(2, 1, sheetUsers.getLastRow() - 1, 5).getValues();
+        usersData.forEach(u => {
+          usuariosMap.set(String(u[0]).trim().toLowerCase(), {
+            nombre: String(u[1]).trim(),
+            area: String(u[4]).trim() || ''
+          });
+        });
+      }
+
+      data.forEach(row => {
+        const idRec = String(row[COLS_SOLICITUDES.ID_RECURSO] || '').trim().toLowerCase();
+        if (idRec !== idRecursoNorm) return;
+
+        const estado = String(row[COLS_SOLICITUDES.ESTADO] || '').toLowerCase();
+        const fechaFin = row[COLS_SOLICITUDES.FECHA_FIN];
+        const emailUsuario = String(row[COLS_SOLICITUDES.EMAIL_USUARIO] || '').trim().toLowerCase();
+        const userData = usuariosMap.get(emailUsuario) || { nombre: '', area: '' };
+
+        const solicitud = {
+          id_solicitud: String(row[COLS_SOLICITUDES.ID_SOLICITUD] || ''),
+          nombre_usuario: String(row[COLS_SOLICITUDES.NOMBRE_USUARIO] || '') || userData.nombre,
+          email_usuario: String(row[COLS_SOLICITUDES.EMAIL_USUARIO] || ''),
+          area_usuario: userData.area,
+          dias_semana: String(row[COLS_SOLICITUDES.DIAS_SEMANA] || ''),
+          id_tramo: String(row[COLS_SOLICITUDES.ID_TRAMO] || ''),
+          nombre_tramo: String(row[COLS_SOLICITUDES.NOMBRE_TRAMO] || ''),
+          fecha_inicio: row[COLS_SOLICITUDES.FECHA_INICIO] instanceof Date ? row[COLS_SOLICITUDES.FECHA_INICIO].toISOString() : '',
+          fecha_fin: fechaFin instanceof Date ? fechaFin.toISOString() : '',
+          motivo: String(row[COLS_SOLICITUDES.MOTIVO] || ''),
+          estado: estado
+        };
+
+        // Solicitudes pendientes (para panel de aprobación)
+        if (estado === 'pendiente') {
+          solicitudesPendientes.push(solicitud);
+        }
+
+        // Recurrencias aprobadas y activas (fecha_fin >= hoy)
+        if (estado === 'aprobada') {
+          let fechaFinDate = fechaFin instanceof Date ? fechaFin : null;
+          if (!fechaFinDate && fechaFin) {
+            fechaFinDate = new Date(fechaFin);
+          }
+
+          // Solo incluir si está vigente
+          if (fechaFinDate && fechaFinDate >= hoy) {
+            recurrencias.push(solicitud);
+          }
+        }
+      });
+    }
+
+    return {
+      success: true,
+      disponibilidad: disponibilidad,
+      recurrencias: recurrencias,
+      solicitudesPendientes: solicitudesPendientes
+    };
+
+  } catch (error) {
+    Logger.log('Error en getDatosMatrizUnificada: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Obtiene TODAS las solicitudes pendientes de todos los recursos.
+ * Para el badge global y el panel de pendientes.
+ */
+function getSolicitudesPendientesGlobal() {
+  try {
+    const email = Session.getActiveUser().getEmail();
+    const authResult = checkUserAuthorization(email);
+
+    if (!authResult || !authResult.isAdmin) {
+      return { success: false, error: "No tienes permisos de administrador." };
+    }
+
+    const sheetSol = getOrCreateSheetSolicitudesRecurrentes();
+    let pendientes = [];
+
+    if (sheetSol && sheetSol.getLastRow() > 1) {
+      const data = sheetSol.getRange(2, 1, sheetSol.getLastRow() - 1, 16).getValues();
+      const ss = getDB();
+
+      // Mapa de recursos para obtener iconos y nombres
+      const sheetRec = ss.getSheetByName(SHEETS.RECURSOS);
+      const recursosMap = new Map();
+      if (sheetRec && sheetRec.getLastRow() > 1) {
+        const recData = sheetRec.getRange(2, 1, sheetRec.getLastRow() - 1, 4).getValues();
+        recData.forEach(r => {
+          recursosMap.set(String(r[0]).trim(), {
+            nombre: String(r[1]).trim(),
+            icono: String(r[3]).trim() || 'mdi:cube-outline'
+          });
+        });
+      }
+
+      // Mapa de usuarios para obtener área
+      const sheetUsers = ss.getSheetByName(SHEETS.USUARIOS);
+      const usuariosMap = new Map();
+      if (sheetUsers && sheetUsers.getLastRow() > 1) {
+        const usersData = sheetUsers.getRange(2, 1, sheetUsers.getLastRow() - 1, 5).getValues();
+        usersData.forEach(u => {
+          usuariosMap.set(String(u[0]).trim().toLowerCase(), {
+            area: String(u[4]).trim() || ''
+          });
+        });
+      }
+
+      data.forEach(row => {
+        const estado = String(row[COLS_SOLICITUDES.ESTADO] || '').toLowerCase();
+        if (estado !== 'pendiente') return;
+
+        const idRecurso = String(row[COLS_SOLICITUDES.ID_RECURSO] || '');
+        const recursoData = recursosMap.get(idRecurso) || { nombre: idRecurso, icono: 'mdi:cube-outline' };
+        const emailUsuario = String(row[COLS_SOLICITUDES.EMAIL_USUARIO] || '').toLowerCase();
+        const userData = usuariosMap.get(emailUsuario) || { area: '' };
+
+        pendientes.push({
+          id_solicitud: String(row[COLS_SOLICITUDES.ID_SOLICITUD] || ''),
+          id_recurso: idRecurso,
+          nombre_recurso: String(row[COLS_SOLICITUDES.NOMBRE_RECURSO] || '') || recursoData.nombre,
+          icono_recurso: recursoData.icono,
+          nombre_usuario: String(row[COLS_SOLICITUDES.NOMBRE_USUARIO] || ''),
+          email_usuario: String(row[COLS_SOLICITUDES.EMAIL_USUARIO] || ''),
+          area_usuario: userData.area,
+          dias_semana: String(row[COLS_SOLICITUDES.DIAS_SEMANA] || ''),
+          id_tramo: String(row[COLS_SOLICITUDES.ID_TRAMO] || ''),
+          nombre_tramo: String(row[COLS_SOLICITUDES.NOMBRE_TRAMO] || ''),
+          fecha_inicio: row[COLS_SOLICITUDES.FECHA_INICIO] instanceof Date ? row[COLS_SOLICITUDES.FECHA_INICIO].toISOString() : '',
+          fecha_fin: row[COLS_SOLICITUDES.FECHA_FIN] instanceof Date ? row[COLS_SOLICITUDES.FECHA_FIN].toISOString() : '',
+          motivo: String(row[COLS_SOLICITUDES.MOTIVO] || ''),
+          fecha_solicitud: row[COLS_SOLICITUDES.FECHA_SOLICITUD] instanceof Date ? row[COLS_SOLICITUDES.FECHA_SOLICITUD].toISOString() : ''
+        });
+      });
+    }
+
+    return { success: true, pendientes: pendientes };
+
+  } catch (error) {
+    Logger.log('Error en getSolicitudesPendientesGlobal: ' + error.message);
+    return { success: false, error: error.message };
+  }
 }
 
 /* ============================================

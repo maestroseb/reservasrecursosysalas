@@ -13,7 +13,8 @@ const DB_SCHEMA = {
   'Usuarios': { headers: ['Nombre_Completo', 'Email_Usuario', 'Activo', 'Admin', 'Especialidad'], color: '#dc2626' },
   'Config':   { headers: ['CLAVE', 'VALOR', 'DESCRIPCION'], color: '#64748b' },
   'Incidencias':   { headers: ['ID_Incidencia',	'ID_Recurso',	'Nombre_Recurso',	'Email_Usuario',	'Fecha_Reporte',	'Categoria',	'Prioridad',	'Descripcion',	'Estado',	'Notas_Admin',	'Fecha_Resolucion'], color: '#64748b' },
-  'Reservas': { headers: ['ID_Reserva', 'ID_Recurso', 'Email_Usuario', 'Fecha', 'Curso', 'ID_Tramo', 'Cantidad', 'Estado', 'Notas', 'Timestamp'], color: '#059669' }
+  'Reservas': { headers: ['ID_Reserva', 'ID_Recurso', 'Email_Usuario', 'Fecha', 'Curso', 'ID_Tramo', 'Cantidad', 'Estado', 'Notas', 'Timestamp', 'ID_Solicitud_Recurrente'], color: '#059669' },
+  'SolicitudesRecurrentes': { headers: ['ID_Solicitud', 'ID_Recurso', 'Nombre_Recurso', 'Email_Usuario', 'Nombre_Usuario', 'Dias_Semana', 'ID_Tramo', 'Nombre_Tramo', 'Fecha_Inicio', 'Fecha_Fin', 'Motivo', 'Estado', 'Fecha_Solicitud', 'Fecha_Resolucion', 'Admin_Resolutor', 'Notas_Admin'], color: '#8b5cf6' }
 };
 
 // ==========================================
@@ -34,8 +35,8 @@ function ejecutarSetupVinculado() {
     // 1. Crear estructura (pestañas)
     crearEstructuraInterna(ss);
 
-    // 2. Rellenar datos y GUARDAR LA URL EN CONFIG (CORREGIDO: ahora pasa currentUrl)
-    crearDatosEjemploInterno(ss, currentUrl);
+    // 2. Rellenar datos y GUARDAR LA URL EN CONFIG (CORREGIDO: ahora pasa currentUrl y email admin)
+    crearDatosEjemploInterno(ss, currentUrl, currentUser);
 
     // 3. Hacer Admin al usuario que está ejecutando esto
     asegurarAdminInterno(ss, currentUser);
@@ -85,9 +86,9 @@ function crearEstructuraInterna(ss) {
   if (tempSheet) ss.deleteSheet(tempSheet);
 }
 
-// --- 🌟 FUNCIÓN CORREGIDA: Ahora recibe currentUrl como parámetro ---
-function crearDatosEjemploInterno(ss, currentUrl) {
-  
+// --- 🌟 FUNCIÓN CORREGIDA: Ahora recibe currentUrl y adminEmail como parámetros ---
+function crearDatosEjemploInterno(ss, currentUrl, adminEmail) {
+
   // A. RECURSOS
   const sheetRec = ss.getSheetByName('Recursos');
   const recursos = [
@@ -114,7 +115,7 @@ function crearDatosEjemploInterno(ss, currentUrl) {
   ];
   sheetCur.getRange(2, 1, cursos.length, cursos[0].length).setValues(cursos);
 
-  // D. CONFIGURACIÓN (Ahora con currentUrl correctamente definido)
+  // D. CONFIGURACIÓN (Con email del admin instalador y opciones de notificación)
   const sheetConfig = ss.getSheetByName('Config');
   const configData = [
     ['dias_vista_maximo', 30, 'Días a futuro permitidos'],
@@ -122,7 +123,8 @@ function crearDatosEjemploInterno(ss, currentUrl) {
     ['limite_reservas', 3, 'Máx. reservas activas por usuario'],
     ['horas_cancelacion', 0, 'Horas mínimas para poder cancelar solo'],
     ['exigir_motivo', 'FALSE', 'Obligatorio escribir para qué es'],
-    ['email_admin', '', 'Email copia oculta (vacío = desactivado)'],
+    ['email_admin', adminEmail || '', 'Email del administrador para notificaciones'],
+    ['admin_recibir_copia_reservas', 'FALSE', 'Recibir copia oculta de confirmaciones de reservas'],
     ['modo_mantenimiento', 'FALSE', 'Bloquear nuevas reservas (Pánico)'],
     ['permitir_multitramo', 'FALSE', 'Permitir seleccionar varios tramos a la vez'],
     ['max_tramos_simultaneos', 1, 'Cuántos tramos seguidos se pueden coger de golpe'],

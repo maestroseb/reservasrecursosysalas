@@ -25,12 +25,16 @@ const AdminState = {
   cursos: [],
   usuarios: [],
   reservas: [],
+  solicitudesRecurrentes: [],
   modoVisualizacionCursos: 'botones',
   currentRecurso: null,
   isEditMode: false,
   tipoFiltroActivo: '', // '' = Todas, 'Sala', 'Dispositivo', 'Agrupado'
   cambiosPendientes: false, // Indica si hay cambios sin guardar
-  ordenOriginal: {} // Guarda el orden original para detectar cambios
+  ordenOriginal: {}, // Guarda el orden original para detectar cambios
+  // Filtros de reservas
+  filtroReservasPeriodo: 'semana', // 'semana', '2semanas', 'mes', 'todas'
+  filtroReservasTipo: 'todas' // 'todas', 'normal', 'recurrente'
 };
 
 let adminHaCambiadoDatos = false; // Flag para saber si hay que recargar al volver
@@ -325,6 +329,11 @@ function setupAdminListeners() {
         if (sectionName === 'tramos') renderTablaTramos();
         
         if (sectionName === 'disponibilidad') {
+            // Cargar solicitudes recurrentes para badge y panel pendientes global
+            if (typeof cargarSolicitudesRecurrentesGlobal === 'function') {
+              cargarSolicitudesRecurrentesGlobal();
+            }
+
             if(typeof DispState !== 'undefined' && DispState.recursoId) {
                 cargarMatrizDisponibilidad(DispState.recursoId);
             } else {
@@ -345,7 +354,11 @@ function setupAdminListeners() {
         }
         
         if (sectionName === 'config') renderConfiguracion();
-        
+
+        if (sectionName === 'recurrentes') {
+          if (typeof cargarSolicitudesRecurrentes === 'function') cargarSolicitudesRecurrentes();
+        }
+
       } catch (err) {
         console.error(`❌ Error pintando ${sectionName}:`, err);
       }
@@ -436,35 +449,65 @@ function renderTablaReservas() {
   const recursosMap = {};
   (AdminState.recursos || []).forEach(r => {
     const id = String(r.id_recurso || r.ID_Recurso || '').toLowerCase();
-    if (id) recursosMap[id] = r.nombre_recurso || r.Nombre || r.nombre || r.ID_Recurso;
+    if (id) recursosMap[id] = {
+      nombre: r.nombre_recurso || r.Nombre || r.nombre || r.ID_Recurso,
+      icono: r.icono || 'mdi:cube-outline'
+    };
   });
 
   // --- B. PROCESADO Y FILTRADO ---
   const hoyStr = new Date().toISOString().split('T')[0];
+  const { fechaInicio, fechaFin } = getFechasFiltroPeriodo();
+  const fechaInicioStr = fechaInicio ? fechaInicio.toISOString().split('T')[0] : null;
+  const fechaFinStr = fechaFin ? fechaFin.toISOString().split('T')[0] : null;
 
   const lista = AdminState.reservas
     .map(reserva => {
       const emailKey = String(reserva.Email_Usuario || '').toLowerCase();
       const recursoKey = String(reserva.ID_Recurso || '').toLowerCase();
+      const recursoInfo = recursosMap[recursoKey] || { nombre: reserva.ID_Recurso || 'Recurso eliminado', icono: 'mdi:cube-outline' };
 
       return {
         ...reserva,
         // Usamos los mapas para obtener nombres bonitos
         nombreUsuario: usuariosMap[emailKey] || reserva.Email_Usuario || 'Desconocido',
-        nombreRecurso: recursosMap[recursoKey] || reserva.ID_Recurso || 'Recurso eliminado'
+        nombreRecurso: recursoInfo.nombre,
+        iconoRecurso: recursoInfo.icono
       };
     })
     .filter(r => {
-      if (!filtro) return true;
-      // Búsqueda en todos los campos relevantes
-      return (
-        String(r.nombreUsuario).toLowerCase().includes(filtro) ||
-        String(r.Email_Usuario).toLowerCase().includes(filtro) ||
-        String(r.nombreRecurso).toLowerCase().includes(filtro) ||
-        String(r.Fecha).toLowerCase().includes(filtro) ||
-        String(r.Estado).toLowerCase().includes(filtro)
-      );
+      // Filtro de texto
+      if (filtro) {
+        const coincide = (
+          String(r.nombreUsuario).toLowerCase().includes(filtro) ||
+          String(r.Email_Usuario).toLowerCase().includes(filtro) ||
+          String(r.nombreRecurso).toLowerCase().includes(filtro) ||
+          String(r.Fecha).toLowerCase().includes(filtro) ||
+          String(r.Estado).toLowerCase().includes(filtro)
+        );
+        if (!coincide) return false;
+      }
+
+      // Filtro de período
+      if (fechaInicioStr || fechaFinStr) {
+        const fechaReserva = r.Fecha || '';
+        if (fechaInicioStr && fechaReserva < fechaInicioStr) return false;
+        if (fechaFinStr && fechaReserva > fechaFinStr) return false;
+      }
+
+      // Filtro de tipo (normal/recurrente)
+      if (AdminState.filtroReservasTipo !== 'todas') {
+        const esRecurrente = !!(r.ID_Solicitud_Recurrente || r.id_solicitud_recurrente);
+        if (AdminState.filtroReservasTipo === 'recurrente' && !esRecurrente) return false;
+        if (AdminState.filtroReservasTipo === 'normal' && esRecurrente) return false;
+      }
+
+      return true;
     });
+
+  // Debug: mostrar cuántas reservas recurrentes hay
+  const totalRecurrentes = AdminState.reservas.filter(r => !!(r.ID_Solicitud_Recurrente || r.id_solicitud_recurrente)).length;
+  console.log(`📊 Total reservas: ${AdminState.reservas.length}, Recurrentes: ${totalRecurrentes}, Filtro: ${AdminState.filtroReservasTipo}, Resultado: ${lista.length}`);
 
   // --- C. ORDENACIÓN MULTINIVEL ---
   lista.sort((a, b) => {
@@ -509,8 +552,24 @@ function renderTablaReservas() {
 
   lista.forEach(reserva => {
     const tr = document.createElement('tr');
-    const esPasado = (reserva.Fecha || '') < hoyStr;
     const estado = reserva.Estado || 'Confirmada';
+
+    // Determinar si la reserva ya pasó (incluyendo tramos del día actual)
+    let esPasado = (reserva.Fecha || '') < hoyStr;
+
+    // Si es hoy, verificar si el tramo ya pasó
+    if (!esPasado && reserva.Fecha === hoyStr) {
+      const tramo = AdminState.tramos?.find(t => t.id_tramo === reserva.ID_Tramo);
+      if (tramo && tramo.hora_fin) {
+        const ahora = new Date();
+        const [horaFin, minFin] = tramo.hora_fin.split(':').map(Number);
+        const horaFinReserva = new Date();
+        horaFinReserva.setHours(horaFin, minFin, 0, 0);
+        if (ahora > horaFinReserva) {
+          esPasado = true;
+        }
+      }
+    }
     
     // Clases dinámicas
     tr.className = `group hover:bg-blue-50/30 transition-all border-b border-gray-100 ${esPasado ? 'opacity-60 grayscale-[0.8]' : ''}`;
@@ -539,6 +598,7 @@ function renderTablaReservas() {
     const emailSafe = safeHtmlRes(reserva.Email_Usuario);
     const cursoSafe = safeHtmlRes(reserva.Curso);
     const tramoSafe = safeHtmlRes(reserva.ID_Tramo);
+    const esRecurrente = !!(reserva.ID_Solicitud_Recurrente || reserva.id_solicitud_recurrente);
 
     // Template HTML
     tr.innerHTML = `
@@ -546,6 +606,7 @@ function renderTablaReservas() {
          <div class="flex flex-col">
             <span class="text-sm font-bold text-gray-800 flex items-center gap-2">
                <iconify-icon icon="mdi:calendar-month" class="text-gray-400"></iconify-icon> ${fechaEsp}
+               ${esRecurrente ? '<iconify-icon icon="mdi:sync" class="text-purple-500 text-xs" title="Reserva recurrente"></iconify-icon>' : ''}
             </span>
             <span class="text-xs text-gray-500 ml-6 font-mono bg-gray-100 px-1.5 py-0.5 rounded w-fit">
                ${tramoSafe}
@@ -556,7 +617,7 @@ function renderTablaReservas() {
       <td class="px-6 py-4">
          <div class="flex items-center gap-3">
             <div class="h-9 w-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 shadow-sm border border-blue-100">
-               <iconify-icon icon="mdi:cube-outline" width="18"></iconify-icon>
+               <iconify-icon icon="${safeHtmlRes(reserva.iconoRecurso)}" width="18"></iconify-icon>
             </div>
             <div class="flex flex-col min-w-0">
                <span class="text-sm font-semibold text-gray-700 truncate max-w-[150px]" title="${nombreRecursoSafe}">${nombreRecursoSafe}</span>
@@ -649,10 +710,95 @@ function cancelarReserva(idReserva) {
   );
 }
 
+// --- 5. FILTROS DE RESERVAS ---
+
+/**
+ * Filtrar reservas por período de tiempo
+ */
+function filtrarReservasPorPeriodo(periodo) {
+  AdminState.filtroReservasPeriodo = periodo;
+
+  // Actualizar botones
+  document.querySelectorAll('[data-filtro-periodo]').forEach(btn => {
+    const btnPeriodo = btn.dataset.filtroPeriodo;
+    if (btnPeriodo === periodo) {
+      btn.classList.add('bg-blue-600', 'text-white');
+      btn.classList.remove('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200');
+    } else {
+      btn.classList.remove('bg-blue-600', 'text-white');
+      btn.classList.add('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200');
+    }
+  });
+
+  renderTablaReservas();
+}
+
+/**
+ * Filtrar reservas por tipo (normal/recurrente)
+ */
+function filtrarReservasPorTipo(tipo) {
+  AdminState.filtroReservasTipo = tipo;
+
+  // Actualizar botones
+  document.querySelectorAll('[data-filtro-tipo]').forEach(btn => {
+    const btnTipo = btn.dataset.filtroTipo;
+    if (btnTipo === tipo) {
+      btn.classList.add('bg-gray-800', 'text-white');
+      btn.classList.remove('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200');
+    } else {
+      btn.classList.remove('bg-gray-800', 'text-white');
+      btn.classList.add('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200');
+    }
+  });
+
+  renderTablaReservas();
+}
+
+/**
+ * Obtener fechas límite según el período seleccionado
+ */
+function getFechasFiltroPeriodo() {
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+
+  let fechaInicio = new Date(hoy);
+  let fechaFin = null;
+
+  switch (AdminState.filtroReservasPeriodo) {
+    case 'semana':
+      // Desde hoy hasta el domingo de esta semana
+      fechaFin = new Date(hoy);
+      fechaFin.setDate(hoy.getDate() + (7 - hoy.getDay()));
+      break;
+
+    case '2semanas':
+      // Desde hoy hasta dentro de 2 semanas
+      fechaFin = new Date(hoy);
+      fechaFin.setDate(hoy.getDate() + 14);
+      break;
+
+    case 'mes':
+      // Desde hoy hasta fin de mes
+      fechaFin = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
+      break;
+
+    case 'todas':
+    default:
+      // Sin límites
+      fechaInicio = null;
+      fechaFin = null;
+      break;
+  }
+
+  return { fechaInicio, fechaFin };
+}
+
 // EXPORTS GLOBALES
 window.inicializarReservas = inicializarReservas;
 window.renderTablaReservas = renderTablaReservas;
 window.cancelarReserva = cancelarReserva;
+window.filtrarReservasPorPeriodo = filtrarReservasPorPeriodo;
+window.filtrarReservasPorTipo = filtrarReservasPorTipo;
 
 
 /* =========================================================
@@ -1077,10 +1223,14 @@ const DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'];
 
 let DispState = {
   recursoId: null,
-  datosOriginales: [], 
-  datosActuales: [],   
+  datosOriginales: [],
+  datosActuales: [],
   cambiosPendientes: false,
-  tramosCache: null
+  tramosCache: null,
+  // Nuevos campos para matriz unificada
+  recurrencias: [],      // Recurrencias aprobadas activas
+  pendientes: [],        // Solicitudes pendientes del recurso
+  mapaRecurrencias: null // Map para búsqueda rápida por celda
 };
 
 // 1. SELECTOR DE RECURSOS
@@ -1160,34 +1310,353 @@ function seleccionarRecursoDisp(id, nombre, icon, colorClass) {
 }
 
 
-// 2. LÓGICA DE DATOS
-function cargarMatrizDisponibilidad(idRecurso) {
+// 2. LÓGICA DE DATOS (MATRIZ UNIFICADA)
+async function cargarMatrizDisponibilidad(idRecurso) {
   if (!idRecurso) return;
-  
+
   DispState.recursoId = idRecurso;
-  const idTarget = String(idRecurso).trim().toLowerCase();
-  
-  const datosRaw = AdminState.disponibilidad.filter(d => {
-      const dId = String(d.id_recurso || '').trim().toLowerCase();
-      return dId === idTarget;
+
+  // Mostrar spinner de carga sobre la matriz
+  const spinner = document.getElementById('spinnerMatrizUnificada');
+  if (spinner) spinner.classList.remove('hidden');
+
+  // Mostrar leyenda
+  const leyenda = document.getElementById('leyendaDisp');
+  if (leyenda) leyenda.classList.remove('hidden');
+
+  try {
+    // Llamar al backend para obtener datos combinados
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .getDatosMatrizUnificada(idRecurso);
+    });
+
+    if (spinner) spinner.classList.add('hidden');
+
+    if (!result || !result.success) {
+      showToast('error', result?.error || 'Error al cargar datos');
+      return;
+    }
+
+    // Procesar disponibilidad
+    const datosNormalizados = (result.disponibilidad || []).map(d => ({
+      id_tramo: String(d.id_tramo).trim(),
+      dia_semana: String(d.dia_semana).trim(),
+      permitido: d.permitido || 'Si',
+      razon_bloqueo: d.razon_bloqueo || ''
+    }));
+
+    DispState.datosOriginales = JSON.parse(JSON.stringify(datosNormalizados));
+    DispState.datosActuales = JSON.parse(JSON.stringify(datosNormalizados));
+
+    // Procesar recurrencias aprobadas
+    DispState.recurrencias = result.recurrencias || [];
+    DispState.mapaRecurrencias = construirMapaRecurrencias(DispState.recurrencias);
+
+    // Procesar pendientes del recurso
+    DispState.pendientes = result.solicitudesPendientes || [];
+    actualizarPanelPendientesRecurso();
+
+    renderMatrizHTML();
+    checkDispChanges();
+
+  } catch (error) {
+    if (spinner) spinner.classList.add('hidden');
+    console.error('Error cargando matriz unificada:', error);
+    showToast('error', 'Error al cargar: ' + (error.message || String(error)));
+  }
+}
+
+/**
+ * Construye un mapa de recurrencias por celda (dia:tramo) para búsqueda rápida
+ */
+function construirMapaRecurrencias(recurrencias) {
+  const mapa = new Map();
+  const diasMap = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes', 'S': 'Sábado', 'D': 'Domingo' };
+
+  recurrencias.forEach(rec => {
+    const diasStr = rec.dias_semana || '';
+
+    if (diasStr.includes(':')) {
+      // Formato nuevo: "L:T001,M:T002"
+      diasStr.split(',').forEach(item => {
+        const [diaCorto, idTramo] = item.trim().split(':');
+        if (diaCorto && idTramo) {
+          const diaLargo = diasMap[diaCorto.toUpperCase()] || diaCorto;
+          const key = `${idTramo.trim()}-${diaLargo}`;
+          if (!mapa.has(key)) mapa.set(key, []);
+          mapa.get(key).push(rec);
+        }
+      });
+    } else {
+      // Formato antiguo: "L,M,X" con un solo id_tramo
+      const idTramo = rec.id_tramo;
+      if (idTramo) {
+        diasStr.split(',').forEach(diaCorto => {
+          const diaLargo = diasMap[diaCorto.trim().toUpperCase()] || diaCorto.trim();
+          const key = `${idTramo}-${diaLargo}`;
+          if (!mapa.has(key)) mapa.set(key, []);
+          mapa.get(key).push(rec);
+        });
+      }
+    }
   });
 
-  const datosNormalizados = datosRaw.map(d => ({
-    id_tramo: String(d.id_tramo).trim(),
-    dia_semana: String(d.dia_semana).trim(),
-    permitido: d.permitido || 'Si',
-    razon_bloqueo: d.razon_bloqueo || ''
-  }));
+  return mapa;
+}
 
-  DispState.datosOriginales = JSON.parse(JSON.stringify(datosNormalizados));
-  DispState.datosActuales = JSON.parse(JSON.stringify(datosNormalizados));
-  
-  document.getElementById('emptyStateDisp').classList.add('hidden');
-  document.getElementById('contenedorMatriz').classList.remove('hidden');
-  document.getElementById('leyendaDisp').classList.remove('hidden');
-  
-  renderMatrizHTML();
-  checkDispChanges(); 
+/**
+ * Actualiza el panel de solicitudes pendientes del recurso
+ */
+function actualizarPanelPendientesRecurso() {
+  const panel = document.getElementById('panelPendientesRecurso');
+  const badge = document.getElementById('badgePendientesRecurso');
+  const lista = document.getElementById('listaPendientesRecurso');
+
+  if (!panel || !badge || !lista) return;
+
+  const pendientes = DispState.pendientes || [];
+
+  if (pendientes.length === 0) {
+    panel.classList.add('hidden');
+    return;
+  }
+
+  panel.classList.remove('hidden');
+  badge.textContent = pendientes.length;
+
+  // Helper para obtener nombre de tramo
+  const getNombreTramo = (idTramo) => {
+    const tramo = AdminState.tramos?.find(t => t.id_tramo === idTramo);
+    return tramo?.Nombre_Tramo || tramo?.nombre_tramo || idTramo;
+  };
+
+  // Obtener nombre del recurso actual
+  const recursoActual = AdminState.recursos?.find(r => r.id_recurso === DispState.recursoId);
+  const nombreRecursoActual = recursoActual?.nombre || '';
+
+  // Botón "Aprobar todas" dentro del contenido expandido si hay más de 1
+  let htmlContent = pendientes.length > 1 ? `
+    <div class="px-3 py-2 bg-amber-100/50 border-b border-amber-200 flex justify-end">
+      <button onclick="aprobarTodasPendientesRecurso()"
+        class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors">
+        <iconify-icon icon="mdi:check-all" class="text-sm"></iconify-icon>
+        Aprobar todas
+      </button>
+    </div>
+  ` : '';
+
+  htmlContent += pendientes.map((sol, idx) => {
+    // Enriquecer con nombre de recurso si no lo tiene
+    if (!sol.nombre_recurso && nombreRecursoActual) {
+      sol.nombre_recurso = nombreRecursoActual;
+    }
+
+    const diasStr = sol.dias_semana || '';
+    let diasDisplay = '';
+    let tramosDisplay = '';
+
+    if (diasStr.includes(':')) {
+      const diasSet = new Set();
+      const tramosSet = new Set();
+      diasStr.split(',').forEach(item => {
+        const [d, t] = item.trim().split(':');
+        if (d) diasSet.add(d.toUpperCase());
+        if (t) tramosSet.add(t);
+      });
+      diasDisplay = Array.from(diasSet).join('·');
+      tramosDisplay = Array.from(tramosSet).map(getNombreTramo).join(', ');
+    } else {
+      diasDisplay = diasStr.split(',').map(d => d.trim().toUpperCase()).join('·');
+      tramosDisplay = sol.nombre_tramo || getNombreTramo(sol.id_tramo);
+    }
+
+    return `
+      <div id="pendiente-row-${sol.id_solicitud}" class="px-3 py-2.5 flex items-center justify-between gap-2 border-b border-amber-100 last:border-b-0 hover:bg-amber-100/30 transition-colors">
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-medium text-gray-800 truncate">${escaparHTML(sol.nombre_usuario)}</div>
+          <div class="text-xs text-gray-500">${diasDisplay} | ${escaparHTML(tramosDisplay)}</div>
+        </div>
+        <div class="flex gap-1 shrink-0">
+          <button id="btn-aprobar-${sol.id_solicitud}" onclick="aprobarSolicitudRapidaConSpinner('${sol.id_solicitud}', this)"
+            class="p-1.5 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg transition-colors" title="Aprobar">
+            <iconify-icon icon="mdi:check" class="text-base"></iconify-icon>
+          </button>
+          <button onclick="rechazarSolicitudRapida('${sol.id_solicitud}')"
+            class="p-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors" title="Rechazar">
+            <iconify-icon icon="mdi:close" class="text-base"></iconify-icon>
+          </button>
+          <button onclick="verDetalleSolicitudDirecto('${sol.id_solicitud}')"
+            class="p-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg transition-colors" title="Ver detalles">
+            <iconify-icon icon="mdi:eye-outline" class="text-base"></iconify-icon>
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  lista.innerHTML = htmlContent;
+}
+
+/**
+ * Ver detalles de solicitud directamente desde los datos locales
+ */
+function verDetalleSolicitudDirecto(idSolicitud) {
+  // Buscar en múltiples fuentes de datos
+  let sol = DispState.pendientes?.find(s => s.id_solicitud === idSolicitud);
+
+  if (!sol) {
+    sol = AdminState.solicitudesRecurrentes?.find(s => s.id_solicitud === idSolicitud);
+  }
+
+  if (!sol) {
+    sol = DispState.recurrencias?.find(s => s.id_solicitud === idSolicitud);
+  }
+
+  if (sol) {
+    abrirModalGestionarSolicitud(idSolicitud);
+  } else {
+    showToast('error', 'Solicitud no encontrada');
+  }
+}
+
+/**
+ * Aprobar solicitud con spinner visual
+ */
+async function aprobarSolicitudRapidaConSpinner(idSolicitud, btnElement) {
+  if (!idSolicitud) return;
+
+  // Mostrar spinner en el botón
+  const originalContent = btnElement.innerHTML;
+  btnElement.innerHTML = '<iconify-icon icon="mdi:loading" class="text-base animate-spin"></iconify-icon>';
+  btnElement.disabled = true;
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .aprobarSolicitudRecurrente(idSolicitud, '');
+    });
+
+    if (result && result.success) {
+      showToast('success', 'Solicitud aprobada');
+      // Eliminar la fila visualmente
+      const row = document.getElementById(`pendiente-row-${idSolicitud}`);
+      if (row) row.remove();
+      // Actualizar badge
+      const badge = document.getElementById('badgePendientesRecurso');
+      const count = parseInt(badge?.textContent || '1') - 1;
+      if (badge) badge.textContent = count;
+      if (count === 0) {
+        document.getElementById('panelPendientesRecurso')?.classList.add('hidden');
+      }
+      // Recargar matriz
+      if (DispState.recursoId) cargarMatrizDisponibilidad(DispState.recursoId);
+    } else {
+      btnElement.innerHTML = originalContent;
+      btnElement.disabled = false;
+      showToast('error', result?.error || 'Error al aprobar');
+    }
+  } catch (error) {
+    btnElement.innerHTML = originalContent;
+    btnElement.disabled = false;
+    showToast('error', 'Error: ' + (error.message || String(error)));
+  }
+}
+
+/**
+ * Rechazar solicitud rápida con spinner visual
+ */
+function rechazarSolicitudRapidaConSpinner(idSolicitud, btnElement) {
+  if (!idSolicitud) return;
+
+  // Mostrar spinner breve para feedback visual
+  const originalContent = btnElement.innerHTML;
+  btnElement.innerHTML = '<iconify-icon icon="mdi:loading" class="text-sm animate-spin"></iconify-icon>';
+  btnElement.disabled = true;
+
+  // Abrir el modal de gestión para que el admin escriba el motivo
+  setTimeout(() => {
+    btnElement.innerHTML = originalContent;
+    btnElement.disabled = false;
+    abrirModalGestionarSolicitud(idSolicitud);
+  }, 200);
+}
+
+/**
+ * Aprobar todas las pendientes del recurso actual
+ */
+async function aprobarTodasPendientesRecurso() {
+  const pendientes = DispState.pendientes || [];
+  if (pendientes.length === 0) return;
+
+  if (!confirm(`¿Aprobar las ${pendientes.length} solicitudes pendientes?`)) return;
+
+  let aprobadas = 0;
+  let errores = 0;
+  let todasLasReservasNuevas = [];
+
+  for (const sol of pendientes) {
+    try {
+      const result = await new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)
+          .aprobarSolicitudRecurrente(sol.id_solicitud, '');
+      });
+      if (result && result.success) {
+        aprobadas++;
+        if (result.reservas) todasLasReservasNuevas = todasLasReservasNuevas.concat(result.reservas);
+      } else {
+        errores++;
+      }
+    } catch (e) {
+      errores++;
+    }
+  }
+
+  if (aprobadas > 0) {
+    showToast('success', `${aprobadas} solicitud(es) aprobada(s)`);
+  }
+  if (errores > 0) {
+    showToast('error', `${errores} error(es) al aprobar`);
+  }
+
+  // Recargar la matriz
+  if (DispState.recursoId) {
+    cargarMatrizDisponibilidad(DispState.recursoId);
+  }
+  // Inyectar reservas nuevas en AdminState y globalState
+  if (todasLasReservasNuevas.length > 0) {
+    AdminState.reservas = AdminState.reservas.concat(todasLasReservasNuevas);
+    if (typeof renderTablaReservas === 'function') renderTablaReservas();
+    if (typeof globalState !== 'undefined') {
+      const nuevasParaGlobal = todasLasReservasNuevas.map(r => ({
+        id_reserva: r.ID_Reserva,
+        id_recurso: r.ID_Recurso,
+        email_usuario: r.Email_Usuario,
+        fecha: r.Fecha,
+        id_tramo: r.ID_Tramo,
+        cantidad: r.Cantidad,
+        estado: r.Estado,
+        notas: r.Notas,
+        id_solicitud_recurrente: r.ID_Solicitud_Recurrente
+      }));
+      globalState.reservas = globalState.reservas.concat(nuevasParaGlobal);
+    }
+  }
+}
+
+function togglePanelPendientes() {
+  const contenido = document.getElementById('contenidoPendientesExpandido');
+  const icon = document.getElementById('iconExpandPendientes');
+  if (!contenido || !icon) return;
+
+  contenido.classList.toggle('hidden');
+  icon.style.transform = contenido.classList.contains('hidden') ? '' : 'rotate(180deg)';
 }
 
 
@@ -1259,44 +1728,90 @@ function renderMatrizHTML() {
   }
 }
 
-// ✅ HELPER VISUAL
+// ✅ HELPER VISUAL (MATRIZ UNIFICADA - 3 ESTADOS)
 function getConfigVisualCelda(dato, idTramo, dia, esPrimeraFila) {
     const esBloqueado = dato && dato.permitido === 'No';
     const razon = dato ? (dato.razon_bloqueo || '') : '';
-    
-    const bgClass = esBloqueado ? "bg-red-50 hover:bg-red-100" : "bg-white hover:bg-green-50";
-    const className = `p-1 border border-gray-100 h-14 text-center transition-all duration-200 relative group min-w-[110px] ${bgClass}`;
+
+    // Buscar recurrencias en esta celda
+    const key = `${idTramo}-${dia}`;
+    const recurrencias = DispState.mapaRecurrencias?.get(key) || [];
+    const tieneRecurrencia = recurrencias.length > 0;
+
+    // Determinar clase de fondo según estado
+    let bgClass = "bg-white hover:bg-green-50"; // Disponible
+    if (esBloqueado) {
+      bgClass = "bg-red-50 hover:bg-red-100"; // Bloqueado
+    } else if (tieneRecurrencia) {
+      bgClass = "bg-blue-50 hover:bg-blue-100"; // Recurrencia
+    }
+
+    const className = `p-1 border border-gray-100 h-16 text-center transition-all duration-200 relative group min-w-[110px] cursor-pointer ${bgClass}`;
 
     const tooltipPos = esPrimeraFila ? 'top-full mt-2' : 'bottom-full mb-2';
     const arrowBorder = esPrimeraFila ? 'border-l-transparent border-r-transparent border-b-gray-800' : 'border-l-transparent border-r-transparent border-t-gray-800';
     const arrowPosClass = esPrimeraFila ? 'bottom-full' : 'top-full';
 
-    const tooltipHTML = razon ? `
-        <div class="absolute ${tooltipPos} left-1/2 -translate-x-1/2 px-3 py-2 bg-gray-800 text-white text-[11px] font-medium rounded-lg shadow-xl opacity-0 group-hover/btn:opacity-100 transition-all duration-200 pointer-events-none whitespace-normal w-48 text-center z-[100]">
-            ${razon}
-            <div class="absolute left-1/2 -translate-x-1/2 border-4 ${arrowBorder} ${arrowPosClass}"></div>
-        </div>
-    ` : '';
-
     let innerHTML = '';
+
     if (esBloqueado) {
+        // ESTADO: BLOQUEADO (Rojo)
+        const tooltipHTML = razon ? `
+            <div class="absolute ${tooltipPos} left-1/2 -translate-x-1/2 px-3 py-2 bg-gray-800 text-white text-[11px] font-medium rounded-lg shadow-xl opacity-0 group-hover/btn:opacity-100 transition-all duration-200 pointer-events-none whitespace-normal w-48 text-center z-[100]">
+                ${escaparHTML(razon)}
+                <div class="absolute left-1/2 -translate-x-1/2 border-4 ${arrowBorder} ${arrowPosClass}"></div>
+            </div>
+        ` : '';
+
         innerHTML = `
           <div class="relative w-full h-full flex flex-col items-center justify-center gap-1">
              <div class="flex items-center gap-1">
-                 <iconify-icon icon="mdi:lock" class="text-red-500 text-lg animate-pulse-subtle"></iconify-icon>
+                 <iconify-icon icon="mdi:lock" class="text-red-500 text-lg"></iconify-icon>
                  <span class="text-[10px] font-bold text-red-600 uppercase">Bloq.</span>
              </div>
-             <div class="absolute top-1 right-1 group/btn"> 
+             <div class="absolute top-1 right-1 group/btn">
                  ${tooltipHTML}
-                 <button onclick="editarNota('${idTramo}', '${dia}')" 
+                 <button onclick="event.stopPropagation(); editarNota('${idTramo}', '${dia}')"
                          title="Editar motivo"
-                         class="btn-info w-6 h-6 rounded-full bg-white hover:bg-blue-50 text-red-400 hover:text-blue-600 border border-red-100 hover:border-blue-200 shadow-sm flex items-center justify-center transition-all transform hover:scale-110">
-                    <iconify-icon icon="${razon ? 'mdi:message-text' : 'mdi:pencil-outline'}" class="text-xs"></iconify-icon>
+                         class="btn-info w-5 h-5 rounded-full bg-white hover:bg-blue-50 text-red-400 hover:text-blue-600 border border-red-100 hover:border-blue-200 shadow-sm flex items-center justify-center transition-all transform hover:scale-110">
+                    <iconify-icon icon="${razon ? 'mdi:message-text' : 'mdi:pencil-outline'}" class="text-[10px]"></iconify-icon>
                  </button>
              </div>
           </div>
         `;
+    } else if (tieneRecurrencia) {
+        // ESTADO: RECURRENCIA (Azul)
+        const rec = recurrencias[0]; // Mostrar la primera (generalmente solo hay una)
+        const nombreCorto = (rec.nombre_usuario || '').split(' ')[0] || 'Usuario';
+        const area = rec.area_usuario || '';
+
+        // Tooltip con info completa
+        const tooltipContent = `
+          <strong>${escaparHTML(rec.nombre_usuario)}</strong><br>
+          ${area ? `<span class="text-blue-200">${escaparHTML(area)}</span><br>` : ''}
+          ${rec.motivo ? `<em>"${escaparHTML(rec.motivo)}"</em>` : ''}
+        `;
+
+        innerHTML = `
+          <div class="relative w-full h-full flex flex-col items-center justify-center gap-0.5 group/rec">
+             <iconify-icon icon="mdi:account-circle" class="text-blue-500 text-lg"></iconify-icon>
+             <span class="text-[10px] font-semibold text-blue-700 truncate max-w-[90px] leading-tight">${escaparHTML(nombreCorto)}</span>
+             ${area ? `<span class="text-[8px] text-blue-500/70 truncate max-w-[90px] leading-tight">${escaparHTML(area)}</span>` : ''}
+             <!-- Tooltip -->
+             <div class="absolute ${tooltipPos} left-1/2 -translate-x-1/2 px-3 py-2 bg-gray-800 text-white text-[11px] rounded-lg shadow-xl opacity-0 group-hover/rec:opacity-100 transition-all duration-200 pointer-events-none whitespace-normal w-52 text-center z-[100]">
+                 ${tooltipContent}
+                 <div class="absolute left-1/2 -translate-x-1/2 border-4 ${arrowBorder} ${arrowPosClass}"></div>
+             </div>
+             <!-- Botón gestionar -->
+             <button onclick="event.stopPropagation(); abrirMenuRecurrencia('${idTramo}', '${dia}')"
+                     title="Gestionar recurrencia"
+                     class="btn-info absolute top-1 right-1 w-5 h-5 rounded-full bg-white hover:bg-blue-100 text-blue-500 hover:text-blue-700 border border-blue-200 shadow-sm flex items-center justify-center transition-all transform hover:scale-110 opacity-0 group-hover:opacity-100">
+                <iconify-icon icon="mdi:dots-vertical" class="text-[10px]"></iconify-icon>
+             </button>
+          </div>
+        `;
     } else {
+        // ESTADO: DISPONIBLE (Verde/Blanco)
         innerHTML = `
           <div class="w-full h-full flex items-center justify-center opacity-0 group-hover:opacity-40 transition-opacity">
              <iconify-icon icon="mdi:check-circle" class="text-green-500 text-2xl"></iconify-icon>
@@ -1311,11 +1826,20 @@ function getConfigVisualCelda(dato, idTramo, dia, esPrimeraFila) {
 // 4. INTERACCIÓN (ACTUALIZACIÓN QUIRÚRGICA 💉)
 function toggleCelda(idTramo, dia, esPrimeraFila = false) {
   idTramo = String(idTramo);
-  
-  let index = DispState.datosActuales.findIndex(d => 
+
+  // Verificar si hay recurrencia en esta celda (no permitir toggle directo)
+  const key = `${idTramo}-${dia}`;
+  const recurrencias = DispState.mapaRecurrencias?.get(key) || [];
+  if (recurrencias.length > 0) {
+    // Si hay recurrencia, abrir menú contextual en lugar de toggle
+    abrirMenuRecurrencia(idTramo, dia);
+    return;
+  }
+
+  let index = DispState.datosActuales.findIndex(d =>
     d.id_tramo === idTramo && d.dia_semana === dia
   );
-  
+
   let datoActualizado = null;
 
   if (index === -1) {
@@ -1325,20 +1849,436 @@ function toggleCelda(idTramo, dia, esPrimeraFila = false) {
   } else {
     // Si existe, lo modificamos (PERO NO LO BORRAMOS)
     const actual = DispState.datosActuales[index];
-    
+
     if (actual.permitido === 'No') {
         // Desbloquear
         actual.permitido = 'Si';
-        datoActualizado = actual; // Mantenemos el objeto para enviarlo al backend
+        datoActualizado = actual;
     } else {
         // Bloquear
         actual.permitido = 'No';
         datoActualizado = actual;
     }
   }
-  
+
   actualizarCeldaVisualmente(idTramo, dia, datoActualizado, esPrimeraFila);
   checkDispChanges();
+}
+
+// ============================================
+// GESTIÓN DE RECURRENCIAS DESDE LA MATRIZ
+// ============================================
+
+/**
+ * Abre el menú contextual para gestionar una recurrencia
+ */
+function abrirMenuRecurrencia(idTramo, dia) {
+  const key = `${idTramo}-${dia}`;
+  const recurrencias = DispState.mapaRecurrencias?.get(key) || [];
+
+  if (recurrencias.length === 0) return;
+
+  const rec = recurrencias[0];
+
+  if (!rec.id_solicitud) return;
+
+  // Diferenciar por estado
+  const estado = (rec.estado || '').toLowerCase();
+
+  if (estado === 'aprobada') {
+    // Abrir modal de detalle/gestión de recurrencia aprobada
+    abrirModalDetalleRecurrencia(rec);
+  } else if (estado === 'pendiente') {
+    // Abrir modal de aprobar/rechazar
+    abrirModalGestionarSolicitud(rec.id_solicitud);
+  } else {
+    // Cualquier otro estado, mostrar detalles
+    abrirModalDetalleRecurrencia(rec);
+  }
+}
+
+/**
+ * Abre el modal de detalle para recurrencias aprobadas
+ */
+function abrirModalDetalleRecurrencia(rec) {
+  const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes', 'S': 'Sábado', 'D': 'Domingo' };
+  const diasStr = rec.dias_semana || '';
+
+  const getNombreTramo = (idTramo) => {
+    const tramo = AdminState.tramos?.find(t => t.id_tramo === idTramo);
+    return tramo?.Nombre_Tramo || tramo?.nombre_tramo || idTramo;
+  };
+
+  // Parsear pares día:tramo
+  let paresDiaTramo = [];
+  if (diasStr.includes(':')) {
+    diasStr.split(',').forEach(item => {
+      const [dia, tramo] = item.trim().split(':');
+      if (dia && tramo) {
+        paresDiaTramo.push({ dia: dia.toUpperCase(), tramo: tramo });
+      }
+    });
+  } else {
+    const tramoId = rec.id_tramo || '';
+    diasStr.split(',').forEach(d => {
+      const dd = d.trim().toUpperCase();
+      if (dd) paresDiaTramo.push({ dia: dd, tramo: tramoId });
+    });
+  }
+
+  const tieneMultiplesTramos = paresDiaTramo.length > 1;
+
+  // Construir HTML de la lista de tramos
+  let tramosListHTML = '';
+  if (tieneMultiplesTramos) {
+    const tramosItems = paresDiaTramo.map(p => {
+      const diaNombre = diasNombres[p.dia] || p.dia;
+      const tramoNombre = getNombreTramo(p.tramo);
+      return `
+        <div class="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-gray-100 group transition-colors">
+          <span class="text-sm text-gray-700">
+            <span class="font-medium">${escaparHTML(diaNombre)}</span> — ${escaparHTML(tramoNombre)}
+          </span>
+          <button onclick="confirmarEliminarTramoRecurrencia('${rec.id_solicitud}', '${p.dia}', '${p.tramo}', this)"
+            class="opacity-0 group-hover:opacity-100 p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-all"
+            title="Eliminar este tramo">
+            <iconify-icon icon="mdi:close-circle-outline" class="text-lg"></iconify-icon>
+          </button>
+        </div>`;
+    }).join('');
+    tramosListHTML = `
+      <div>
+        <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Tramos reservados</p>
+        <div class="divide-y divide-gray-100">${tramosItems}</div>
+      </div>`;
+  } else {
+    // Solo un tramo: mostrar como antes sin botón de eliminar
+    const diasFormateados = paresDiaTramo.map(p => diasNombres[p.dia] || p.dia).join(', ');
+    const tramosFormateados = [...new Set(paresDiaTramo.map(p => getNombreTramo(p.tramo)))].join(', ');
+    tramosListHTML = `
+      <p><span class="font-medium text-gray-700">Días:</span> ${escaparHTML(diasFormateados)}</p>
+      <p><span class="font-medium text-gray-700">Tramos:</span> ${escaparHTML(tramosFormateados)}</p>`;
+  }
+
+  // Obtener nombre del recurso
+  const recurso = AdminState.recursos?.find(r => r.id_recurso === rec.id_recurso || r.id_recurso === DispState.recursoId);
+  const nombreRecurso = rec.nombre_recurso || recurso?.nombre || '';
+
+  const fechaInicio = rec.fecha_inicio ? new Date(rec.fecha_inicio).toLocaleDateString('es-ES') : '-';
+  const fechaFin = rec.fecha_fin ? new Date(rec.fecha_fin).toLocaleDateString('es-ES') : '-';
+
+  const modalHTML = `
+    <div id="modalDetalleRecurrencia" class="fixed inset-0 z-[10100] flex items-center justify-center p-4">
+      <div class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm" onclick="cerrarModalDetalleRecurrencia()"></div>
+      <div class="relative bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-fade-in-up">
+        <!-- Header -->
+        <div class="bg-blue-50 px-6 py-4 flex items-center justify-between border-b border-blue-100">
+          <div class="flex items-center gap-3">
+            <div class="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100">
+              <iconify-icon icon="mdi:calendar-account" class="text-xl text-blue-600"></iconify-icon>
+            </div>
+            <div>
+              <h3 class="text-lg font-semibold text-gray-900">Recurrencia Activa</h3>
+              <p class="text-sm text-blue-600">${escaparHTML(nombreRecurso)}</p>
+            </div>
+          </div>
+          <button onclick="cerrarModalDetalleRecurrencia()" class="p-2 hover:bg-blue-100 rounded-full transition-colors">
+            <iconify-icon icon="mdi:close" class="text-xl text-gray-500"></iconify-icon>
+          </button>
+        </div>
+
+        <!-- Contenido -->
+        <div class="px-6 py-5 space-y-4">
+          <div class="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+            <p><span class="font-medium text-gray-700">Usuario:</span> ${escaparHTML(rec.nombre_usuario)}</p>
+            <p><span class="font-medium text-gray-700">Email:</span> ${escaparHTML(rec.email_usuario)}</p>
+            ${rec.area_usuario ? `<p><span class="font-medium text-gray-700">Área:</span> ${escaparHTML(rec.area_usuario)}</p>` : ''}
+            ${tramosListHTML}
+            <p><span class="font-medium text-gray-700">Período:</span> ${fechaInicio} → ${fechaFin}</p>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+              <iconify-icon icon="mdi:text-box-edit-outline" class="text-base"></iconify-icon>
+              Motivo de la reserva
+            </label>
+            <textarea id="motivoRecurrenciaDetalle" rows="2"
+              class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+              placeholder="Motivo...">${escaparHTML(rec.motivo || '')}</textarea>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="bg-gray-50 px-6 py-4 flex gap-3 border-t border-gray-100">
+          <button onclick="cerrarModalDetalleRecurrencia()"
+            class="flex-1 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors">
+            Cerrar
+          </button>
+          <button id="btnGuardarMotivo" onclick="guardarMotivoRecurrencia('${rec.id_solicitud}')"
+            class="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+            <iconify-icon id="iconGuardarMotivo" icon="mdi:content-save"></iconify-icon>
+            <span id="textoGuardarMotivo">Guardar</span>
+          </button>
+          <button id="btnRevocarRecurrencia" onclick="confirmarRevocarRecurrencia('${rec.id_solicitud}')"
+            class="px-4 py-2.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+            <iconify-icon id="iconRevocarRecurrencia" icon="mdi:cancel"></iconify-icon>
+            <span id="textoRevocarRecurrencia">Revocar</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Eliminar modal anterior si existe
+  const modalExistente = document.getElementById('modalDetalleRecurrencia');
+  if (modalExistente) modalExistente.remove();
+
+  // Insertar y mostrar
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function cerrarModalDetalleRecurrencia() {
+  const modal = document.getElementById('modalDetalleRecurrencia');
+  if (modal) modal.remove();
+}
+
+/**
+ * Confirma y elimina un tramo individual de una recurrencia
+ */
+function confirmarEliminarTramoRecurrencia(idSolicitud, diaLetra, idTramo, btnEl) {
+  const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes', 'S': 'Sábado', 'D': 'Domingo' };
+  const getNombreTramo = (id) => {
+    const t = AdminState.tramos?.find(t => t.id_tramo === id);
+    return t?.Nombre_Tramo || t?.nombre_tramo || id;
+  };
+  const diaNombre = diasNombres[diaLetra] || diaLetra;
+  const tramoNombre = getNombreTramo(idTramo);
+
+  mostrarConfirmacion(
+    'Eliminar tramo',
+    `¿Eliminar el tramo ${diaNombre} — ${tramoNombre} de esta recurrencia? Se eliminarán las reservas futuras de ese tramo.`,
+    () => eliminarTramoRecurrencia(idSolicitud, diaLetra, idTramo)
+  );
+}
+
+async function eliminarTramoRecurrencia(idSolicitud, diaLetra, idTramo) {
+  // Deshabilitar todos los botones del modal y mostrar overlay de carga
+  const modal = document.getElementById('modalDetalleRecurrencia');
+  const botones = modal?.querySelectorAll('button') || [];
+  botones.forEach(b => b.disabled = true);
+
+  // Añadir overlay spinner al modal
+  const contenedor = modal?.querySelector('.relative');
+  if (contenedor) {
+    contenedor.insertAdjacentHTML('beforeend', `
+      <div id="overlayEliminandoTramo" class="absolute inset-0 bg-white/70 flex items-center justify-center z-10 rounded-2xl">
+        <div class="flex items-center gap-3 text-blue-600">
+          <iconify-icon icon="mdi:loading" class="text-2xl animate-spin"></iconify-icon>
+          <span class="text-sm font-medium">Eliminando tramo...</span>
+        </div>
+      </div>
+    `);
+  }
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .eliminarTramoDeRecurrencia(idSolicitud, diaLetra, idTramo);
+    });
+
+    if (result && result.success) {
+      showToast('success', result.message);
+      cerrarModalDetalleRecurrencia();
+      // Recargar la matriz de disponibilidad
+      if (DispState.recursoId) {
+        cargarMatrizDisponibilidad(DispState.recursoId);
+      }
+      // Recargar la lista de recurrentes
+      cargarSolicitudesRecurrentes();
+    } else {
+      // Quitar overlay y rehabilitar botones en caso de error
+      document.getElementById('overlayEliminandoTramo')?.remove();
+      botones.forEach(b => b.disabled = false);
+      showToast('error', result?.error || 'Error al eliminar tramo');
+    }
+  } catch (error) {
+    document.getElementById('overlayEliminandoTramo')?.remove();
+    botones.forEach(b => b.disabled = false);
+    console.error('Error eliminando tramo:', error);
+    showToast('error', 'Error: ' + (error.message || String(error)));
+  }
+}
+
+async function guardarMotivoRecurrencia(idSolicitud) {
+  const motivo = document.getElementById('motivoRecurrenciaDetalle')?.value || '';
+  const btn = document.getElementById('btnGuardarMotivo');
+  const icon = document.getElementById('iconGuardarMotivo');
+  const texto = document.getElementById('textoGuardarMotivo');
+
+  // Mostrar spinner
+  if (btn) btn.disabled = true;
+  if (icon) icon.setAttribute('icon', 'mdi:loading');
+  if (icon) icon.classList.add('animate-spin');
+  if (texto) texto.textContent = 'Guardando...';
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .actualizarMotivoRecurrencia(idSolicitud, motivo);
+    });
+
+    if (result && result.success) {
+      showToast('success', 'Motivo actualizado');
+      cerrarModalDetalleRecurrencia();
+      // Recargar matriz
+      if (DispState.recursoId) cargarMatrizDisponibilidad(DispState.recursoId);
+    } else {
+      showToast('error', result?.error || 'Error al guardar');
+      // Restaurar botón en caso de error
+      if (btn) btn.disabled = false;
+      if (icon) { icon.setAttribute('icon', 'mdi:content-save'); icon.classList.remove('animate-spin'); }
+      if (texto) texto.textContent = 'Guardar';
+    }
+  } catch (error) {
+    showToast('error', 'Error: ' + (error.message || String(error)));
+    // Restaurar botón en caso de error
+    if (btn) btn.disabled = false;
+    if (icon) { icon.setAttribute('icon', 'mdi:content-save'); icon.classList.remove('animate-spin'); }
+    if (texto) texto.textContent = 'Guardar';
+  }
+}
+
+/**
+ * Muestra el modal de confirmacion antes de revocar
+ */
+function confirmarRevocarRecurrencia(idSolicitud) {
+  mostrarConfirmacion(
+    'Revocar recurrencia',
+    '¿Revocar esta recurrencia? Se cancelaran todas las reservas futuras asociadas.',
+    () => revocarRecurrencia(idSolicitud)
+  );
+}
+
+async function revocarRecurrencia(idSolicitud) {
+  const btn = document.getElementById('btnRevocarRecurrencia');
+  const icon = document.getElementById('iconRevocarRecurrencia');
+  const texto = document.getElementById('textoRevocarRecurrencia');
+
+  // Mostrar spinner
+  if (btn) btn.disabled = true;
+  if (icon) { icon.setAttribute('icon', 'mdi:loading'); icon.classList.add('animate-spin'); }
+  if (texto) texto.textContent = 'Revocando...';
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .cancelarRecurrenciaAprobada(idSolicitud);
+    });
+
+    if (result && result.success) {
+      showToast('success', 'Recurrencia revocada');
+      cerrarModalDetalleRecurrencia();
+      // Recargar matriz
+      if (DispState.recursoId) cargarMatrizDisponibilidad(DispState.recursoId);
+      // Actualizar historial: marcar como cancelada y re-renderizar
+      const idx = datosHistorialRecurrencias.findIndex(s => s.id_solicitud === idSolicitud);
+      if (idx !== -1) {
+        datosHistorialRecurrencias[idx].estado = 'Cancelada';
+        renderizarHistorialRecurrencias();
+      }
+      // Actualizar estado global del usuario (para que no haga falta recargar)
+      if (typeof globalState !== 'undefined') {
+        globalState.reservas = globalState.reservas.filter(
+          r => r.id_solicitud_recurrente !== idSolicitud
+        );
+        globalState.misReservasActivas = globalState.misReservasActivas.filter(
+          r => r.id_solicitud_recurrente !== idSolicitud
+        );
+      }
+      // Actualizar reservas en AdminState y re-renderizar tabla
+      AdminState.reservas = AdminState.reservas.filter(
+        r => r.id_solicitud_recurrente !== idSolicitud
+      );
+      if (typeof renderTablaReservas === 'function') renderTablaReservas();
+    } else {
+      showToast('error', result?.error || 'Error al revocar');
+      // Restaurar boton
+      if (btn) btn.disabled = false;
+      if (icon) { icon.setAttribute('icon', 'mdi:cancel'); icon.classList.remove('animate-spin'); }
+      if (texto) texto.textContent = 'Revocar';
+    }
+  } catch (error) {
+    showToast('error', 'Error: ' + (error.message || String(error)));
+    // Restaurar boton
+    if (btn) btn.disabled = false;
+    if (icon) { icon.setAttribute('icon', 'mdi:cancel'); icon.classList.remove('animate-spin'); }
+    if (texto) texto.textContent = 'Revocar';
+  }
+}
+
+/**
+ * Aprueba una solicitud rápidamente desde el panel de pendientes
+ */
+async function aprobarSolicitudRapida(idSolicitud) {
+  if (!idSolicitud) return;
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .aprobarSolicitudRecurrente(idSolicitud, '');
+    });
+
+    if (result && result.success) {
+      showToast('success', 'Solicitud aprobada correctamente');
+      // Recargar la matriz
+      if (DispState.recursoId) {
+        cargarMatrizDisponibilidad(DispState.recursoId);
+      }
+      // También actualizar la lista global de recurrentes
+      cargarSolicitudesRecurrentes();
+      // Inyectar reservas nuevas en AdminState y globalState
+      if (result.reservas && result.reservas.length > 0) {
+        AdminState.reservas = AdminState.reservas.concat(result.reservas);
+        if (typeof renderTablaReservas === 'function') renderTablaReservas();
+        if (typeof globalState !== 'undefined') {
+          const nuevasParaGlobal = result.reservas.map(r => ({
+            id_reserva: r.ID_Reserva,
+            id_recurso: r.ID_Recurso,
+            email_usuario: r.Email_Usuario,
+            fecha: r.Fecha,
+            id_tramo: r.ID_Tramo,
+            cantidad: r.Cantidad,
+            estado: r.Estado,
+            notas: r.Notas,
+            id_solicitud_recurrente: r.ID_Solicitud_Recurrente
+          }));
+          globalState.reservas = globalState.reservas.concat(nuevasParaGlobal);
+        }
+      }
+    } else {
+      showToast('error', result?.error || 'Error al aprobar');
+    }
+  } catch (error) {
+    console.error('Error aprobando solicitud:', error);
+    showToast('error', 'Error: ' + (error.message || String(error)));
+  }
+}
+
+/**
+ * Rechaza una solicitud rápidamente (abre modal para motivo)
+ */
+function rechazarSolicitudRapida(idSolicitud) {
+  if (!idSolicitud) return;
+  // Abrir el modal de gestión para que el admin escriba el motivo
+  abrirModalGestionarSolicitud(idSolicitud);
 }
 
 function actualizarCeldaVisualmente(idTramo, dia, dato, esPrimeraFila) {
@@ -1390,14 +2330,17 @@ function checkDispChanges() {
   }
 }
 
-function guardarCambiosDisp() {
+// Variable para almacenar payload pendiente de confirmación
+let payloadDisponibilidadPendiente = null;
+
+function guardarCambiosDisp(forzar = false) {
   if (!DispState.recursoId) {
       showToast('error', 'Error: No hay recurso seleccionado');
       return;
   }
 
   showLoading();
-  
+
   const payload = DispState.datosActuales.map(d => ({
     id_recurso: DispState.recursoId,
     id_tramo: d.id_tramo,
@@ -1405,22 +2348,164 @@ function guardarCambiosDisp() {
     permitido: d.permitido,
     razon_bloqueo: d.razon_bloqueo
   }));
-  
+
   google.script.run
     .withSuccessHandler(res => {
       hideLoading();
+
+      if (res.requiereConfirmacion && !forzar) {
+        // Hay conflictos con recurrencias: mostrar modal de confirmación
+        payloadDisponibilidadPendiente = payload;
+        mostrarModalConflictosDisponibilidad(res.afectados);
+        return;
+      }
+
       if(res.success) {
         showToast('success', 'Disponibilidad guardada');
         DispState.datosOriginales = JSON.parse(JSON.stringify(DispState.datosActuales));
         AdminState.disponibilidad = AdminState.disponibilidad.filter(d => String(d.id_recurso) !== String(DispState.recursoId));
         payload.forEach(p => AdminState.disponibilidad.push(p));
         checkDispChanges();
+        payloadDisponibilidadPendiente = null;
       } else {
-        showToast('error', res.error);
+        showToast('error', res.error || 'Error al guardar');
       }
     })
     .withFailureHandler(err => { hideLoading(); showToast('error', err); })
-    .saveBatchDisponibilidad(payload);
+    .saveBatchDisponibilidadConValidacion(payload, forzar);
+}
+
+/**
+ * Muestra modal de confirmación cuando hay recurrencias afectadas
+ */
+function mostrarModalConflictosDisponibilidad(afectados) {
+  // Agrupar por usuario
+  const porUsuario = {};
+  afectados.forEach(a => {
+    if (!porUsuario[a.email_usuario]) {
+      porUsuario[a.email_usuario] = {
+        nombre: a.nombre_usuario,
+        tramos: []
+      };
+    }
+    porUsuario[a.email_usuario].tramos.push(`${a.dia_semana} (${a.id_tramo})`);
+  });
+
+  // Generar HTML del listado
+  let listaHTML = '';
+  Object.keys(porUsuario).forEach(email => {
+    const u = porUsuario[email];
+    listaHTML += `
+      <div class="flex items-start gap-3 p-3 bg-red-50 rounded-lg border border-red-100">
+        <iconify-icon icon="mdi:account-alert" class="text-red-500 text-xl mt-0.5 shrink-0"></iconify-icon>
+        <div class="flex-1 min-w-0">
+          <p class="font-medium text-gray-800 text-sm truncate">${escaparHTML(u.nombre)}</p>
+          <p class="text-xs text-gray-500 truncate">${escaparHTML(email)}</p>
+          <p class="text-xs text-red-600 mt-1">Tramos: ${u.tramos.join(', ')}</p>
+        </div>
+      </div>
+    `;
+  });
+
+  // Crear o actualizar modal
+  let modal = document.getElementById('modalConflictosDisponibilidad');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modalConflictosDisponibilidad';
+    document.body.appendChild(modal);
+  }
+
+  modal.className = 'fixed inset-0 z-[10000] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4';
+  modal.innerHTML = `
+    <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 fade-in duration-200">
+      <!-- Header -->
+      <div class="bg-red-50 border-b border-red-100 px-5 py-4 flex items-center gap-3">
+        <div class="p-2 rounded-lg bg-red-100 text-red-600">
+          <iconify-icon icon="mdi:alert-circle" class="text-2xl"></iconify-icon>
+        </div>
+        <div>
+          <h3 class="text-lg font-bold text-gray-900">Conflicto con reservas recurrentes</h3>
+          <p class="text-sm text-gray-600">${afectados.length} tramo(s) afectado(s)</p>
+        </div>
+      </div>
+
+      <!-- Body -->
+      <div class="p-5 overflow-y-auto flex-1">
+        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+          <div class="flex items-start gap-2">
+            <iconify-icon icon="mdi:information" class="text-amber-600 text-lg mt-0.5 shrink-0"></iconify-icon>
+            <p class="text-sm text-amber-800">
+              Los siguientes usuarios tienen reservas recurrentes en los tramos que vas a bloquear.
+              Si continúas, se cancelarán sus tramos afectados y recibirán una notificación por email.
+            </p>
+          </div>
+        </div>
+
+        <div class="space-y-2 max-h-60 overflow-y-auto">
+          ${listaHTML}
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="bg-gray-50 border-t border-gray-200 px-5 py-4 flex gap-3">
+        <button onclick="cerrarModalConflictosDisponibilidad()"
+          class="flex-1 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition-colors">
+          Cancelar
+        </button>
+        <button onclick="confirmarGuardarConConflictos()"
+          class="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-colors flex items-center justify-center gap-2">
+          <iconify-icon icon="mdi:check"></iconify-icon>
+          Guardar y notificar
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function cerrarModalConflictosDisponibilidad() {
+  const modal = document.getElementById('modalConflictosDisponibilidad');
+  if (modal) modal.remove();
+  payloadDisponibilidadPendiente = null;
+}
+
+function confirmarGuardarConConflictos() {
+  // Cerrar modal pero NO resetear el payload todavía
+  const modal = document.getElementById('modalConflictosDisponibilidad');
+  if (modal) modal.remove();
+
+  // Mostrar loading
+  showLoading();
+
+  // Reconstruir payload desde el estado actual
+  const payload = DispState.datosActuales.map(d => ({
+    id_recurso: DispState.recursoId,
+    id_tramo: d.id_tramo,
+    dia_semana: d.dia_semana,
+    permitido: d.permitido,
+    razon_bloqueo: d.razon_bloqueo
+  }));
+
+  google.script.run
+    .withSuccessHandler(res => {
+      hideLoading();
+      payloadDisponibilidadPendiente = null;
+
+      if (res.success) {
+        showToast('success', 'Disponibilidad guardada y usuarios notificados');
+        DispState.datosOriginales = JSON.parse(JSON.stringify(DispState.datosActuales));
+        AdminState.disponibilidad = AdminState.disponibilidad.filter(d => String(d.id_recurso) !== String(DispState.recursoId));
+        payload.forEach(p => AdminState.disponibilidad.push(p));
+        checkDispChanges();
+      } else {
+        showToast('error', res.error || 'Error al guardar');
+      }
+    })
+    .withFailureHandler(err => {
+      hideLoading();
+      payloadDisponibilidadPendiente = null;
+      showToast('error', 'Error: ' + err);
+    })
+    .saveBatchDisponibilidadConValidacion(payload, true);
 }
 
 function descartarCambiosDisp() {
@@ -2619,6 +3704,7 @@ function renderConfiguracion() {
   setCfgCheck('cfg_permitir_multitramo',  configMap['permitir_multitramo']);
   setCfgCheck('cfg_exigir_motivo',        configMap['exigir_motivo']);
   setCfgCheck('cfg_modo_mantenimiento',   configMap['modo_mantenimiento']);
+  setCfgCheck('cfg_admin_recibir_copia_reservas', configMap['admin_recibir_copia_reservas']);
 }
 
 // --- LISTENERS ---
@@ -2629,7 +3715,7 @@ function attachConfigListeners() {
     'cfg_dias_vista_maximo', 'cfg_minutos_antelacion', 'cfg_limite_reservas',
     'cfg_horas_cancelacion', 'cfg_email_admin', 'cfg_nombre_centro',
     'cfg_url_logo', 'cfg_max_tramos_simultaneos', 'cfg_permitir_multitramo',
-    'cfg_exigir_motivo', 'cfg_modo_mantenimiento'
+    'cfg_exigir_motivo', 'cfg_modo_mantenimiento', 'cfg_admin_recibir_copia_reservas'
   ];
   
   ids.forEach(id => {
@@ -2675,7 +3761,8 @@ function construirConfigDesdeInputs() {
     { clave: 'max_tramos_simultaneos', valor: getCfgVal('cfg_max_tramos_simultaneos') },
     { clave: 'permitir_multitramo',    valor: getCfgCheck('cfg_permitir_multitramo') },
     { clave: 'exigir_motivo',      valor: getCfgCheck('cfg_exigir_motivo') },
-    { clave: 'modo_mantenimiento', valor: getCfgCheck('cfg_modo_mantenimiento') }
+    { clave: 'modo_mantenimiento', valor: getCfgCheck('cfg_modo_mantenimiento') },
+    { clave: 'admin_recibir_copia_reservas', valor: getCfgCheck('cfg_admin_recibir_copia_reservas') }
   ];
 }
 
@@ -2815,10 +3902,11 @@ function descartarCambiosConfiguracion() {
       setCfgVal('cfg_nombre_centro',       configMap['nombre_centro']);
       setCfgVal('cfg_url_logo',            configMap['url_logo']);
       setCfgVal('cfg_max_tramos_simultaneos', configMap['max_tramos_simultaneos']);
-      
+
       setCfgCheck('cfg_permitir_multitramo',  configMap['permitir_multitramo']);
       setCfgCheck('cfg_exigir_motivo',        configMap['exigir_motivo']);
       setCfgCheck('cfg_modo_mantenimiento',   configMap['modo_mantenimiento']);
+      setCfgCheck('cfg_admin_recibir_copia_reservas', configMap['admin_recibir_copia_reservas']);
       
       ConfigState.cambiosPendientes = false;
       SaveBarManager.hide();
@@ -3240,8 +4328,8 @@ var adminDataLoading = false; // ¿Cargando ahora mismo?
    8.2. FUNCIÓN DE CARGA MAESTRA (Modo Ninja 🥷)
    ========================================================= */
 function loadAdminData(isSilent = false) {
-  if (adminDataReady) return; 
-  
+  if (adminDataReady || adminDataLoading) return;
+
   adminDataLoading = true;
 
   if (!isSilent) showLoading(); 
@@ -3429,11 +4517,1849 @@ function fixMenusFlotantes() {
 /* =========================================================
    9.3. INICIALIZACIÓN DEL ADMIN 🚀
    ========================================================= */
+/* =========================================================
+   10. GESTIÓN DE SOLICITUDES RECURRENTES
+   ========================================================= */
+
+let filtroEstadoRecurrente = 'todas';
+let busquedaRecurrente = '';
+
+/**
+ * Carga las solicitudes recurrentes globales para el badge y panel de pendientes
+ * Se llama al abrir la pestaña Disponibilidad
+ */
+async function cargarSolicitudesRecurrentesGlobal() {
+  try {
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler((res) => resolve(res || { success: true, solicitudes: [] }))
+        .withFailureHandler(reject)
+        .getSolicitudesRecurrentes();
+    });
+
+    if (result && result.success) {
+      AdminState.solicitudesRecurrentes = result.solicitudes || [];
+      actualizarBadgeRecurrentes();
+      actualizarPanelPendientesGlobal();
+    }
+  } catch (error) {
+    console.error('Error cargando solicitudes recurrentes globales:', error);
+  }
+}
+
+/**
+ * Actualiza el panel de pendientes con TODAS las solicitudes pendientes (global)
+ */
+function actualizarPanelPendientesGlobal() {
+  const panel = document.getElementById('panelPendientesRecurso');
+  const lista = document.getElementById('listaPendientesRecurso');
+  const badge = document.getElementById('badgePendientesRecurso');
+
+  if (!panel || !lista || !badge) return;
+
+  // Filtrar solicitudes pendientes de todos los recursos
+  const pendientes = (AdminState.solicitudesRecurrentes || []).filter(s =>
+    (s.estado || '').toLowerCase() === 'pendiente'
+  );
+
+  if (pendientes.length === 0) {
+    panel.classList.add('hidden');
+    return;
+  }
+
+  // Mostrar panel
+  panel.classList.remove('hidden');
+  badge.textContent = pendientes.length;
+
+  // Renderizar lista
+  lista.innerHTML = pendientes.map(sol => {
+    const diasStr = sol.dias_semana || '';
+    let diasDisplay = '';
+    if (diasStr.includes(':')) {
+      const diasSet = new Set();
+      diasStr.split(',').forEach(item => {
+        const [d] = item.trim().split(':');
+        if (d) diasSet.add(d.toUpperCase());
+      });
+      diasDisplay = Array.from(diasSet).join('·');
+    } else {
+      diasDisplay = diasStr.split(',').map(d => d.trim().toUpperCase()).join('·');
+    }
+
+    return `
+      <div class="px-3 py-2 border-b border-amber-100 last:border-b-0 hover:bg-amber-100/50 transition-colors cursor-pointer"
+           onclick="verDetalleSolicitudDirecto('${sol.id_solicitud}')">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex-1 min-w-0">
+            <div class="font-medium text-gray-800 text-xs truncate">${escaparHTML(sol.nombre_usuario)}</div>
+            <div class="text-[10px] text-gray-500">${escaparHTML(sol.nombre_recurso)} · ${diasDisplay}</div>
+          </div>
+          <div class="flex gap-1 shrink-0">
+            <button onclick="event.stopPropagation(); verDetalleSolicitudDirecto('${sol.id_solicitud}')"
+              class="p-1.5 hover:bg-amber-200 rounded-lg transition-colors" title="Ver detalles">
+              <iconify-icon icon="mdi:eye-outline" class="text-amber-700 text-sm"></iconify-icon>
+            </button>
+            <button onclick="event.stopPropagation(); rechazarSolicitudRapidaConSpinner('${sol.id_solicitud}', this)"
+              class="p-1.5 hover:bg-red-200 rounded-lg transition-colors" title="Rechazar">
+              <iconify-icon icon="mdi:close" class="text-red-600 text-sm"></iconify-icon>
+            </button>
+            <button onclick="event.stopPropagation(); aprobarSolicitudRapidaConSpinner('${sol.id_solicitud}', this)"
+              class="p-1.5 hover:bg-green-200 rounded-lg transition-colors" title="Aprobar">
+              <iconify-icon icon="mdi:check" class="text-green-600 text-sm"></iconify-icon>
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+/**
+ * Aprueba todas las solicitudes pendientes de una vez
+ */
+async function aprobarTodasPendientesGlobal() {
+  const pendientes = (AdminState.solicitudesRecurrentes || []).filter(s =>
+    (s.estado || '').toLowerCase() === 'pendiente'
+  );
+
+  if (pendientes.length === 0) {
+    showToast('info', 'No hay solicitudes pendientes');
+    return;
+  }
+
+  // Usar modal de confirmación en lugar de confirm()
+  mostrarConfirmacion(
+    '¿Aprobar todas las solicitudes?',
+    `Se aprobarán <strong>${pendientes.length}</strong> solicitudes pendientes.<br>Esta acción no se puede deshacer.`,
+    () => ejecutarAprobarTodasPendientes(pendientes)
+  );
+}
+
+/**
+ * Ejecuta la aprobación masiva de solicitudes
+ */
+async function ejecutarAprobarTodasPendientes(pendientes) {
+  // Mostrar overlay de progreso
+  const overlay = document.createElement('div');
+  overlay.id = 'overlayAprobandoTodas';
+  overlay.className = 'fixed inset-0 z-[10002] bg-gray-900/50 backdrop-blur-sm flex items-center justify-center';
+  overlay.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-2xl p-6 max-w-xs w-full mx-4 text-center">
+      <iconify-icon icon="mdi:loading" class="text-4xl text-blue-600 animate-spin"></iconify-icon>
+      <p class="mt-3 font-semibold text-gray-800">Aprobando solicitudes...</p>
+      <p id="progresoAprobacion" class="text-sm text-gray-500 mt-1">0 de ${pendientes.length}</p>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  let aprobadas = 0;
+  let errores = 0;
+
+  for (const sol of pendientes) {
+    try {
+      const result = await new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)
+          .aprobarSolicitudRecurrente(sol.id_solicitud);
+      });
+
+      if (result && result.success) {
+        aprobadas++;
+      } else {
+        errores++;
+      }
+    } catch (error) {
+      errores++;
+    }
+
+    // Actualizar progreso
+    const progreso = document.getElementById('progresoAprobacion');
+    if (progreso) {
+      progreso.textContent = `${aprobadas + errores} de ${pendientes.length}`;
+    }
+  }
+
+  // Quitar overlay
+  overlay.remove();
+
+  if (aprobadas > 0) {
+    showToast('success', `${aprobadas} solicitudes aprobadas`);
+  }
+  if (errores > 0) {
+    showToast('warning', `${errores} solicitudes con error`);
+  }
+
+  // Recargar datos
+  await cargarSolicitudesRecurrentesGlobal();
+  if (DispState.recursoId) {
+    cargarMatrizDisponibilidad(DispState.recursoId);
+  }
+}
+
+/**
+ * Carga las solicitudes recurrentes desde el servidor
+ */
+async function cargarSolicitudesRecurrentes() {
+  const container = document.getElementById('listaSolicitudesRecurrentes');
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="text-center py-8">
+      <div class="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
+      <p class="text-gray-500 mt-2">Cargando solicitudes...</p>
+    </div>
+  `;
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler((res) => resolve(res || { success: true, solicitudes: [] }))
+        .withFailureHandler(reject)
+        .getSolicitudesRecurrentes();
+    });
+
+    if (result && result.success) {
+      AdminState.solicitudesRecurrentes = result.solicitudes || [];
+      renderizarSolicitudesRecurrentes();
+      actualizarBadgeRecurrentes();
+    } else {
+      const errorMsg = (result && result.error) ? result.error : 'Error desconocido al cargar';
+      container.innerHTML = `<p class="text-red-500 text-center py-4">${escaparHTML(errorMsg)}</p>`;
+    }
+  } catch (error) {
+    console.error('Error cargando solicitudes recurrentes:', error);
+    container.innerHTML = `<p class="text-red-500 text-center py-4">Error al cargar: ${escaparHTML(error.message || String(error))}</p>`;
+  }
+}
+
+/**
+ * Actualiza el badge de solicitudes pendientes
+ */
+function actualizarBadgeRecurrentes() {
+  const badge = document.getElementById('badgeSolicitudesRecurrentes');
+  if (!badge) return;
+
+  const pendientes = AdminState.solicitudesRecurrentes.filter(s =>
+    (s.estado || '').toLowerCase() === 'pendiente'
+  ).length;
+
+  if (pendientes > 0) {
+    badge.textContent = pendientes;
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+}
+
+/**
+ * Filtra solicitudes por estado
+ */
+function filtrarSolicitudesRecurrentes(estado) {
+  filtroEstadoRecurrente = estado;
+
+  // Actualizar botones de filtro
+  document.querySelectorAll('[data-filtro-recurrente]').forEach(btn => {
+    const btnEstado = btn.dataset.filtroRecurrente;
+    if (btnEstado === estado) {
+      btn.classList.add('bg-blue-600', 'text-white');
+      btn.classList.remove('bg-gray-100', 'text-gray-700');
+    } else {
+      btn.classList.remove('bg-blue-600', 'text-white');
+      btn.classList.add('bg-gray-100', 'text-gray-700');
+    }
+  });
+
+  renderizarSolicitudesRecurrentes();
+}
+
+/**
+ * Busca solicitudes por texto
+ */
+function buscarSolicitudesRecurrentes(texto) {
+  busquedaRecurrente = texto.toLowerCase().trim();
+  renderizarSolicitudesRecurrentes();
+}
+
+/**
+ * Aprueba todas las solicitudes pendientes
+ */
+async function aprobarTodasPendientes() {
+  const pendientes = AdminState.solicitudesRecurrentes.filter(s =>
+    (s.estado || '').toLowerCase() === 'pendiente'
+  );
+
+  if (pendientes.length === 0) {
+    showToast('info', 'No hay solicitudes pendientes para aprobar');
+    return;
+  }
+
+  if (!confirm(`¿Aprobar ${pendientes.length} solicitud(es) pendiente(s)?\n\nEsto generará todas las reservas correspondientes.`)) {
+    return;
+  }
+
+  const btn = document.getElementById('btnAprobarTodasPendientes');
+  const textoOriginal = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>Procesando...';
+
+  let aprobadas = 0;
+  let errores = 0;
+  let totalReservas = 0;
+
+  for (const sol of pendientes) {
+    try {
+      const result = await new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)
+          .aprobarSolicitudRecurrente(sol.id_solicitud, 'Aprobación masiva');
+      });
+
+      if (result && result.success) {
+        aprobadas++;
+        totalReservas += result.reservasGeneradas || 0;
+      } else {
+        errores++;
+      }
+    } catch (e) {
+      console.error('Error aprobando:', sol.id_solicitud, e);
+      errores++;
+    }
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = textoOriginal;
+
+  if (errores === 0) {
+    showToast('success', `${aprobadas} solicitud(es) aprobada(s). ${totalReservas} reservas generadas.`);
+  } else {
+    showToast('warning', `Aprobadas: ${aprobadas}, Errores: ${errores}. Revisa los detalles.`);
+  }
+
+  await cargarSolicitudesRecurrentes();
+  adminHaCambiadoDatos = true;
+}
+
+/**
+ * Cancela una recurrencia aprobada
+ */
+function cancelarRecurrenciaAprobada(idSolicitud) {
+  const solicitud = AdminState.solicitudesRecurrentes.find(s => s.id_solicitud === idSolicitud);
+  if (!solicitud) {
+    showToast('error', 'Solicitud no encontrada');
+    return;
+  }
+
+  mostrarConfirmacion(
+    '¿Cancelar recurrencia?',
+    `Se cancelarán todas las reservas futuras de <strong>"${escaparHTML(solicitud.nombre_recurso)}"</strong> para el usuario <strong>${escaparHTML(solicitud.nombre_usuario)}</strong>.`,
+    async () => {
+      showToast('info', 'Cancelando recurrencia...');
+
+      try {
+        const result = await new Promise((resolve, reject) => {
+          google.script.run
+            .withSuccessHandler((res) => resolve(res || { success: false, error: 'Respuesta vacía' }))
+            .withFailureHandler(reject)
+            .cancelarRecurrenciaAprobada(idSolicitud);
+        });
+
+        if (result && result.success) {
+          showToast('success', result.message || 'Recurrencia cancelada');
+          await cargarSolicitudesRecurrentes();
+          adminHaCambiadoDatos = true;
+        } else {
+          showToast('error', result?.error || 'Error al cancelar');
+        }
+      } catch (error) {
+        console.error('Error cancelando recurrencia:', error);
+        showToast('error', 'Error: ' + (error.message || error));
+      }
+    }
+  );
+}
+
+/**
+ * Abre modal para editar tramos de una recurrencia aprobada
+ */
+function abrirModalEditarTramosRecurrencia(idSolicitud) {
+  const solicitud = AdminState.solicitudesRecurrentes.find(s => s.id_solicitud === idSolicitud);
+  if (!solicitud) {
+    showToast('error', 'Solicitud no encontrada');
+    return;
+  }
+
+  // Parsear los tramos actuales
+  const diasSemanaStr = solicitud.dias_semana || '';
+  const tramosActuales = [];
+
+  if (diasSemanaStr.includes(':')) {
+    diasSemanaStr.split(',').forEach(item => {
+      const [dia, tramo] = item.trim().split(':');
+      if (dia && tramo) {
+        tramosActuales.push({ dia: dia.toUpperCase(), tramo: tramo.trim() });
+      }
+    });
+  }
+
+  if (tramosActuales.length === 0) {
+    showToast('warning', 'Esta recurrencia no tiene tramos editables');
+    return;
+  }
+
+  // Nombres de días y tramos
+  const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes' };
+
+  // Generar lista de tramos con checkboxes
+  let tramosHTML = tramosActuales.map((t, idx) => {
+    const nombreDia = diasNombres[t.dia] || t.dia;
+    const tramoInfo = AdminState.tramos?.find(tr => tr.id_tramo === t.tramo);
+    const nombreTramo = tramoInfo?.nombre_tramo || t.tramo;
+    const horaTramo = tramoInfo ? `${tramoInfo.hora_inicio} - ${tramoInfo.hora_fin}` : '';
+
+    return `
+      <label class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors tramo-editable"
+             data-dia="${t.dia}" data-tramo="${t.tramo}">
+        <input type="checkbox" checked class="w-4 h-4 accent-blue-600 checkbox-tramo">
+        <div class="flex-1">
+          <div class="font-medium text-gray-800">${escaparHTML(nombreDia)}</div>
+          <div class="text-sm text-gray-500">${escaparHTML(nombreTramo)} ${horaTramo ? `(${horaTramo})` : ''}</div>
+        </div>
+        <iconify-icon icon="mdi:calendar-clock" class="text-gray-400 text-xl"></iconify-icon>
+      </label>
+    `;
+  }).join('');
+
+  // Crear modal
+  let modal = document.getElementById('modalEditarTramosRecurrencia');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modalEditarTramosRecurrencia';
+    document.body.appendChild(modal);
+  }
+
+  modal.className = 'fixed inset-0 z-[10000] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4';
+  modal.innerHTML = `
+    <div class="bg-white rounded-xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 fade-in duration-200">
+      <!-- Header -->
+      <div class="bg-blue-50 border-b border-blue-100 px-5 py-4 flex items-center gap-3">
+        <div class="p-2 rounded-lg bg-blue-100 text-blue-600">
+          <iconify-icon icon="mdi:calendar-edit" class="text-2xl"></iconify-icon>
+        </div>
+        <div class="flex-1 min-w-0">
+          <h3 class="text-lg font-bold text-gray-900">Editar Tramos</h3>
+          <p class="text-sm text-gray-600 truncate">${escaparHTML(solicitud.nombre_recurso)} - ${escaparHTML(solicitud.nombre_usuario)}</p>
+        </div>
+        <button onclick="cerrarModalEditarTramosRecurrencia()" class="p-2 hover:bg-blue-100 rounded-lg transition-colors">
+          <iconify-icon icon="mdi:close" class="text-xl text-gray-400"></iconify-icon>
+        </button>
+      </div>
+
+      <!-- Body -->
+      <div class="p-5 overflow-y-auto flex-1">
+        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+          <div class="flex items-start gap-2">
+            <iconify-icon icon="mdi:information" class="text-amber-600 text-lg mt-0.5 shrink-0"></iconify-icon>
+            <p class="text-sm text-amber-800">
+              Desmarca los tramos que quieras eliminar. Las reservas futuras de esos tramos serán canceladas y el usuario será notificado.
+            </p>
+          </div>
+        </div>
+
+        <div class="space-y-2" id="listaTramosEditar">
+          ${tramosHTML}
+        </div>
+
+        <div id="contadorTramosSeleccionados" class="mt-3 text-center text-sm text-gray-500">
+          ${tramosActuales.length} de ${tramosActuales.length} tramos seleccionados
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="bg-gray-50 border-t border-gray-200 px-5 py-4 flex gap-3">
+        <button onclick="cerrarModalEditarTramosRecurrencia()"
+          class="flex-1 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition-colors">
+          Cancelar
+        </button>
+        <button onclick="guardarEdicionTramosRecurrencia('${idSolicitud}')" id="btnGuardarTramosRecurrencia"
+          class="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors flex items-center justify-center gap-2">
+          <iconify-icon icon="mdi:content-save"></iconify-icon>
+          Guardar cambios
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Añadir listeners para actualizar contador
+  modal.querySelectorAll('.checkbox-tramo').forEach(cb => {
+    cb.addEventListener('change', actualizarContadorTramosEditar);
+  });
+}
+
+function actualizarContadorTramosEditar() {
+  const total = document.querySelectorAll('#listaTramosEditar .checkbox-tramo').length;
+  const seleccionados = document.querySelectorAll('#listaTramosEditar .checkbox-tramo:checked').length;
+  const contador = document.getElementById('contadorTramosSeleccionados');
+  const btnGuardar = document.getElementById('btnGuardarTramosRecurrencia');
+
+  if (contador) {
+    contador.textContent = `${seleccionados} de ${total} tramos seleccionados`;
+
+    if (seleccionados === 0) {
+      contador.classList.add('text-red-500');
+      contador.classList.remove('text-gray-500');
+    } else {
+      contador.classList.remove('text-red-500');
+      contador.classList.add('text-gray-500');
+    }
+  }
+
+  // Deshabilitar botón si no hay tramos seleccionados
+  if (btnGuardar) {
+    btnGuardar.disabled = seleccionados === 0;
+    if (seleccionados === 0) {
+      btnGuardar.classList.add('opacity-50', 'cursor-not-allowed');
+    } else {
+      btnGuardar.classList.remove('opacity-50', 'cursor-not-allowed');
+    }
+  }
+}
+
+function cerrarModalEditarTramosRecurrencia() {
+  const modal = document.getElementById('modalEditarTramosRecurrencia');
+  if (modal) modal.remove();
+}
+
+async function guardarEdicionTramosRecurrencia(idSolicitud) {
+  // Obtener tramos seleccionados (los que quedan)
+  const tramosRestantes = [];
+  document.querySelectorAll('#listaTramosEditar .tramo-editable').forEach(label => {
+    const checkbox = label.querySelector('.checkbox-tramo');
+    if (checkbox && checkbox.checked) {
+      tramosRestantes.push({
+        dia: label.dataset.dia,
+        tramo: label.dataset.tramo
+      });
+    }
+  });
+
+  // Obtener tramos originales
+  const solicitud = AdminState.solicitudesRecurrentes.find(s => s.id_solicitud === idSolicitud);
+  if (!solicitud) {
+    showToast('error', 'Solicitud no encontrada');
+    return;
+  }
+
+  const diasSemanaStr = solicitud.dias_semana || '';
+  const tramosOriginales = [];
+  diasSemanaStr.split(',').forEach(item => {
+    const [dia, tramo] = item.trim().split(':');
+    if (dia && tramo) {
+      tramosOriginales.push({ dia: dia.toUpperCase(), tramo: tramo.trim() });
+    }
+  });
+
+  // Verificar si hay cambios
+  if (tramosRestantes.length === tramosOriginales.length) {
+    showToast('info', 'No hay cambios para guardar');
+    cerrarModalEditarTramosRecurrencia();
+    return;
+  }
+
+  // Calcular tramos eliminados
+  const tramosEliminados = tramosOriginales.filter(orig =>
+    !tramosRestantes.some(rest => rest.dia === orig.dia && rest.tramo === orig.tramo)
+  );
+
+  // Confirmar
+  const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes' };
+  const eliminadosTexto = tramosEliminados.map(t => {
+    const tramoInfo = AdminState.tramos?.find(tr => tr.id_tramo === t.tramo);
+    return `${diasNombres[t.dia] || t.dia} (${tramoInfo?.nombre_tramo || t.tramo})`;
+  }).join(', ');
+
+  cerrarModalEditarTramosRecurrencia();
+
+  mostrarConfirmacion(
+    '¿Confirmar cambios?',
+    `Se eliminarán los siguientes tramos: <strong>${eliminadosTexto}</strong>.<br><br>Las reservas futuras de estos tramos serán canceladas y el usuario recibirá una notificación.`,
+    async () => {
+      showLoading();
+
+      try {
+        const result = await new Promise((resolve, reject) => {
+          google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler(reject)
+            .editarTramosRecurrencia(idSolicitud, tramosRestantes, tramosEliminados);
+        });
+
+        hideLoading();
+
+        if (result && result.success) {
+          showToast('success', result.message || 'Tramos actualizados correctamente');
+          await cargarSolicitudesRecurrentes();
+          adminHaCambiadoDatos = true;
+        } else {
+          showToast('error', result?.error || 'Error al actualizar tramos');
+        }
+      } catch (error) {
+        hideLoading();
+        console.error('Error editando tramos:', error);
+        showToast('error', 'Error: ' + (error.message || error));
+      }
+    }
+  );
+}
+
+/**
+ * Renderiza las solicitudes recurrentes según el filtro activo
+ */
+function renderizarSolicitudesRecurrentes() {
+  const container = document.getElementById('listaSolicitudesRecurrentes');
+  if (!container) return;
+
+  let solicitudes = [...AdminState.solicitudesRecurrentes];
+
+  // Aplicar filtro de estado
+  if (filtroEstadoRecurrente !== 'todas') {
+    solicitudes = solicitudes.filter(s =>
+      (s.estado || '').toLowerCase() === filtroEstadoRecurrente.toLowerCase()
+    );
+  }
+
+  // Aplicar filtro de búsqueda
+  if (busquedaRecurrente) {
+    solicitudes = solicitudes.filter(s => {
+      const texto = [
+        s.nombre_recurso,
+        s.nombre_usuario,
+        s.email_usuario,
+        s.motivo,
+        s.nombre_tramo
+      ].filter(Boolean).join(' ').toLowerCase();
+      return texto.includes(busquedaRecurrente);
+    });
+  }
+
+  // Actualizar visibilidad del botón "Aprobar todas"
+  const btnAprobarTodas = document.getElementById('btnAprobarTodasPendientes');
+  if (btnAprobarTodas) {
+    const pendientesCount = AdminState.solicitudesRecurrentes.filter(s =>
+      (s.estado || '').toLowerCase() === 'pendiente'
+    ).length;
+    btnAprobarTodas.style.display = pendientesCount > 0 ? 'flex' : 'none';
+  }
+
+  if (solicitudes.length === 0) {
+    const mensajes = {
+      'pendiente': 'No hay solicitudes pendientes de revisión',
+      'aprobada': 'No hay solicitudes aprobadas',
+      'rechazada': 'No hay solicitudes rechazadas',
+      'todas': 'No hay solicitudes registradas'
+    };
+    container.innerHTML = `
+      <div class="text-center py-8 text-gray-500">
+        <iconify-icon icon="mdi:calendar-check" class="text-4xl mb-2"></iconify-icon>
+        <p>${busquedaRecurrente ? 'No se encontraron resultados para la búsqueda' : (mensajes[filtroEstadoRecurrente] || 'No hay solicitudes')}</p>
+      </div>
+    `;
+    return;
+  }
+
+  // Ordenar por fecha (más recientes primero)
+  solicitudes.sort((a, b) => new Date(b.fecha_solicitud) - new Date(a.fecha_solicitud));
+
+  // Función para obtener el icono del recurso
+  const getIconoRecurso = (idRecurso) => {
+    const recurso = AdminState.recursos?.find(r => r.id_recurso === idRecurso);
+    return recurso?.icono || 'mdi:cube-outline';
+  };
+
+  container.innerHTML = solicitudes.map(sol => {
+    const estadoConfig = {
+      'pendiente': { bg: 'bg-amber-100', text: 'text-amber-800', icon: 'mdi:clock-outline' },
+      'aprobada': { bg: 'bg-green-100', text: 'text-green-800', icon: 'mdi:check-circle' },
+      'rechazada': { bg: 'bg-red-100', text: 'text-red-800', icon: 'mdi:close-circle' }
+    };
+    const config = estadoConfig[(sol.estado || '').toLowerCase()] || { bg: 'bg-gray-100', text: 'text-gray-800', icon: 'mdi:help-circle' };
+
+    // Parsear días y tramos (soporta formato nuevo "V:T001,L:T002" y antiguo "L,M,X")
+    const diasSemanaStr = sol.dias_semana || '';
+    let diasUnicos = [];
+    let tramosUnicos = [];
+
+    if (diasSemanaStr.includes(':')) {
+      // Formato nuevo: "V:T001,V:T002,L:T001"
+      const items = diasSemanaStr.split(',');
+      const diasSet = new Set();
+      const tramosSet = new Set();
+      items.forEach(item => {
+        const [dia, tramo] = item.trim().split(':');
+        if (dia) diasSet.add(dia.toUpperCase());
+        if (tramo) tramosSet.add(tramo);
+      });
+      diasUnicos = Array.from(diasSet);
+      tramosUnicos = Array.from(tramosSet);
+    } else {
+      // Formato antiguo: "L,M,X"
+      diasUnicos = diasSemanaStr.split(',').map(d => d.trim().toUpperCase()).filter(Boolean);
+      if (sol.id_tramo) tramosUnicos = [sol.id_tramo];
+    }
+
+    const diasNombres = { 'L': 'L', 'M': 'M', 'X': 'X', 'J': 'J', 'V': 'V', 'S': 'S', 'D': 'D' };
+    const diasFormateados = diasUnicos.map(d => diasNombres[d] || d).join('·');
+
+    // Buscar nombres de tramos
+    const tramosNombres = tramosUnicos.map(idTramo => {
+      const tramo = AdminState.tramos?.find(t => t.id_tramo === idTramo);
+      return tramo?.nombre_tramo || idTramo;
+    });
+    const tramosDisplay = tramosNombres.length > 2
+      ? `${tramosNombres.slice(0, 2).join(', ')} +${tramosNombres.length - 2}`
+      : tramosNombres.join(', ') || sol.nombre_tramo || '-';
+
+    const fechaInicio = sol.fecha_inicio ? new Date(sol.fecha_inicio).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }) : '-';
+    const fechaFin = sol.fecha_fin ? new Date(sol.fecha_fin).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }) : '-';
+
+    const icono = getIconoRecurso(sol.id_recurso);
+    const esPendiente = (sol.estado || '').toLowerCase() === 'pendiente';
+
+    return `
+      <div class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow cursor-pointer group"
+           onclick="verDetalleSolicitud('${sol.id_solicitud}')">
+        <div class="flex items-center gap-3">
+          <!-- Icono del recurso -->
+          <div class="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0 group-hover:bg-blue-100 transition-colors">
+            <iconify-icon icon="${escaparHTML(icono)}" class="text-xl text-blue-600"></iconify-icon>
+          </div>
+
+          <!-- Info principal -->
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-semibold text-gray-900 truncate">${escaparHTML(sol.nombre_recurso)}</span>
+              <span class="px-1.5 py-0.5 text-xs font-medium rounded ${config.bg} ${config.text} flex items-center gap-0.5">
+                <iconify-icon icon="${config.icon}" class="text-xs"></iconify-icon>
+                ${escaparHTML(sol.estado)}
+              </span>
+            </div>
+            <div class="text-xs text-gray-500 flex items-center gap-2 mt-0.5 flex-wrap">
+              <span class="flex items-center gap-1">
+                <iconify-icon icon="mdi:account" class="text-sm"></iconify-icon>
+                ${escaparHTML(sol.nombre_usuario)}
+              </span>
+              <span class="text-gray-300">|</span>
+              <span class="font-medium">${escaparHTML(diasFormateados)}</span>
+              <span class="text-gray-300">|</span>
+              <span title="${escaparHTML(tramosNombres.join(', '))}">${escaparHTML(tramosDisplay)}</span>
+              <span class="text-gray-300">|</span>
+              <span>${fechaInicio} → ${fechaFin}</span>
+            </div>
+          </div>
+
+          <!-- Botones -->
+          <div class="flex items-center gap-1 flex-shrink-0" onclick="event.stopPropagation()">
+            ${esPendiente ? `
+              <button onclick="abrirModalGestionarSolicitud('${sol.id_solicitud}')"
+                class="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
+                Gestionar
+              </button>
+            ` : ''}
+            ${(sol.estado || '').toLowerCase() === 'aprobada' ? `
+              <button onclick="abrirModalEditarTramosRecurrencia('${sol.id_solicitud}')"
+                class="px-3 py-1.5 text-xs font-medium text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-200 rounded-lg transition-colors"
+                title="Editar tramos de esta recurrencia">
+                Editar
+              </button>
+              <button onclick="cancelarRecurrenciaAprobada('${sol.id_solicitud}')"
+                class="px-3 py-1.5 text-xs font-medium text-red-600 hover:text-white hover:bg-red-600 border border-red-200 rounded-lg transition-colors">
+                Cancelar
+              </button>
+            ` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+/**
+ * Abre el modal para gestionar (aprobar/rechazar) una solicitud
+ */
+function abrirModalGestionarSolicitud(idSolicitud) {
+  // Buscar en múltiples fuentes de datos
+  let solicitud = AdminState.solicitudesRecurrentes?.find(s => s.id_solicitud === idSolicitud);
+
+  // Si no está en AdminState, buscar en DispState (datos de la matriz)
+  if (!solicitud && DispState.recurrencias) {
+    solicitud = DispState.recurrencias.find(s => s.id_solicitud === idSolicitud);
+  }
+  if (!solicitud && DispState.pendientes) {
+    solicitud = DispState.pendientes.find(s => s.id_solicitud === idSolicitud);
+  }
+  // Buscar también en el historial si está cargado
+  if (!solicitud && typeof datosHistorialRecurrencias !== 'undefined' && datosHistorialRecurrencias) {
+    solicitud = datosHistorialRecurrencias.find(s => s.id_solicitud === idSolicitud);
+  }
+
+  if (!solicitud) {
+    showToast('error', 'Solicitud no encontrada');
+    return;
+  }
+
+  document.getElementById('gestionarSolicitudId').value = idSolicitud;
+  document.getElementById('gestionarSolicitudNotas').value = '';
+  document.getElementById('gestionarSolicitudMotivo').value = '';
+
+  // Mostrar info de la solicitud - Parsear días y tramos
+  const diasSemanaStr = solicitud.dias_semana || '';
+  const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes', 'S': 'Sábado', 'D': 'Domingo' };
+  let diasFormateados = '';
+  let tramosFormateados = '';
+
+  if (diasSemanaStr.includes(':')) {
+    const items = diasSemanaStr.split(',');
+    const diasSet = new Set();
+    const tramosSet = new Set();
+    items.forEach(item => {
+      const [dia, tramo] = item.trim().split(':');
+      if (dia) diasSet.add(dia.toUpperCase());
+      if (tramo) tramosSet.add(tramo);
+    });
+    diasFormateados = Array.from(diasSet).map(d => diasNombres[d] || d).join(', ');
+    const tramosConNombre = Array.from(tramosSet).map(idTramo => {
+      const tramo = AdminState.tramos?.find(t => t.id_tramo === idTramo);
+      return tramo?.nombre_tramo || idTramo;
+    });
+    tramosFormateados = tramosConNombre.join(', ');
+  } else {
+    diasFormateados = diasSemanaStr.split(',').map(d => diasNombres[d.trim().toUpperCase()] || d).join(', ');
+    tramosFormateados = solicitud.nombre_tramo || '-';
+  }
+
+  document.getElementById('gestionarSolicitudInfo').innerHTML = `
+    <div class="space-y-2 text-sm">
+      <p><span class="font-medium text-gray-700">Recurso:</span> ${escaparHTML(solicitud.nombre_recurso)}</p>
+      <p><span class="font-medium text-gray-700">Solicitante:</span> ${escaparHTML(solicitud.nombre_usuario)}</p>
+      <p><span class="font-medium text-gray-700">Días:</span> ${escaparHTML(diasFormateados)}</p>
+      <p><span class="font-medium text-gray-700">Tramos:</span> ${escaparHTML(tramosFormateados)}</p>
+      <p><span class="font-medium text-gray-700">Período:</span> ${new Date(solicitud.fecha_inicio).toLocaleDateString('es-ES')} → ${new Date(solicitud.fecha_fin).toLocaleDateString('es-ES')}</p>
+      <p><span class="font-medium text-gray-700">Motivo:</span> ${escaparHTML(solicitud.motivo)}</p>
+    </div>
+  `;
+
+  const modal = document.getElementById('modalGestionarSolicitud');
+  // Mover modal al body para que el overlay cubra toda la pantalla
+  if (modal.parentElement !== document.body) {
+    document.body.appendChild(modal);
+  }
+  modal.classList.remove('hidden');
+}
+
+function cerrarModalGestionarSolicitud() {
+  const modal = document.getElementById('modalGestionarSolicitud');
+  modal.classList.add('hidden');
+}
+
+/**
+ * Aprueba una solicitud recurrente
+ */
+async function aprobarSolicitudRecurrente() {
+  const idSolicitud = document.getElementById('gestionarSolicitudId').value;
+  const notas = document.getElementById('gestionarSolicitudNotas').value.trim();
+
+  const btnAprobar = document.getElementById('btnAprobarSolicitud');
+  const btnRechazar = document.getElementById('btnRechazarSolicitud');
+  if (!btnAprobar) {
+    showToast('error', 'Error interno: botón no encontrado');
+    return;
+  }
+
+  const textoOriginal = btnAprobar.innerHTML;
+  btnAprobar.disabled = true;
+  if (btnRechazar) btnRechazar.disabled = true;
+  btnAprobar.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>Aprobando...';
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler((res) => resolve(res || { success: false, error: 'Respuesta vacía del servidor' }))
+        .withFailureHandler(reject)
+        .aprobarSolicitudRecurrente(idSolicitud, notas);
+    });
+
+    // Restaurar botones siempre
+    btnAprobar.disabled = false;
+    btnAprobar.innerHTML = textoOriginal;
+    if (btnRechazar) btnRechazar.disabled = false;
+
+    if (result && result.success) {
+      showToast('success', `Solicitud aprobada. Se crearon ${result.reservasCreadas || 0} reservas.`);
+      cerrarModalGestionarSolicitud();
+      await cargarSolicitudesRecurrentes();
+      adminHaCambiadoDatos = true;
+    } else {
+      showToast('error', result?.error || 'Error al aprobar');
+    }
+  } catch (error) {
+    console.error('Error al aprobar:', error);
+    showToast('error', 'Error al aprobar la solicitud: ' + (error.message || error));
+    btnAprobar.disabled = false;
+    btnAprobar.innerHTML = textoOriginal;
+    if (btnRechazar) btnRechazar.disabled = false;
+  }
+}
+
+/**
+ * Rechaza una solicitud recurrente
+ */
+async function rechazarSolicitudRecurrente() {
+  const idSolicitud = document.getElementById('gestionarSolicitudId').value;
+  const motivo = document.getElementById('gestionarSolicitudMotivo').value.trim();
+
+  if (!motivo) {
+    showToast('error', 'Debes indicar un motivo para rechazar');
+    return;
+  }
+
+  const btnRechazar = document.getElementById('btnRechazarSolicitud');
+  if (!btnRechazar) {
+    showToast('error', 'Error interno: botón no encontrado');
+    return;
+  }
+
+  const textoOriginal = btnRechazar.innerHTML;
+  btnRechazar.disabled = true;
+  btnRechazar.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>Rechazando...';
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler((res) => resolve(res || { success: false, error: 'Respuesta vacía del servidor' }))
+        .withFailureHandler(reject)
+        .rechazarSolicitudRecurrente(idSolicitud, motivo);
+    });
+
+    if (result && result.success) {
+      showToast('success', 'Solicitud rechazada correctamente');
+      cerrarModalGestionarSolicitud();
+      await cargarSolicitudesRecurrentes();
+    } else {
+      showToast('error', result?.error || 'Error al rechazar');
+      btnRechazar.disabled = false;
+      btnRechazar.innerHTML = textoOriginal;
+    }
+  } catch (error) {
+    console.error('Error al rechazar:', error);
+    showToast('error', 'Error al rechazar la solicitud: ' + (error.message || error));
+    btnRechazar.disabled = false;
+    btnRechazar.innerHTML = textoOriginal;
+  }
+}
+
+/**
+ * Muestra detalle de una solicitud (histórico)
+ */
+function verDetalleSolicitud(idSolicitud) {
+  const solicitud = AdminState.solicitudesRecurrentes.find(s => s.id_solicitud === idSolicitud);
+  if (!solicitud) {
+    showToast('error', 'Solicitud no encontrada');
+    return;
+  }
+
+  // Parsear días y tramos (soporta formato nuevo "V:T001,L:T002" y antiguo "L,M,X")
+  const diasSemanaStr = solicitud.dias_semana || '';
+  const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes', 'S': 'Sábado', 'D': 'Domingo' };
+  let diasFormateados = '';
+  let tramosFormateados = '';
+
+  if (diasSemanaStr.includes(':')) {
+    // Formato nuevo: "V:T001,V:T002,L:T001"
+    const items = diasSemanaStr.split(',');
+    const diasSet = new Set();
+    const tramosSet = new Set();
+    items.forEach(item => {
+      const [dia, tramo] = item.trim().split(':');
+      if (dia) diasSet.add(dia.toUpperCase());
+      if (tramo) tramosSet.add(tramo);
+    });
+    diasFormateados = Array.from(diasSet).map(d => diasNombres[d] || d).join(', ');
+
+    // Buscar nombres de tramos
+    const tramosConNombre = Array.from(tramosSet).map(idTramo => {
+      const tramo = AdminState.tramos?.find(t => t.id_tramo === idTramo);
+      return tramo?.nombre_tramo || idTramo;
+    });
+    tramosFormateados = tramosConNombre.join(', ');
+  } else {
+    // Formato antiguo: "L,M,X"
+    diasFormateados = diasSemanaStr.split(',').map(d => diasNombres[d.trim().toUpperCase()] || d).join(', ');
+    tramosFormateados = solicitud.nombre_tramo || '-';
+  }
+
+  const estadoClasses = {
+    'pendiente': 'text-amber-600',
+    'aprobada': 'text-green-600',
+    'rechazada': 'text-red-600'
+  };
+  const estadoClass = estadoClasses[(solicitud.estado || '').toLowerCase()] || 'text-gray-600';
+
+  let html = `
+    <div class="space-y-3">
+      <div class="flex items-center gap-2">
+        <span class="font-bold text-lg">${escaparHTML(solicitud.nombre_recurso)}</span>
+        <span class="font-semibold ${estadoClass}">(${escaparHTML(solicitud.estado)})</span>
+      </div>
+      <hr>
+      <p><strong>ID:</strong> ${escaparHTML(solicitud.id_solicitud)}</p>
+      <p><strong>Solicitante:</strong> ${escaparHTML(solicitud.nombre_usuario)} (${escaparHTML(solicitud.email_usuario)})</p>
+      <p><strong>Días:</strong> ${escaparHTML(diasFormateados)}</p>
+      <p><strong>Tramos:</strong> ${escaparHTML(tramosFormateados)}</p>
+      <p><strong>Período:</strong> ${new Date(solicitud.fecha_inicio).toLocaleDateString('es-ES')} → ${new Date(solicitud.fecha_fin).toLocaleDateString('es-ES')}</p>
+      <p><strong>Motivo:</strong> ${escaparHTML(solicitud.motivo || 'No especificado')}</p>
+      <p><strong>Fecha solicitud:</strong> ${new Date(solicitud.fecha_solicitud).toLocaleString('es-ES')}</p>
+      ${solicitud.fecha_resolucion ? `<p><strong>Fecha resolución:</strong> ${new Date(solicitud.fecha_resolucion).toLocaleString('es-ES')}</p>` : ''}
+      ${solicitud.admin_resolutor ? `<p><strong>Gestionado por:</strong> ${escaparHTML(solicitud.admin_resolutor)}</p>` : ''}
+      ${solicitud.notas_admin ? `<p><strong>Notas admin:</strong> ${escaparHTML(solicitud.notas_admin)}</p>` : ''}
+    </div>
+  `;
+
+  // Usar un modal simple o alert
+  const modal = document.createElement('div');
+  modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4';
+  modal.innerHTML = `
+    <div class="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 max-h-[80vh] overflow-y-auto">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-lg font-bold text-gray-900">Detalle de Solicitud</h3>
+        <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-gray-600">
+          <iconify-icon icon="mdi:close" class="text-xl"></iconify-icon>
+        </button>
+      </div>
+      ${html}
+      <div class="mt-6 text-right">
+        <button onclick="this.closest('.fixed').remove()"
+          class="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg">
+          Cerrar
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+/**
+ * Abre modal para crear reserva recurrente directa (admin)
+ */
+// Variables para calendario de recurrente admin
+let seleccionesRecurrenteAdmin = new Set();
+let conflictosRecurrenteAdmin = { recurrenciasOcupadas: [], nodisponibles: [] };
+const DIAS_RECURRENTES_ADMIN = ['L', 'M', 'X', 'J', 'V'];
+
+/**
+ * Carga los conflictos para un recurso específico
+ */
+async function cargarConflictosRecurso(idRecurso) {
+  const spinnerAdmin = document.getElementById('spinnerConflictosAdmin');
+
+  if (!idRecurso) {
+    conflictosRecurrenteAdmin = { recurrenciasOcupadas: [], nodisponibles: [] };
+    generarMatrizRecurrenteAdmin();
+    return;
+  }
+
+  // Mostrar spinner
+  if (spinnerAdmin) spinnerAdmin.classList.remove('hidden');
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .getConflictosRecurrencia(idRecurso);
+    });
+
+    if (result && result.success) {
+      conflictosRecurrenteAdmin = {
+        recurrenciasOcupadas: result.recurrenciasOcupadas || [],
+        nodisponibles: result.nodisponibles || []
+      };
+    } else {
+      conflictosRecurrenteAdmin = { recurrenciasOcupadas: [], nodisponibles: [] };
+    }
+  } catch (error) {
+    console.error('Error cargando conflictos:', error);
+    conflictosRecurrenteAdmin = { recurrenciasOcupadas: [], nodisponibles: [] };
+  }
+
+  // Ocultar spinner
+  if (spinnerAdmin) spinnerAdmin.classList.add('hidden');
+
+  // Limpiar selecciones previas y regenerar matriz
+  seleccionesRecurrenteAdmin.clear();
+  generarMatrizRecurrenteAdmin();
+  actualizarContadorRecurrenteAdmin();
+}
+
+function abrirModalRecurrenteDirecta() {
+  // Resetear selecciones
+  seleccionesRecurrenteAdmin.clear();
+
+  // Poblar selector de recursos
+  const selectRecurso = document.getElementById('recDirectaRecurso');
+  selectRecurso.innerHTML = '<option value="">Selecciona un recurso</option>';
+  (AdminState.recursos || []).forEach(r => {
+    if (r.estado === 'Activo') {
+      selectRecurso.innerHTML += `<option value="${r.id_recurso}">${escaparHTML(r.nombre)}</option>`;
+    }
+  });
+
+  // Listener para cargar conflictos al cambiar recurso
+  selectRecurso.onchange = function() {
+    cargarConflictosRecurso(this.value);
+  };
+
+  // Resetear conflictos
+  conflictosRecurrenteAdmin = { recurrenciasOcupadas: [], nodisponibles: [] };
+
+  // Poblar selector de usuarios (campos: Nombre, Email, Activo, Admin)
+  const selectUsuario = document.getElementById('recDirectaUsuario');
+  selectUsuario.innerHTML = '<option value="">Selecciona un usuario</option>';
+  const usuariosActivos = (AdminState.usuarios || []).filter(u => {
+    const activo = u.Activo ?? u.activo;
+    return activo === true || activo === 'TRUE' || activo === 'true' || activo === 'Sí' || activo === 'Si';
+  });
+  usuariosActivos.forEach(u => {
+    const email = u.Email || u.email_usuario || u.email || '';
+    const nombre = u.Nombre || u.nombre_completo || u.nombre || email;
+    selectUsuario.innerHTML += `<option value="${escaparHTML(email)}">${escaparHTML(nombre)} (${escaparHTML(email)})</option>`;
+  });
+
+  // Generar matriz del calendario
+  generarMatrizRecurrenteAdmin();
+
+  // Configurar opciones de fecha fin
+  const radioFinCurso = document.querySelector('input[name="recDirectaTipoFin"][value="finCurso"]');
+  if (radioFinCurso) radioFinCurso.checked = true;
+  document.getElementById('recDirectaFechaFinContainer').classList.add('hidden');
+
+  const fechaInput = document.getElementById('recDirectaFechaFin');
+  if (fechaInput) {
+    const hoy = new Date().toISOString().split('T')[0];
+    fechaInput.min = hoy;
+    fechaInput.value = '';
+  }
+
+  // Listeners para radios de fecha
+  document.querySelectorAll('input[name="recDirectaTipoFin"]').forEach(radio => {
+    radio.onchange = function() {
+      const container = document.getElementById('recDirectaFechaFinContainer');
+      if (this.value === 'fecha') {
+        container.classList.remove('hidden');
+      } else {
+        container.classList.add('hidden');
+      }
+    };
+  });
+
+  // Resetear otros campos
+  document.getElementById('recDirectaNotas').value = '';
+  actualizarContadorRecurrenteAdmin();
+
+  // Mover modal al body y mostrar
+  const modal = document.getElementById('modalRecurrenteDirecta');
+  if (modal.parentElement !== document.body) {
+    document.body.appendChild(modal);
+  }
+  modal.classList.remove('hidden');
+}
+
+function cerrarModalRecurrenteDirecta() {
+  document.getElementById('modalRecurrenteDirecta').classList.add('hidden');
+}
+
+/**
+ * Genera la matriz del calendario semanal para admin
+ */
+function generarMatrizRecurrenteAdmin() {
+  const tbody = document.getElementById('cuerpoMatrizRecurrenteAdmin');
+  if (!tbody || !AdminState.tramos) return;
+
+  tbody.innerHTML = '';
+
+  // Ordenar tramos por hora de inicio
+  const tramosOrdenados = [...AdminState.tramos].sort((a, b) =>
+    (a.hora_inicio || '').localeCompare(b.hora_inicio || '')
+  );
+
+  tramosOrdenados.forEach(tramo => {
+    const tr = document.createElement('tr');
+    tr.className = 'hover:bg-gray-50/50';
+
+    // Celda del tramo
+    tr.innerHTML = `
+      <td class="px-2 py-1.5 border-r border-gray-200 bg-gray-50">
+        <div class="text-xs font-bold text-gray-700">${escaparHTML(tramo.nombre_tramo)}</div>
+        <div class="text-[10px] text-gray-400">${tramo.hora_inicio} - ${tramo.hora_fin}</div>
+      </td>
+    `;
+
+    // Celdas de días
+    DIAS_RECURRENTES_ADMIN.forEach(dia => {
+      const td = document.createElement('td');
+      const celdaId = `${tramo.id_tramo}-${dia}`;
+      td.id = `celda-rec-admin-${celdaId}`;
+
+      // Verificar si está ocupada por recurrencia
+      const ocupadaPor = conflictosRecurrenteAdmin.recurrenciasOcupadas.find(
+        c => c.dia === dia && c.tramo === tramo.id_tramo
+      );
+
+      // Verificar si no está disponible
+      const noDisponible = conflictosRecurrenteAdmin.nodisponibles.find(
+        c => c.dia === dia && c.tramo === tramo.id_tramo
+      );
+
+      if (ocupadaPor) {
+        // Celda ocupada por otra recurrencia (ROJO)
+        td.className = 'p-1 border border-red-200 h-10 text-center bg-red-100 cursor-not-allowed';
+        td.innerHTML = `<div class="w-full h-full flex items-center justify-center" title="Ocupado por: ${escaparHTML(ocupadaPor.usuario)}">
+          <iconify-icon icon="mdi:account-clock" class="text-red-500 text-sm"></iconify-icon>
+        </div>`;
+        td.title = `Ocupado por: ${ocupadaPor.usuario}`;
+      } else if (noDisponible) {
+        // Celda no disponible (GRIS)
+        td.className = 'p-1 border border-gray-200 h-10 text-center bg-gray-200 cursor-not-allowed';
+        td.innerHTML = `<div class="w-full h-full flex items-center justify-center" title="${escaparHTML(noDisponible.razon || 'No disponible')}">
+          <iconify-icon icon="mdi:block-helper" class="text-gray-400 text-sm"></iconify-icon>
+        </div>`;
+        td.title = noDisponible.razon || 'No disponible';
+      } else {
+        // Celda disponible (normal)
+        td.className = 'p-1 border border-gray-100 h-10 text-center transition-all duration-200 cursor-pointer hover:bg-blue-50';
+        td.innerHTML = `<div class="w-full h-full flex items-center justify-center"></div>`;
+        td.onclick = () => toggleCeldaRecurrenteAdmin(tramo.id_tramo, dia);
+      }
+
+      tr.appendChild(td);
+    });
+
+    tbody.appendChild(tr);
+  });
+}
+
+/**
+ * Toggle selección de celda
+ */
+function toggleCeldaRecurrenteAdmin(idTramo, dia) {
+  const celdaId = `${idTramo}-${dia}`;
+  const celda = document.getElementById(`celda-rec-admin-${celdaId}`);
+  if (!celda) return;
+
+  // Verificar que no esté bloqueada
+  const ocupada = conflictosRecurrenteAdmin.recurrenciasOcupadas.find(
+    c => c.dia === dia && c.tramo === idTramo
+  );
+  const noDisponible = conflictosRecurrenteAdmin.nodisponibles.find(
+    c => c.dia === dia && c.tramo === idTramo
+  );
+
+  if (ocupada || noDisponible) {
+    // No permitir seleccionar celdas bloqueadas
+    return;
+  }
+
+  if (seleccionesRecurrenteAdmin.has(celdaId)) {
+    seleccionesRecurrenteAdmin.delete(celdaId);
+    celda.className = 'p-1 border border-gray-100 h-10 text-center transition-all duration-200 cursor-pointer hover:bg-blue-50';
+    celda.innerHTML = `<div class="w-full h-full flex items-center justify-center"></div>`;
+  } else {
+    seleccionesRecurrenteAdmin.add(celdaId);
+    celda.className = 'p-1 border border-blue-300 h-10 text-center transition-all duration-200 cursor-pointer bg-blue-500';
+    celda.innerHTML = `<div class="w-full h-full flex items-center justify-center"><iconify-icon icon="mdi:check" class="text-white text-lg"></iconify-icon></div>`;
+  }
+
+  actualizarContadorRecurrenteAdmin();
+}
+
+/**
+ * Actualiza el contador de selecciones
+ */
+function actualizarContadorRecurrenteAdmin() {
+  const contador = document.getElementById('contadorSeleccionRecurrenteAdmin');
+  if (!contador) return;
+
+  const num = seleccionesRecurrenteAdmin.size;
+  contador.textContent = num === 0 ? '0 tramos seleccionados' :
+    num === 1 ? '1 tramo seleccionado' : `${num} tramos seleccionados`;
+  contador.className = num > 0 ?
+    'mt-2 text-center text-xs font-medium text-blue-600' :
+    'mt-2 text-center text-xs text-gray-500';
+}
+
+/**
+ * Guarda una reserva recurrente directa (sin solicitud previa)
+ */
+async function guardarRecurrenteDirecta() {
+  const recurso = document.getElementById('recDirectaRecurso').value;
+  const usuario = document.getElementById('recDirectaUsuario').value;
+  const notas = document.getElementById('recDirectaNotas').value.trim();
+
+  // Obtener selecciones del calendario (formato: "L:T001,M:T002")
+  const seleccionesArray = Array.from(seleccionesRecurrenteAdmin).map(sel => {
+    const [idTramo, dia] = sel.split('-');
+    return `${dia}:${idTramo}`;
+  });
+
+  // Determinar fecha fin
+  const tipoFin = document.querySelector('input[name="recDirectaTipoFin"]:checked')?.value;
+  let fechaFin = '';
+  if (tipoFin === 'fecha') {
+    fechaFin = document.getElementById('recDirectaFechaFin').value;
+    if (!fechaFin) return showToast('error', 'Indica la fecha de fin');
+  } else {
+    // Fin de curso - usar fecha de la config o 30 junio
+    const config = AdminState.config || [];
+    const finCursoConfig = config.find(c => c.clave === 'FECHA_FIN_CURSO');
+    fechaFin = finCursoConfig?.valor || `${new Date().getFullYear()}-06-30`;
+  }
+
+  // Validaciones
+  if (!recurso) return showToast('error', 'Selecciona un recurso');
+  if (!usuario) return showToast('error', 'Selecciona un usuario');
+  if (seleccionesArray.length === 0) return showToast('error', 'Selecciona al menos un tramo en el calendario');
+
+  const btn = document.getElementById('btnGuardarRecurrenteDirecta');
+  const textoOriginal = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>Generando...';
+
+  try {
+    const datos = {
+      id_recurso: recurso,
+      email_usuario: usuario,
+      dias_semana: seleccionesArray.join(','), // Formato: "L:T001,M:T002"
+      fecha_inicio: new Date().toISOString().split('T')[0], // Siempre desde hoy
+      fecha_fin: fechaFin,
+      notas_admin: notas
+    };
+
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler((res) => resolve(res || { success: false, error: 'Respuesta vacía' }))
+        .withFailureHandler(reject)
+        .crearRecurrenteDirecta(datos);
+    });
+
+    btn.disabled = false;
+    btn.innerHTML = textoOriginal;
+
+    if (result && result.success) {
+      showToast('success', `Reservas generadas: ${result.reservasCreadas || result.reservasGeneradas || 0}`);
+      cerrarModalRecurrenteDirecta();
+      await cargarSolicitudesRecurrentes();
+      adminHaCambiadoDatos = true;
+    } else {
+      showToast('error', result?.error || 'Error al crear reservas');
+    }
+  } catch (error) {
+    console.error('Error al crear recurrente directa:', error);
+    showToast('error', 'Error: ' + (error.message || error));
+    btn.disabled = false;
+    btn.innerHTML = textoOriginal;
+  }
+}
+
+/* =========================================================
+   9.3. MODAL HISTORIAL DE RECURRENCIAS
+   ========================================================= */
+
+let filtroHistorialActual = 'todas';
+let datosHistorialRecurrencias = [];
+
+/**
+ * Alias para abrir modal de nueva recurrente
+ */
+function abrirModalNuevaRecurrenteAdmin() {
+  abrirModalRecurrenteDirecta();
+}
+
+/**
+ * Abre el modal de historial de recurrencias
+ */
+async function abrirModalHistorialRecurrencias() {
+  const modal = document.getElementById('modalHistorialRecurrencias');
+  if (!modal) return;
+
+  // FIX: Mover al body si está atrapado dentro de otro contenedor
+  if (modal.parentNode !== document.body) {
+    document.body.appendChild(modal);
+  }
+
+  modal.classList.remove('hidden');
+
+  // Mostrar loading
+  document.getElementById('listaHistorialRecurrencias').innerHTML = `
+    <div class="text-center py-8 text-gray-400">
+      <iconify-icon icon="mdi:loading" class="text-3xl animate-spin"></iconify-icon>
+      <p class="mt-2 text-sm">Cargando historial...</p>
+    </div>
+  `;
+
+  // Resetear filtros
+  filtroHistorialActual = 'todas';
+  document.getElementById('busquedaHistorial').value = '';
+  actualizarBotonesFiltroHistorial();
+
+  try {
+    // Cargar solicitudes del backend
+    const result = await new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .getSolicitudesRecurrentes();
+    });
+
+    if (result && result.success) {
+      datosHistorialRecurrencias = result.solicitudes || [];
+      renderizarHistorialRecurrencias();
+    } else {
+      document.getElementById('listaHistorialRecurrencias').innerHTML = `
+        <div class="text-center py-8 text-red-400">
+          <iconify-icon icon="mdi:alert-circle" class="text-3xl"></iconify-icon>
+          <p class="mt-2 text-sm">${result?.error || 'Error al cargar'}</p>
+        </div>
+      `;
+    }
+  } catch (error) {
+    console.error('Error cargando historial:', error);
+    document.getElementById('listaHistorialRecurrencias').innerHTML = `
+      <div class="text-center py-8 text-red-400">
+        <iconify-icon icon="mdi:alert-circle" class="text-3xl"></iconify-icon>
+        <p class="mt-2 text-sm">Error: ${error.message || String(error)}</p>
+      </div>
+    `;
+  }
+}
+
+function cerrarModalHistorialRecurrencias() {
+  const modal = document.getElementById('modalHistorialRecurrencias');
+  if (modal) modal.classList.add('hidden');
+}
+
+function setFiltroHistorial(filtro) {
+  filtroHistorialActual = filtro;
+  actualizarBotonesFiltroHistorial();
+  renderizarHistorialRecurrencias();
+}
+
+function actualizarBotonesFiltroHistorial() {
+  document.querySelectorAll('.filtro-historial').forEach(btn => {
+    const esFiltroActivo = btn.dataset.filtro === filtroHistorialActual;
+    btn.className = `filtro-historial px-3 py-1.5 text-xs font-medium rounded-lg ${
+      esFiltroActivo ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+    }`;
+  });
+}
+
+function filtrarHistorialRecurrencias() {
+  renderizarHistorialRecurrencias();
+}
+
+function renderizarHistorialRecurrencias() {
+  const container = document.getElementById('listaHistorialRecurrencias');
+  if (!container) return;
+
+  let solicitudes = [...datosHistorialRecurrencias];
+
+  // Filtrar por estado adicional si hay filtro activo
+  if (filtroHistorialActual !== 'todas') {
+    solicitudes = solicitudes.filter(s =>
+      (s.estado || '').toLowerCase() === filtroHistorialActual.toLowerCase()
+    );
+  }
+
+  // Filtrar por búsqueda
+  const busqueda = (document.getElementById('busquedaHistorial')?.value || '').toLowerCase();
+  if (busqueda) {
+    solicitudes = solicitudes.filter(s => {
+      const texto = [s.nombre_recurso, s.nombre_usuario, s.email_usuario, s.motivo].filter(Boolean).join(' ').toLowerCase();
+      return texto.includes(busqueda);
+    });
+  }
+
+  // Ordenar por fecha (más recientes primero)
+  solicitudes.sort((a, b) => new Date(b.fecha_solicitud) - new Date(a.fecha_solicitud));
+
+  if (solicitudes.length === 0) {
+    container.innerHTML = `
+      <div class="text-center py-8 text-gray-400">
+        <iconify-icon icon="mdi:calendar-blank" class="text-3xl"></iconify-icon>
+        <p class="mt-2 text-sm">${busqueda ? 'No se encontraron resultados' : 'No hay solicitudes'}</p>
+      </div>
+    `;
+    return;
+  }
+
+  const estadoConfig = {
+    'pendiente': { bg: 'bg-amber-100', text: 'text-amber-800', icon: 'mdi:clock-outline' },
+    'aprobada': { bg: 'bg-green-100', text: 'text-green-800', icon: 'mdi:check-circle' },
+    'rechazada': { bg: 'bg-red-100', text: 'text-red-800', icon: 'mdi:close-circle' },
+    'cancelada': { bg: 'bg-gray-100', text: 'text-gray-600', icon: 'mdi:cancel' }
+  };
+
+  // Helper para obtener nombre corto del tramo
+  const getNombreTramoCorto = (idTramo) => {
+    const tramo = AdminState.tramos?.find(t => t.id_tramo === idTramo);
+    return tramo?.Nombre_Tramo || tramo?.nombre_tramo || idTramo;
+  };
+
+  container.innerHTML = solicitudes.map(sol => {
+    const config = estadoConfig[(sol.estado || '').toLowerCase()] || { bg: 'bg-gray-100', text: 'text-gray-800', icon: 'mdi:help-circle' };
+
+    // Parsear días y tramos - formato: "L:T001,L:T002,M:T001" -> "L: 1ª Hora, 2ª Hora | M: 1ª Hora"
+    const diasStr = sol.dias_semana || '';
+    let diasTramosDisplay = '';
+
+    if (diasStr.includes(':')) {
+      // Agrupar tramos por día
+      const diasTramos = {};
+      const ordenDias = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+
+      diasStr.split(',').forEach(item => {
+        const [dia, tramo] = item.trim().split(':');
+        if (dia && tramo) {
+          const diaUpper = dia.toUpperCase();
+          if (!diasTramos[diaUpper]) diasTramos[diaUpper] = [];
+          diasTramos[diaUpper].push(tramo);
+        }
+      });
+
+      // Formatear como "L: 1ª Hora, 2ª Hora | M: 3ª Hora"
+      diasTramosDisplay = ordenDias
+        .filter(d => diasTramos[d])
+        .map(dia => {
+          const tramosNombres = diasTramos[dia].map(getNombreTramoCorto).join(', ');
+          return `${dia}: ${tramosNombres}`;
+        })
+        .join(' | ');
+    } else {
+      // Formato antiguo: solo días, tramo único
+      const dias = diasStr.split(',').map(d => d.trim().toUpperCase()).filter(Boolean);
+      const tramoNombre = sol.nombre_tramo || getNombreTramoCorto(sol.id_tramo) || '';
+      if (tramoNombre) {
+        diasTramosDisplay = dias.map(d => `${d}: ${tramoNombre}`).join(' | ');
+      } else {
+        diasTramosDisplay = dias.join(' · ');
+      }
+    }
+
+    // Formatear fechas
+    const fechaInicio = sol.fecha_inicio ? new Date(sol.fecha_inicio).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '';
+    const fechaFin = sol.fecha_fin ? new Date(sol.fecha_fin).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '';
+
+    // Icono del recurso
+    const recurso = AdminState.recursos?.find(r => r.id_recurso === sol.id_recurso);
+    const iconoRecurso = recurso?.icono || 'mdi:cube-outline';
+
+    return `
+      <div class="px-6 py-4 border-b border-gray-100 hover:bg-gray-50/50 transition-colors flex items-center gap-4 cursor-pointer"
+           onclick="abrirDetalleDesdeHistorial('${sol.id_solicitud}')">
+        <div class="p-2 rounded-lg bg-gray-100 text-gray-600 shrink-0">
+          <iconify-icon icon="${iconoRecurso}" class="text-xl"></iconify-icon>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-semibold text-gray-800 text-sm truncate">${escaparHTML(sol.nombre_recurso)}</span>
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${config.bg} ${config.text}">
+              <iconify-icon icon="${config.icon}"></iconify-icon>
+              ${escaparHTML(sol.estado)}
+            </span>
+          </div>
+          <div class="text-xs text-gray-500 mt-0.5">
+            <span class="font-medium">${escaparHTML(sol.nombre_usuario)}</span>
+            <span class="mx-1">·</span>
+            <span>${escaparHTML(diasTramosDisplay)}</span>
+          </div>
+          <div class="text-xs text-gray-400 mt-0.5">
+            ${fechaInicio} → ${fechaFin}
+          </div>
+        </div>
+        <button onclick="event.stopPropagation(); abrirDetalleDesdeHistorial('${sol.id_solicitud}')"
+          class="p-2 hover:bg-gray-200 rounded-lg transition-colors shrink-0" title="${(sol.estado || '').toLowerCase() === 'pendiente' ? 'Gestionar' : 'Ver detalles'}">
+          <iconify-icon icon="${(sol.estado || '').toLowerCase() === 'pendiente' ? 'mdi:pencil-outline' : 'mdi:eye-outline'}" class="text-gray-500"></iconify-icon>
+        </button>
+      </div>
+    `;
+  }).join('');
+}
+
+// Función auxiliar para abrir el modal correcto desde el historial
+function abrirDetalleDesdeHistorial(idSolicitud) {
+  // Buscar la solicitud en los datos del historial
+  const sol = datosHistorialRecurrencias.find(s => s.id_solicitud === idSolicitud);
+  if (!sol) {
+    console.error('Solicitud no encontrada en historial:', idSolicitud);
+    mostrarToast('Solicitud no encontrada', 'error');
+    return;
+  }
+
+  const estado = (sol.estado || '').toLowerCase();
+  if (estado === 'aprobada') {
+    // Usar el modal de detalle de recurrencia activa
+    abrirModalDetalleRecurrencia(sol);
+  } else if (estado === 'rechazada') {
+    // Para rechazadas, mostrar modal de solo lectura
+    abrirModalDetalleRecurrenciaRechazada(sol);
+  } else if (estado === 'cancelada') {
+    // Para canceladas/revocadas, mostrar modal de solo lectura
+    abrirModalDetalleRecurrenciaCancelada(sol);
+  } else {
+    // Solo para pendientes, usar el modal de gestión
+    abrirModalGestionarSolicitud(idSolicitud);
+  }
+}
+
+/**
+ * Abre el modal de detalle para recurrencias rechazadas (solo lectura)
+ */
+function abrirModalDetalleRecurrenciaRechazada(rec) {
+  // Construir contenido del modal
+  const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miercoles', 'J': 'Jueves', 'V': 'Viernes', 'S': 'Sabado', 'D': 'Domingo' };
+  const diasStr = rec.dias_semana || '';
+  let diasFormateados = '';
+  let tramosFormateados = '';
+
+  const getNombreTramo = (idTramo) => {
+    const tramo = AdminState.tramos?.find(t => t.id_tramo === idTramo);
+    return tramo?.Nombre_Tramo || tramo?.nombre_tramo || idTramo;
+  };
+
+  if (diasStr.includes(':')) {
+    const items = diasStr.split(',');
+    const diasSet = new Set();
+    const tramosSet = new Set();
+    items.forEach(item => {
+      const [dia, tramo] = item.trim().split(':');
+      if (dia) diasSet.add(dia.toUpperCase());
+      if (tramo) tramosSet.add(tramo);
+    });
+    diasFormateados = Array.from(diasSet).map(d => diasNombres[d] || d).join(', ');
+    tramosFormateados = Array.from(tramosSet).map(getNombreTramo).join(', ');
+  } else {
+    diasFormateados = diasStr.split(',').map(d => diasNombres[d.trim().toUpperCase()] || d).join(', ');
+    tramosFormateados = rec.nombre_tramo || getNombreTramo(rec.id_tramo);
+  }
+
+  // Obtener nombre del recurso
+  const recurso = AdminState.recursos?.find(r => r.id_recurso === rec.id_recurso);
+  const nombreRecurso = rec.nombre_recurso || recurso?.nombre || '';
+
+  const fechaInicio = rec.fecha_inicio ? new Date(rec.fecha_inicio).toLocaleDateString('es-ES') : '-';
+  const fechaFin = rec.fecha_fin ? new Date(rec.fecha_fin).toLocaleDateString('es-ES') : '-';
+
+  const modalHTML = `
+    <div id="modalDetalleRecurrenciaRechazada" class="fixed inset-0 z-[10100] flex items-center justify-center p-4">
+      <div class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm" onclick="cerrarModalDetalleRecurrenciaRechazada()"></div>
+      <div class="relative bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-fade-in-up">
+        <!-- Header -->
+        <div class="bg-red-50 px-6 py-4 flex items-center justify-between border-b border-red-100">
+          <div class="flex items-center gap-3">
+            <div class="flex h-10 w-10 items-center justify-center rounded-full bg-red-100">
+              <iconify-icon icon="mdi:close-circle" class="text-xl text-red-600"></iconify-icon>
+            </div>
+            <div>
+              <h3 class="text-lg font-semibold text-gray-900">Solicitud Rechazada</h3>
+              <p class="text-sm text-red-600">${escaparHTML(nombreRecurso)}</p>
+            </div>
+          </div>
+          <button onclick="cerrarModalDetalleRecurrenciaRechazada()" class="p-2 hover:bg-red-100 rounded-full transition-colors">
+            <iconify-icon icon="mdi:close" class="text-xl text-gray-500"></iconify-icon>
+          </button>
+        </div>
+
+        <!-- Contenido -->
+        <div class="px-6 py-5 space-y-4">
+          <div class="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+            <p><span class="font-medium text-gray-700">Usuario:</span> ${escaparHTML(rec.nombre_usuario)}</p>
+            <p><span class="font-medium text-gray-700">Email:</span> ${escaparHTML(rec.email_usuario)}</p>
+            ${rec.area_usuario ? `<p><span class="font-medium text-gray-700">Area:</span> ${escaparHTML(rec.area_usuario)}</p>` : ''}
+            <p><span class="font-medium text-gray-700">Dias:</span> ${escaparHTML(diasFormateados)}</p>
+            <p><span class="font-medium text-gray-700">Tramos:</span> ${escaparHTML(tramosFormateados)}</p>
+            <p><span class="font-medium text-gray-700">Periodo:</span> ${fechaInicio} → ${fechaFin}</p>
+          </div>
+
+          ${rec.motivo ? `
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+              <iconify-icon icon="mdi:text-box-outline" class="text-base"></iconify-icon>
+              Motivo de la solicitud
+            </label>
+            <div class="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-600">
+              ${escaparHTML(rec.motivo)}
+            </div>
+          </div>
+          ` : ''}
+
+          ${rec.motivo_rechazo ? `
+          <div>
+            <label class="block text-sm font-medium text-red-700 mb-2 flex items-center gap-1">
+              <iconify-icon icon="mdi:alert-circle-outline" class="text-base"></iconify-icon>
+              Motivo del rechazo
+            </label>
+            <div class="w-full px-3 py-2 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+              ${escaparHTML(rec.motivo_rechazo)}
+            </div>
+          </div>
+          ` : ''}
+        </div>
+
+        <!-- Footer -->
+        <div class="bg-gray-50 px-6 py-4 border-t border-gray-100">
+          <button onclick="cerrarModalDetalleRecurrenciaRechazada()"
+            class="w-full px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors">
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Eliminar modal anterior si existe
+  const modalExistente = document.getElementById('modalDetalleRecurrenciaRechazada');
+  if (modalExistente) modalExistente.remove();
+
+  // Insertar y mostrar
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function cerrarModalDetalleRecurrenciaRechazada() {
+  const modal = document.getElementById('modalDetalleRecurrenciaRechazada');
+  if (modal) modal.remove();
+}
+
+/**
+ * Abre el modal de detalle para recurrencias canceladas/revocadas (solo lectura)
+ */
+function abrirModalDetalleRecurrenciaCancelada(rec) {
+  // Construir contenido del modal
+  const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miercoles', 'J': 'Jueves', 'V': 'Viernes', 'S': 'Sabado', 'D': 'Domingo' };
+  const diasStr = rec.dias_semana || '';
+  let diasFormateados = '';
+  let tramosFormateados = '';
+
+  const getNombreTramo = (idTramo) => {
+    const tramo = AdminState.tramos?.find(t => t.id_tramo === idTramo);
+    return tramo?.Nombre_Tramo || tramo?.nombre_tramo || idTramo;
+  };
+
+  if (diasStr.includes(':')) {
+    const items = diasStr.split(',');
+    const diasSet = new Set();
+    const tramosSet = new Set();
+    items.forEach(item => {
+      const [dia, tramo] = item.trim().split(':');
+      if (dia) diasSet.add(dia.toUpperCase());
+      if (tramo) tramosSet.add(tramo);
+    });
+    diasFormateados = Array.from(diasSet).map(d => diasNombres[d] || d).join(', ');
+    tramosFormateados = Array.from(tramosSet).map(getNombreTramo).join(', ');
+  } else {
+    diasFormateados = diasStr.split(',').map(d => diasNombres[d.trim().toUpperCase()] || d).join(', ');
+    tramosFormateados = rec.nombre_tramo || getNombreTramo(rec.id_tramo);
+  }
+
+  // Obtener nombre del recurso
+  const recurso = AdminState.recursos?.find(r => r.id_recurso === rec.id_recurso);
+  const nombreRecurso = rec.nombre_recurso || recurso?.nombre || '';
+
+  const fechaInicio = rec.fecha_inicio ? new Date(rec.fecha_inicio).toLocaleDateString('es-ES') : '-';
+  const fechaFin = rec.fecha_fin ? new Date(rec.fecha_fin).toLocaleDateString('es-ES') : '-';
+
+  const modalHTML = `
+    <div id="modalDetalleRecurrenciaCancelada" class="fixed inset-0 z-[10100] flex items-center justify-center p-4">
+      <div class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm" onclick="cerrarModalDetalleRecurrenciaCancelada()"></div>
+      <div class="relative bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-fade-in-up">
+        <!-- Header -->
+        <div class="bg-gray-100 px-6 py-4 flex items-center justify-between border-b border-gray-200">
+          <div class="flex items-center gap-3">
+            <div class="flex h-10 w-10 items-center justify-center rounded-full bg-gray-200">
+              <iconify-icon icon="mdi:cancel" class="text-xl text-gray-600"></iconify-icon>
+            </div>
+            <div>
+              <h3 class="text-lg font-semibold text-gray-900">Recurrencia Revocada</h3>
+              <p class="text-sm text-gray-600">${escaparHTML(nombreRecurso)}</p>
+            </div>
+          </div>
+          <button onclick="cerrarModalDetalleRecurrenciaCancelada()" class="p-2 hover:bg-gray-200 rounded-full transition-colors">
+            <iconify-icon icon="mdi:close" class="text-xl text-gray-500"></iconify-icon>
+          </button>
+        </div>
+
+        <!-- Contenido -->
+        <div class="px-6 py-5 space-y-4">
+          <div class="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+            <p><span class="font-medium text-gray-700">Usuario:</span> ${escaparHTML(rec.nombre_usuario)}</p>
+            <p><span class="font-medium text-gray-700">Email:</span> ${escaparHTML(rec.email_usuario)}</p>
+            ${rec.area_usuario ? `<p><span class="font-medium text-gray-700">Area:</span> ${escaparHTML(rec.area_usuario)}</p>` : ''}
+            <p><span class="font-medium text-gray-700">Dias:</span> ${escaparHTML(diasFormateados)}</p>
+            <p><span class="font-medium text-gray-700">Tramos:</span> ${escaparHTML(tramosFormateados)}</p>
+            <p><span class="font-medium text-gray-700">Periodo:</span> ${fechaInicio} → ${fechaFin}</p>
+          </div>
+
+          ${rec.motivo ? `
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+              <iconify-icon icon="mdi:text-box-outline" class="text-base"></iconify-icon>
+              Motivo de la solicitud
+            </label>
+            <div class="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-600">
+              ${escaparHTML(rec.motivo)}
+            </div>
+          </div>
+          ` : ''}
+
+          <div class="bg-gray-100 rounded-xl p-4 border border-gray-200">
+            <div class="flex items-center gap-2 text-gray-600">
+              <iconify-icon icon="mdi:information-outline" class="text-lg"></iconify-icon>
+              <span class="text-sm font-medium">Esta recurrencia fue revocada por un administrador</span>
+            </div>
+            ${rec.notas_admin ? `<p class="mt-2 text-sm text-gray-500">${escaparHTML(rec.notas_admin)}</p>` : ''}
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="bg-gray-50 px-6 py-4 border-t border-gray-100">
+          <button onclick="cerrarModalDetalleRecurrenciaCancelada()"
+            class="w-full px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors">
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Eliminar modal anterior si existe
+  const modalExistente = document.getElementById('modalDetalleRecurrenciaCancelada');
+  if (modalExistente) modalExistente.remove();
+
+  // Insertar y mostrar
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function cerrarModalDetalleRecurrenciaCancelada() {
+  const modal = document.getElementById('modalDetalleRecurrenciaCancelada');
+  if (modal) modal.remove();
+}
+
+/* =========================================================
+   9.4. INICIALIZACIÓN DEL ADMIN 🚀
+   ========================================================= */
 document.addEventListener('DOMContentLoaded', function() {
 
   // 1. Configurar los Listeners (Clicks de pestañas, botones de guardar, etc.)
   if (typeof setupAdminListeners === 'function') {
-      setupAdminListeners(); 
+      setupAdminListeners();
   }
 
   // 2. LANZAR LA ESTRATEGIA DE "CARGA INTELIGENTE" (Prefetch)

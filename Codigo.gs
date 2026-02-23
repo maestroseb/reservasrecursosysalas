@@ -496,6 +496,34 @@ function getStaticData() {
     // 4. MIS RESERVAS ACTIVAS
     const misReservasActivas = getMyActiveReservationsData(email);
 
+    // 4b. MOTIVOS DE RECURRENCIAS (para mostrar en "Mis Reservas")
+    const misRecurrencias = {};
+    const idsSolicitudes = [...new Set(
+      misReservasActivas
+        .filter(r => r.id_solicitud_recurrente)
+        .map(r => String(r.id_solicitud_recurrente))
+    )];
+
+    if (idsSolicitudes.length > 0) {
+      try {
+        const sheetSol = getDB().getSheetByName('SolicitudesRecurrentes');
+        if (sheetSol && sheetSol.getLastRow() > 1) {
+          const dataSol = sheetSol.getDataRange().getValues();
+          for (let i = 1; i < dataSol.length; i++) {
+            const idSol = String(dataSol[i][0] || '').trim();
+            if (idsSolicitudes.includes(idSol)) {
+              misRecurrencias[idSol] = {
+                motivo: String(dataSol[i][10] || '').trim(),
+                dias_semana: String(dataSol[i][5] || '').trim()
+              };
+            }
+          }
+        }
+      } catch (e) {
+        Logger.log('⚠️ Error cargando motivos recurrencias: ' + e.message);
+      }
+    }
+
     // 5. RESPUESTA COMPLETA
     return {
       success: true,
@@ -509,6 +537,7 @@ function getStaticData() {
       usuariosMap: usuariosMap,
       reservas: reservas,
       misReservasActivas: misReservasActivas,
+      misRecurrencias: misRecurrencias,
       configuracion: configuracion  // ✅ AÑADIDO
     };
 
@@ -560,7 +589,8 @@ function getActiveReservations() {
     cantidad: parseInt(r.cantidad, 10) || 1,
     estado: r.estado,
     notas: r.notas || '',
-    curso: r.curso || ''
+    curso: r.curso || '',
+    id_solicitud_recurrente: r.id_solicitud_recurrente || ''
   }));
 }
 
@@ -642,6 +672,11 @@ function doGet(e) {
   // 1.2. Aprobación de usuarios por Admin
   if (e.parameter.action === "approve" && e.parameter.email && e.parameter.nombre) {
     return handleAdminApproval(e.parameter.email, e.parameter.nombre);
+  }
+
+  // 1.3. Aprobación de solicitud recurrente desde email
+  if (e.parameter.action === "aprobar_recurrente" && e.parameter.id) {
+    return handleAprobarRecurrenteDesdeEmail(e.parameter.id);
   }
 
   // (LA ANTIGUA FASE 2 SE ELIMINA PORQUE ERA REDUNDANTE Y PROVOCABA ERROR)
@@ -1050,11 +1085,22 @@ function sendConfirmationEmail(email, userName, details) {
   `;
 
   try {
-    MailApp.sendEmail({
+    // Verificar si el admin quiere recibir copia oculta
+    const adminEmail = getConfigValue('email_admin', '');
+    const recibirCopia = getConfigValue('admin_recibir_copia_reservas', 'FALSE');
+
+    const emailOptions = {
       to: email,
       subject: asunto,
       htmlBody: cuerpoHtml
-    });
+    };
+
+    // Añadir BCC solo si el admin lo tiene activado y hay email configurado
+    if (adminEmail && recibirCopia.toUpperCase() === 'TRUE') {
+      emailOptions.bcc = adminEmail;
+    }
+
+    MailApp.sendEmail(emailOptions);
     Logger.log(`Correo de confirmación enviado a ${email} para reserva ${details.idReserva}`);
   } catch (e) {
     Logger.log(`Error al enviar correo de confirmación a ${email}: ${e.message}`);
@@ -1461,6 +1507,78 @@ function buildHtmlCancelPage(titulo, mensaje, details) {
   `;
 }
 
+/* ============================================
+   APROBACIÓN DE SOLICITUD RECURRENTE DESDE EMAIL
+   ============================================ */
+function handleAprobarRecurrenteDesdeEmail(idSolicitud) {
+  try {
+    // Obtener datos de la solicitud
+    const sheet = getOrCreateSheetSolicitudesRecurrentes();
+    const data = sheet.getDataRange().getValues();
+
+    let filaEncontrada = -1;
+    let solicitud = null;
+
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === String(idSolicitud).trim()) {
+        filaEncontrada = i + 1;
+        solicitud = {
+          id: data[i][0],
+          recurso: data[i][2],
+          usuario: data[i][4],
+          email: data[i][3],
+          dias: data[i][5],
+          tramo: data[i][7],
+          estado: data[i][11]
+        };
+        break;
+      }
+    }
+
+    if (!solicitud) {
+      return HtmlService.createHtmlOutput(buildHtmlCancelPage(
+        "Solicitud no encontrada",
+        "No se ha encontrado la solicitud de reserva recurrente."
+      ));
+    }
+
+    // Verificar que está pendiente
+    if (solicitud.estado && solicitud.estado.toLowerCase() !== 'pendiente') {
+      return HtmlService.createHtmlOutput(buildHtmlCancelPage(
+        "Solicitud ya procesada",
+        `Esta solicitud ya fue ${solicitud.estado.toLowerCase()}.`
+      ));
+    }
+
+    // Aprobar la solicitud
+    const resultado = aprobarSolicitudRecurrente(idSolicitud, 'Aprobada desde email');
+
+    if (resultado && resultado.success) {
+      return HtmlService.createHtmlOutput(buildHtmlCancelPage(
+        "Solicitud Aprobada",
+        `La solicitud de reserva recurrente de <strong>${solicitud.usuario}</strong> para <strong>${solicitud.recurso}</strong> ha sido aprobada correctamente.`,
+        {
+          recursoNombre: solicitud.recurso,
+          fechaFormateada: `${solicitud.dias}`,
+          tramoNombre: solicitud.tramo
+        }
+      ));
+    } else {
+      return HtmlService.createHtmlOutput(buildHtmlCancelPage(
+        "Error al aprobar",
+        resultado?.error || "Ha ocurrido un error al aprobar la solicitud."
+      ));
+    }
+
+  } catch (error) {
+    Logger.log('❌ Error en handleAprobarRecurrenteDesdeEmail: ' + error.message);
+    return HtmlService.createHtmlOutput(buildHtmlCancelPage(
+      "Error",
+      "Ha ocurrido un error al procesar la aprobación: " + error.message
+    ));
+  }
+}
+
 
 /* ============================================
    NUEVAS FUNCIONES DE ALTA DE USUARIO 🚀
@@ -1781,14 +1899,17 @@ function validarAntelacionMinima(fechaISO, tramoId) {
  */
 function validarLimiteReservas(email) {
   const limiteReservas = getConfigValue('limite_reservas', 3);
-  
+
   const reservasActivas = getActiveReservations();
-  const reservasUsuario = reservasActivas.filter(r => r.email_usuario === email);
-  
+  // Solo contar reservas manuales (excluir las generadas por recurrencias)
+  const reservasUsuario = reservasActivas.filter(r =>
+    r.email_usuario === email && !r.id_solicitud_recurrente
+  );
+
   if (reservasUsuario.length >= limiteReservas) {
     throw new Error(`Has alcanzado el límite de ${limiteReservas} reservas activas. Cancela alguna para continuar.`);
   }
-  
+
   Logger.log(`✅ Límite de reservas: ${reservasUsuario.length}/${limiteReservas}`);
   return true;
 }
