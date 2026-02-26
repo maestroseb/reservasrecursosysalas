@@ -1085,10 +1085,6 @@ function sendConfirmationEmail(email, userName, details) {
   `;
 
   try {
-    // Verificar si el admin quiere recibir copia oculta
-    const adminEmail = getConfigValue('email_admin', '');
-    const recibirCopia = getConfigValue('admin_recibir_copia_reservas', 'FALSE');
-
     const emailOptions = {
       to: email,
       subject: asunto,
@@ -1096,7 +1092,9 @@ function sendConfirmationEmail(email, userName, details) {
     };
 
     // Añadir BCC solo si el admin lo tiene activado y hay email configurado
-    if (adminEmail && recibirCopia.toUpperCase() === 'TRUE') {
+    const adminEmail = getConfigValue('email_admin', '');
+    const recibirCopia = getConfigValue('admin_recibir_copia_reservas', false);
+    if (adminEmail && recibirCopia === true) {
       emailOptions.bcc = adminEmail;
     }
 
