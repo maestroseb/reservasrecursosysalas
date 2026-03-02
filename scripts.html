@@ -416,11 +416,15 @@ function handleRecursoClick(recursoBtn) {
         
         if (result.success) {
           globalState.disponibilidad = result.disponibilidad;
-          
+          // Actualizar reservas frescas del servidor
+          if (result.reservas) {
+            globalState.reservas = result.reservas;
+          }
+
           // Renderizamos calendario y tramos con la fecha que YA calculamos arriba
           renderCalendar(globalState.fechaActual.getFullYear(), globalState.fechaActual.getMonth());
           loadTramos();
-          
+
         } else {
           showToast('error', result.error || 'Error disponibilidad');
         }
@@ -1260,6 +1264,9 @@ function onReservaSuccess(response) {
         .withSuccessHandler((result) => {
           if (result.success) {
             globalState.disponibilidad = result.disponibilidad;
+            if (result.reservas) {
+              globalState.reservas = result.reservas;
+            }
             if (!step2.classList.contains('hidden')) {
               loadTramos();
             }
@@ -1268,7 +1275,7 @@ function onReservaSuccess(response) {
         .withFailureHandler((e) => console.error("Error recargando disponibilidad:", e))
         .cargarDisponibilidadRecurso(recursoId);
     }
-    
+
     // Desbloquear scroll al cerrar
     document.body.style.overflow = '';
 
@@ -1296,6 +1303,9 @@ function refreshDisponibilidadAndReloadTramos() {
       hideLoading();
       if (result.success) {
         globalState.disponibilidad = result.disponibilidad;
+        if (result.reservas) {
+          globalState.reservas = result.reservas;
+        }
         loadTramos();
         showError("La disponibilidad ha cambiado. Por favor, revisa los tramos y vuelve a intentarlo.");
       } else {
@@ -1662,12 +1672,15 @@ function onCancelReservationSuccess(response) {
         .withSuccessHandler((result) => {
           if (result.success) {
             globalState.disponibilidad = result.disponibilidad;
+            if (result.reservas) {
+              globalState.reservas = result.reservas;
+            }
             loadTramos();
           }
         })
         .cargarDisponibilidadRecurso(recursoId);
     }
-    
+
     // ✅ MOSTRAR SOLO ÉXITO (sin hideMessages antes)
     showSuccess("Reserva cancelada con éxito.");
     setTimeout(hideMessages, 2500);

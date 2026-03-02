@@ -779,9 +779,13 @@ function cargarDisponibilidadRecurso(recursoId) {
     const disponibilidad = getDisponibilidadRecurso(recursoId);
     Logger.log(`Cargada disponibilidad para ${recursoId}: ${disponibilidad.length} registros`);
 
+    // Incluir reservas frescas para que el cliente siempre tenga datos actualizados
+    const reservas = getReservasFrescas();
+
     return {
       success: true,
-      disponibilidad: disponibilidad
+      disponibilidad: disponibilidad,
+      reservas: reservas
     };
   } catch (e) {
     Logger.log(`Error en cargarDisponibilidadRecurso: ${e.message}`);
@@ -1062,32 +1066,40 @@ function crearNuevaReserva(reservaData) {
    EMAIL DE CONFIRMACIÓN DE RESERVA
    ============================================ */
 function sendConfirmationEmail(email, userName, details) {
-  const urlApp = ScriptApp.getService().getUrl();
-  const urlCancelacion = `${urlApp}?action=cancel&id=${details.idReserva}`;
-
-  const asunto = `Reserva Confirmada: ${details.recursoNombre} - ${details.fechaFormateada}`;
-  const cuerpoHtml = `
-    <p>¡Hola ${userName || ''}!</p>
-    <p>Tu reserva ha sido confirmada con éxito.</p>
-    <hr>
-    <ul>
-      <li><strong>Recurso:</strong> ${details.recursoNombre}</li>
-      <li><strong>Fecha:</strong> ${details.fechaFormateada}</li>
-      <li><strong>Tramo:</strong> ${details.tramoNombre}</li>
-      <li><strong>Curso:</strong> ${details.curso}</li>
-      ${details.cantidad > 1 ? `<li><strong>Cantidad:</strong> ${details.cantidad}</li>` : ''}
-      ${details.notas ? `<li><strong>Notas:</strong> ${details.notas}</li>` : ''}
-    </ul>
-    <hr>
-    <p>Si necesitas cancelar la reserva, puedes hacerlo desde este enlace:</p>
-    <p><a href="${urlCancelacion}" style="padding: 10px 15px; background-color: #d9534f; color: white; text-decoration: none; border-radius: 5px;">Cancelar esta Reserva</a></p>
-    <p style="font-size: 0.8em; color: #777;">O puedes gestionarla desde la propia aplicación.</p>
-  `;
-
   try {
-    // Verificar si el admin quiere recibir copia oculta
-    const adminEmail = getConfigValue('email_admin', '');
-    const recibirCopia = getConfigValue('admin_recibir_copia_reservas', 'FALSE');
+    // Generar URL de cancelación (dentro del try-catch para que un fallo aquí no impida el email)
+    let urlCancelacion = '';
+    try {
+      const urlApp = ScriptApp.getService().getUrl();
+      urlCancelacion = `${urlApp}?action=cancel&id=${details.idReserva}`;
+    } catch (urlError) {
+      Logger.log(`⚠️ No se pudo obtener URL de la app: ${urlError.message}`);
+    }
+
+    const asunto = `Reserva Confirmada: ${details.recursoNombre} - ${details.fechaFormateada}`;
+
+    // Bloque de cancelación: solo si tenemos URL
+    const bloqueCancelacion = urlCancelacion
+      ? `<p>Si necesitas cancelar la reserva, puedes hacerlo desde este enlace:</p>
+         <p><a href="${urlCancelacion}" style="padding: 10px 15px; background-color: #d9534f; color: white; text-decoration: none; border-radius: 5px;">Cancelar esta Reserva</a></p>`
+      : '';
+
+    const cuerpoHtml = `
+      <p>¡Hola ${userName || ''}!</p>
+      <p>Tu reserva ha sido confirmada con éxito.</p>
+      <hr>
+      <ul>
+        <li><strong>Recurso:</strong> ${details.recursoNombre}</li>
+        <li><strong>Fecha:</strong> ${details.fechaFormateada}</li>
+        <li><strong>Tramo:</strong> ${details.tramoNombre}</li>
+        <li><strong>Curso:</strong> ${details.curso}</li>
+        ${details.cantidad > 1 ? `<li><strong>Cantidad:</strong> ${details.cantidad}</li>` : ''}
+        ${details.notas ? `<li><strong>Notas:</strong> ${details.notas}</li>` : ''}
+      </ul>
+      <hr>
+      ${bloqueCancelacion}
+      <p style="font-size: 0.8em; color: #777;">Puedes gestionar tus reservas desde la propia aplicación.</p>
+    `;
 
     const emailOptions = {
       to: email,
@@ -1096,14 +1108,16 @@ function sendConfirmationEmail(email, userName, details) {
     };
 
     // Añadir BCC solo si el admin lo tiene activado y hay email configurado
-    if (adminEmail && recibirCopia.toUpperCase() === 'TRUE') {
+    const adminEmail = getConfigValue('email_admin', '');
+    const recibirCopia = getConfigValue('admin_recibir_copia_reservas', false);
+    if (adminEmail && recibirCopia === true) {
       emailOptions.bcc = adminEmail;
     }
 
     MailApp.sendEmail(emailOptions);
-    Logger.log(`Correo de confirmación enviado a ${email} para reserva ${details.idReserva}`);
+    Logger.log(`✅ Correo de confirmación enviado a ${email} para reserva ${details.idReserva}`);
   } catch (e) {
-    Logger.log(`Error al enviar correo de confirmación a ${email}: ${e.message}`);
+    Logger.log(`❌ Error al enviar correo de confirmación a ${email}: ${e.message}\nStack: ${e.stack}`);
   }
 }
 
