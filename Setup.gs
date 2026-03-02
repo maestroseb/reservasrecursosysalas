@@ -48,6 +48,13 @@ function ejecutarSetupVinculado() {
     props.setProperty('WEB_APP_URL', currentUrl);
     props.setProperty('FECHA_ACTIVACION', new Date().toISOString());
 
+    // 5. Instalar comprobación automática de actualizaciones (diaria)
+    try {
+      instalarTriggerActualizaciones();
+    } catch (triggerErr) {
+      Logger.log('⚠️ No se pudo instalar trigger de actualizaciones: ' + triggerErr.message);
+    }
+
     // Limpieza opcional de la hoja por defecto
     const hojaDefault = ss.getSheetByName("Hoja 1");
     if (hojaDefault && hojaDefault.getLastRow() === 0) {

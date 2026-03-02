@@ -1,6 +1,6 @@
 /**
  * SISTEMA DE RESERVAS - CÓDIGO PRINCIPAL
- * Versión 1.3 - Modular y Optimizado con Panel Admin Integrado
+ * Versión 1.5 - Modular y Optimizado con Panel Admin y Auto-Update
  * 
  * Este archivo contiene las funciones principales del sistema.
  * Las funciones de administración están en AdminFunctions.gs
@@ -65,7 +65,11 @@ function onOpen() {
     // YA INSTALADO -> Menú normal
     menu.addItem('🔗 Ver URL de acceso', 'mostrarURLRapido');
     menu.addSeparator();
+    menu.addItem('🔄 Buscar actualizaciones', 'comprobarActualizacionesManual');
+    menu.addItem('🔄 Aplicar actualización', 'aplicarActualizacion');
+    menu.addSeparator();
     menu.addItem('⚙️ Cambiar URL manualmente', 'cambiarURLManual');
+    menu.addItem('ℹ️ Versión v' + SYSTEM_VERSION, 'mostrarInfoVersion');
     menu.addToUi();
   }
 }

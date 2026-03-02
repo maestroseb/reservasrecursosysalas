@@ -55,13 +55,19 @@
             <li class="flex items-center gap-2"><iconify-icon icon="mdi:table-plus" class="text-indigo-500"></iconify-icon> Creará las pestañas (Usuarios, Reservas...)</li>
             <li class="flex items-center gap-2"><iconify-icon icon="mdi:database-import" class="text-indigo-500"></iconify-icon> Insertará datos de ejemplo</li>
             <li class="flex items-center gap-2"><iconify-icon icon="mdi:account-key" class="text-indigo-500"></iconify-icon> Te configurará a ti como <strong>Admin</strong></li>
+            <li class="flex items-center gap-2"><iconify-icon icon="mdi:update" class="text-indigo-500"></iconify-icon> Activará las <strong>actualizaciones automáticas</strong></li>
           </ul>
         </div>
 
-        <button id="btnInstalar" onclick="iniciarInstalacion()" 
+        <button id="btnInstalar" onclick="iniciarInstalacion()"
                 class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-xl transition-all shadow-lg shadow-indigo-200 active:scale-95 flex items-center justify-center gap-2">
           <span>Inicializar Sistema</span>
         </button>
+
+        <p class="text-xs text-gray-400 mt-3">
+          Para recibir actualizaciones automáticas, activa la API de Apps Script en
+          <a href="https://script.google.com/home/usersettings" target="_blank" class="text-indigo-400 underline hover:text-indigo-600">Configuración de Apps Script</a>
+        </p>
 
         <a id="btnEntrar" href="<?= ScriptApp.getService().getUrl() ?>" 
            class="hidden w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 px-6 rounded-xl transition-all shadow-lg shadow-emerald-200 active:scale-95 flex items-center justify-center gap-2">
