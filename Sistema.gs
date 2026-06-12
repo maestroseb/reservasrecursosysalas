@@ -1,4 +1,682 @@
 /**
+ * =========================================================================== 
+ * ⚙️ SETUP.GS - GESTIÓN DE INSTALACIÓN Y DATOS INICIALES
+ * ===========================================================================
+ */
+
+// --- CONFIGURACIÓN DE COLUMNAS (TU ESQUEMA CORRECTO) ---
+const DB_SCHEMA = {
+  'Recursos': { headers: ['ID_Recurso', 'Nombre', 'Tipo', 'Icono', 'Ubicacion', 'Capacidad', 'Descripcion', 'Estado'], color: '#4f46e5' },
+  'Tramos':   { headers: ['ID_Tramo', 'Nombre_Tramo', 'Hora_Inicio', 'Hora_Fin'], color: '#d97706' },
+  'Disponibilidad': { headers: ['ID_Recurso', 'Dia_Semana', 'ID_Tramo', 'Hora_Inicio', 'Permitido', 'Razon_Bloqueo'], color: '#7c3aed' },
+  'Cursos':   { headers: ['Etapa', 'Curso', 'Mostrar el curso con:'], color: '#0891b2' },
+  'Usuarios': { headers: ['Nombre_Completo', 'Email_Usuario', 'Activo', 'Admin', 'Especialidad'], color: '#dc2626' },
+  'Config':   { headers: ['CLAVE', 'VALOR', 'DESCRIPCION'], color: '#64748b' },
+  'Incidencias':   { headers: ['ID_Incidencia',	'ID_Recurso',	'Nombre_Recurso',	'Email_Usuario',	'Fecha_Reporte',	'Categoria',	'Prioridad',	'Descripcion',	'Estado',	'Notas_Admin',	'Fecha_Resolucion'], color: '#64748b' },
+  'Reservas': { headers: ['ID_Reserva', 'ID_Recurso', 'Email_Usuario', 'Fecha', 'Curso', 'ID_Tramo', 'Cantidad', 'Estado', 'Notas', 'Timestamp', 'ID_Solicitud_Recurrente'], color: '#059669' },
+  'SolicitudesRecurrentes': { headers: ['ID_Solicitud', 'ID_Recurso', 'Nombre_Recurso', 'Email_Usuario', 'Nombre_Usuario', 'Dias_Semana', 'ID_Tramo', 'Nombre_Tramo', 'Fecha_Inicio', 'Fecha_Fin', 'Motivo', 'Estado', 'Fecha_Solicitud', 'Fecha_Resolucion', 'Admin_Resolutor', 'Notas_Admin'], color: '#8b5cf6' }
+};
+
+// ==========================================
+// 🌐 FUNCIÓN QUE LLAMA EL HTML 'ActivacionSistema'
+// ==========================================
+function ejecutarSetupVinculado() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const currentUser = Session.getActiveUser().getEmail();
+    
+    // 🔥 MAGIA: Obtenemos la URL actual automáticamente
+    const currentUrl = ScriptApp.getService().getUrl(); 
+
+    if (!currentUrl) {
+      throw new Error("No se pudo detectar la URL de la Web App. Asegúrate de haber desplegado correctamente.");
+    }
+
+    // 1. Crear estructura (pestañas)
+    crearEstructuraInterna(ss);
+
+    // 2. Rellenar datos y GUARDAR LA URL EN CONFIG (CORREGIDO: ahora pasa currentUrl y email admin)
+    crearDatosEjemploInterno(ss, currentUrl, currentUser);
+
+    // 3. Hacer Admin al usuario que está ejecutando esto
+    asegurarAdminInterno(ss, currentUser);
+
+    // 4. Marcar como instalado (IMPORTANTE: usar SETUP_COMPLETED para consistencia)
+    const props = PropertiesService.getScriptProperties();
+    props.setProperty('SETUP_COMPLETED', 'true');
+    props.setProperty('INSTALL_DATE', new Date().toISOString());
+    props.setProperty('WEB_APP_URL', currentUrl);
+    props.setProperty('FECHA_ACTIVACION', new Date().toISOString());
+
+    // 5. Instalar comprobación automática de actualizaciones (diaria)
+    try {
+      instalarTriggerActualizaciones();
+    } catch (triggerErr) {
+      Logger.log('⚠️ No se pudo instalar trigger de actualizaciones: ' + triggerErr.message);
+    }
+
+    // Limpieza opcional de la hoja por defecto
+    const hojaDefault = ss.getSheetByName("Hoja 1");
+    if (hojaDefault && hojaDefault.getLastRow() === 0) {
+      ss.deleteSheet(hojaDefault);
+    }
+
+    return { success: true, url: currentUrl };
+
+  } catch (e) {
+    Logger.log("ERROR SETUP: " + e.toString());
+    return { success: false, error: e.toString() };
+  }
+}
+
+// ==========================================
+// 🔧 FUNCIONES INTERNAS
+// ==========================================
+
+function crearEstructuraInterna(ss) {
+  const sheets = ss.getSheets();
+  if (sheets.length > 0) sheets[0].setName("Temp_Init");
+
+  for (const [sheetName, config] of Object.entries(DB_SCHEMA)) {
+    let sheet = ss.getSheetByName(sheetName);
+    if (!sheet) sheet = ss.insertSheet(sheetName);
+    
+    const r = sheet.getRange(1, 1, 1, config.headers.length);
+    r.setValues([config.headers]);
+    r.setBackground(config.color).setFontColor('white').setFontWeight('bold').setHorizontalAlignment('center');
+    sheet.setFrozenRows(1);
+    
+    if(sheetName === 'Cursos') sheet.getRange('F1').setValue('botones');
+  }
+  
+  const tempSheet = ss.getSheetByName("Temp_Init");
+  if (tempSheet) ss.deleteSheet(tempSheet);
+}
+
+// --- 🌟 FUNCIÓN CORREGIDA: Ahora recibe currentUrl y adminEmail como parámetros ---
+function crearDatosEjemploInterno(ss, currentUrl, adminEmail) {
+
+  // A. RECURSOS
+  const sheetRec = ss.getSheetByName('Recursos');
+  const recursos = [
+    ['REC-INFO', 'Sala Informática', 'Sala', 'mdi:desktop-classic', 'Planta 1', 25, 'Sala con PCs fijos', 'Activo'],
+    ['REC-CARR1', 'Carro Portátiles 1', 'Agrupado', 'mdi:laptop', 'Secretaría', 30, '30 Chromebooks', 'Activo']
+  ];
+  sheetRec.getRange(2, 1, recursos.length, recursos[0].length).setValues(recursos);
+
+  // B. TRAMOS
+  const sheetTram = ss.getSheetByName('Tramos');
+  const tramos = [
+    ['T001', '1ª Hora', '09:00', '10:00'],
+    ['T002', '2ª Hora', '10:00', '11:00'],
+    ['T003', '3ª Hora', '11:00', '11:30'],
+    ['T004', '4ª Hora', '12:00', '13:00'],
+    ['T005', '5ª Hora', '13:00', '14:00']
+  ];
+  sheetTram.getRange(2, 1, tramos.length, tramos[0].length).setValues(tramos);
+
+  // C. CURSOS
+  const sheetCur = ss.getSheetByName('Cursos');
+  const cursos = [
+    ['Primaria', '6º Primaria A', 1, 'PRI-6A', '']
+  ];
+  sheetCur.getRange(2, 1, cursos.length, cursos[0].length).setValues(cursos);
+
+  // D. CONFIGURACIÓN (Con email del admin instalador y opciones de notificación)
+  const sheetConfig = ss.getSheetByName('Config');
+  const configData = [
+    ['dias_vista_maximo', 30, 'Días a futuro permitidos'],
+    ['minutos_antelacion', 0, 'Minutos mínimos antes de reservar'],
+    ['limite_reservas', 3, 'Máx. reservas activas por usuario'],
+    ['horas_cancelacion', 0, 'Horas mínimas para poder cancelar solo'],
+    ['exigir_motivo', 'FALSE', 'Obligatorio escribir para qué es'],
+    ['email_admin', adminEmail || '', 'Email del administrador para notificaciones'],
+    ['admin_recibir_copia_reservas', 'FALSE', 'Recibir copia oculta de confirmaciones de reservas'],
+    ['modo_mantenimiento', 'FALSE', 'Bloquear nuevas reservas (Pánico)'],
+    ['permitir_multitramo', 'FALSE', 'Permitir seleccionar varios tramos a la vez'],
+    ['max_tramos_simultaneos', 1, 'Cuántos tramos seguidos se pueden coger de golpe'],
+    ['nombre_centro', 'Sistema de Reservas', 'Nombre del centro'],
+    ['url_logo', '', 'URL del logo del centro'],
+    ['url_webapp', currentUrl, 'URL automática de la aplicación']
+  ];
+  sheetConfig.getRange(2, 1, configData.length, 3).setValues(configData);
+}
+
+function asegurarAdminInterno(ss, email) {
+  const sheet = ss.getSheetByName('Usuarios');
+  const data = sheet.getDataRange().getValues();
+  
+  let found = false;
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][1] && data[i][1].toString().toLowerCase() === email.toLowerCase()) {
+      found = true;
+      sheet.getRange(i+1, 3).setValue(true); // Activo
+      sheet.getRange(i+1, 4).setValue(true); // Admin
+      break;
+    }
+  }
+  
+  if (!found) {
+    const nombre = email.split('@')[0].toUpperCase();
+    sheet.appendRow([nombre, email, true, true, 'Super Admin']);
+  }
+}
+
+
+/**
+ * ===========================================================================
+ * 🔧 HERRAMIENTAS DE MANTENIMIENTO Y REPARACIÓN
+ * ===========================================================================
+ */
+
+/**
+ * Sincroniza el estado de instalación y actualiza la URL en la configuración.
+ * * ¿CUÁNDO USAR ESTA FUNCIÓN?
+ * 1. Si el sistema te pide "Instalar" pero tú ya tienes la hoja configurada.
+ * 2. Si has cambiado la implementación de la Web App y la URL ha cambiado.
+ * 3. Si has copiado el archivo y quieres reactivarlo rápidamente.
+ * * ¿QUÉ HACE?
+ * - Marca internamente el sistema como 'SETUP_COMPLETED'.
+ * - Detecta la URL actual de la Web App.
+ * - Escribe o actualiza esa URL en la hoja 'Config' (fila 'url_webapp').
+ * * @return {void} Solo imprime logs en la consola.
+ */
+function repararInstalacionYGuardarURL() {
+  Logger.log("🔧 INICIANDO REPARACIÓN DEL SISTEMA...");
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetConfig = ss.getSheetByName('Config');
+    
+    // --- PASO 1: OBTENER URL ---
+    // Nota: Requiere que el script esté implementado como Web App.
+    const url = ScriptApp.getService().getUrl();
+    
+    if (!url) {
+      Logger.log("❌ ERROR CRÍTICO: No se detecta una URL de Web App activa.");
+      Logger.log("   -> Solución: Ve a 'Gestionar implementaciones' y asegúrate de que existe una versión activa.");
+      return;
+    }
+
+    // --- PASO 2: ACTUALIZAR MEMORIA INTERNA (PropertiesService) ---
+    // Esto es lo que consulta el doGet() para saber si mostrar el instalador.
+    const props = PropertiesService.getScriptProperties();
+    props.setProperty('SETUP_COMPLETED', 'true');
+    props.setProperty('WEB_APP_URL', url); // Guardamos también en memoria por redundancia
+    // Opcional: Actualizar fecha de instalación/reparación
+    // props.setProperty('INSTALL_DATE', new Date().toISOString()); 
+    
+    Logger.log("✅ Memoria del Script (PropertiesService) actualizada correctamente.");
+
+    // --- PASO 3: ACTUALIZAR HOJA VISIBLE 'Config' ---
+    if (sheetConfig) {
+      const data = sheetConfig.getDataRange().getValues();
+      let encontrada = false;
+
+      // Buscamos si ya existe la clave 'url_webapp' para no duplicarla
+      for (let i = 0; i < data.length; i++) {
+        // Asumimos que la Columna A es la CLAVE y la Columna B es el VALOR
+        if (data[i][0] && data[i][0].toString() === 'url_webapp') {
+          sheetConfig.getRange(i + 1, 2).setValue(url);
+          Logger.log(`✏️ URL actualizada en la fila ${i + 1} de la hoja 'Config'.`);
+          encontrada = true;
+          break;
+        }
+      }
+
+      // Si no existe, la creamos nueva al final
+      if (!encontrada) {
+        // Estructura: [CLAVE, VALOR, DESCRIPCIÓN]
+        sheetConfig.appendRow(['url_webapp', url, 'URL automática de la aplicación (Actualizada manualmente)']);
+        Logger.log("➕ Fila 'url_webapp' añadida al final de la hoja 'Config'.");
+      }
+    } else {
+      Logger.log("⚠️ AVISO: No se encontró la hoja 'Config'. Solo se actualizó la memoria interna.");
+    }
+
+    Logger.log("🎉 REPARACIÓN COMPLETADA.");
+    Logger.log("   -> Ahora puedes recargar tu Web App y entrará directamente.");
+    Logger.log("   -> URL registrada: " + url);
+
+  } catch (e) {
+    Logger.log("❌ EXCEPCIÓN: Ocurrió un error inesperado.");
+    Logger.log(e.toString());
+  }
+}
+
+/* ========================================================= 
+   SISTEMA DE INCIDENCIAS - BACKEND
+   ========================================================= */
+
+/**
+ * Reportar nueva incidencia
+ */
+function reportarIncidencia(datos) {
+  try {
+    const userEmail = Session.getActiveUser().getEmail();
+    if (!userEmail) throw new Error("Usuario no identificado");
+
+    const ss = getDB();
+    const sheet = ss.getSheetByName(SHEETS.INCIDENCIAS);
+
+    // Generar ID único: Año corto + secuencial
+    const año = new Date().getFullYear().toString().slice(-2); // "25"
+
+    let maxNumeroAño = 0;
+    if (sheet.getLastRow() > 1) {
+      const data = sheet.getDataRange().getValues();
+      const patron = new RegExp(`INC-${año}-(\\d+)`);
+
+      for (let i = 1; i < data.length; i++) {
+        if (data[i][0]) {
+          const match = String(data[i][0]).match(patron);
+          if (match) {
+            const num = parseInt(match[1], 10);
+            if (num > maxNumeroAño) maxNumeroAño = num;
+          }
+        }
+      }
+    }
+
+    const nuevoId = `INC-${año}-${String(maxNumeroAño + 1).padStart(3, '0')}`;
+    // Resultado: INC-25-001, INC-25-002... INC-26-001 (nuevo año)
+
+    // Datos a guardar
+    const nuevaFila = [
+      nuevoId,                           // A - ID_Incidencia
+      datos.id_recurso || '',            // B - ID_Recurso
+      datos.nombre_recurso || '',        // C - Nombre_Recurso (cache)
+      userEmail,                         // D - Email_Usuario
+      new Date(),                        // E - Fecha_Reporte
+      datos.categoria || 'Otro',         // F - Categoria
+      datos.prioridad || 'Media',        // G - Prioridad
+      datos.descripcion || '',           // H - Descripcion
+      'Pendiente',                       // I - Estado
+      '',                                // J - Notas_Admin (vacío)
+      ''                                 // K - Fecha_Resolucion (vacío)
+    ];
+
+    // Insertar
+    sheet.appendRow(nuevaFila);
+
+    // Email al admin
+    enviarEmailNuevaIncidencia({
+      id: nuevoId,
+      recurso: datos.nombre_recurso,
+      usuario: userEmail,
+      categoria: datos.categoria,
+      prioridad: datos.prioridad,
+      descripcion: datos.descripcion
+    });
+
+    purgarCache();
+
+    return {
+      success: true,
+      message: 'Incidencia reportada correctamente',
+      id: nuevoId
+    };
+
+  } catch (e) {
+    Logger.log('Error reportarIncidencia: ' + e);
+    return { success: false, error: e.toString() };
+  }
+}
+
+
+/* =========================================================
+   OBTENER INCIDENCIAS
+   ========================================================= */
+
+function getIncidencias() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName('Incidencias'); // Asegúrate que el nombre coincide
+
+    if (!sheet) return { success: true, incidencias: [] };
+    if (sheet.getLastRow() < 2) return { success: true, incidencias: [] };
+
+    const data = sheet.getDataRange().getValues();
+    const incidencias = [];
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0]) { // Si hay ID
+
+        // 1. LIMPIEZA FECHA REPORTE (Columna E -> Indice 4)
+        let fechaReporte = '';
+        if (data[i][4] && data[i][4] instanceof Date) {
+          fechaReporte = data[i][4].toISOString();
+        } else {
+          fechaReporte = String(data[i][4] || '');
+        }
+
+        // 2. LIMPIEZA FECHA RESOLUCIÓN (Columna K -> Indice 10)
+        // ESTO ES LO QUE FALLABA: Convertir fecha a String antes de enviar
+        let fechaResolucion = '';
+        if (data[i][10] && data[i][10] instanceof Date) {
+          fechaResolucion = data[i][10].toISOString();
+        } else {
+          fechaResolucion = String(data[i][10] || '');
+        }
+
+        incidencias.push({
+          ID_Incidencia: data[i][0],
+          ID_Recurso: data[i][1],
+          Nombre_Recurso: data[i][2],
+          Email_Usuario: data[i][3],
+          Fecha_Reporte: fechaReporte,
+          Categoria: data[i][5],
+          Prioridad: data[i][6],
+          Descripcion: data[i][7],
+          Estado: data[i][8],
+          Notas_Admin: data[i][9],
+          Fecha_Resolucion: fechaResolucion // <--- Ahora viaja como texto seguro
+        });
+      }
+    }
+
+    return { success: true, incidencias: incidencias };
+
+  } catch (e) {
+    Logger.log('Error getIncidencias: ' + e);
+    return { success: false, error: e.toString() };
+  }
+}
+
+/* =========================================================
+   NUEVA FUNCIÓN DE GESTIÓN
+   ========================================================= */
+
+/**
+ * Función flexible para manejar los botones del Frontend
+ * @param {string} idIncidencia - El ID (ej: "INC-0001")
+ * @param {string} accion - 'RESOLVER' o 'EDITAR_NOTA'
+ * @param {string} valor - El nuevo valor (o null si es resolver simple)
+ */
+/* --- ACTUALIZAR BACKEND --- */
+
+function backend_actualizarIncidencia(idIncidencia, accion, valor) {
+  try {
+    if (!isUserAdmin()) throw new Error("Permiso denegado");
+    const ss = getDB();
+    const sheet = ss.getSheetByName('Incidencias');
+    const data = sheet.getDataRange().getValues();
+
+    // Buscar fila
+    let fila = -1, recName = '', userEmail = '', oldNote = '';
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === String(idIncidencia)) {
+        fila = i + 1;
+        recName = data[i][2];
+        userEmail = data[i][3];
+        oldNote = data[i][9];
+        break;
+      }
+    }
+    if (fila === -1) throw new Error("Incidencia no encontrada");
+
+    // --- LOGICA ACCIONES ---
+
+    if (accion === 'PRIORIDAD') {
+      sheet.getRange(fila, 7).setValue(valor);
+      return { exito: true };
+    }
+
+    // ✅ AÑADIR ESTO: Cambiar estado sin resolver
+    if (accion === 'ESTADO') {
+      sheet.getRange(fila, 9).setValue(valor);
+      return { exito: true };
+    }
+
+    if (accion === 'RESOLVER') {
+      sheet.getRange(fila, 9).setValue('Resuelta');
+      sheet.getRange(fila, 11).setValue(new Date());
+
+      let notaFinal = valor || oldNote;
+      if (valor) sheet.getRange(fila, 10).setValue(valor);
+
+      enviarEmailIncidenciaResuelta({
+        id: idIncidencia, recurso: recName, email: userEmail, notas: notaFinal
+      });
+      return { exito: true };
+    }
+
+    if (accion === 'EDITAR_NOTA') {
+      sheet.getRange(fila, 10).setValue(valor);
+      return { exito: true };
+    }
+
+  } catch (e) {
+    return { exito: false, error: e.toString() };
+  }
+}
+
+/**
+ * Cambiar estado de recurso desde Incidencias (Versión corregida)
+ */
+function backend_toggleMantenimiento(idRecurso, nuevoEstado) {
+  try {
+    if (!isUserAdmin()) throw new Error("Acceso denegado");
+
+    const ss = getDB();
+    const sheet = ss.getSheetByName(SHEETS.RECURSOS); // Usar constante si existe
+    if (!sheet) throw new Error("Hoja 'Recursos' no encontrada");
+    
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) throw new Error("No hay recursos en la hoja");
+
+    // 1. Buscar índice de columnas por cabecera (más robusto)
+    const cabeceras = data[0].map(c => String(c).toLowerCase().trim());
+    const colIdIndex = cabeceras.findIndex(c => c === 'id_recurso' || c === 'id');
+    const colEstadoIndex = cabeceras.findIndex(c => c === 'estado');
+
+    if (colIdIndex === -1) throw new Error("No encuentro columna 'id_recurso' o 'id'");
+    if (colEstadoIndex === -1) throw new Error("No encuentro columna 'estado'");
+
+    // 2. Buscar fila del recurso
+    let fila = -1;
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][colIdIndex]).trim() === String(idRecurso).trim()) {
+        fila = i + 1; // +1 porque getRange es 1-indexed
+        break;
+      }
+    }
+
+    if (fila === -1) throw new Error(`Recurso '${idRecurso}' no encontrado`);
+
+    // 3. Actualizar estado
+    sheet.getRange(fila, colEstadoIndex + 1).setValue(nuevoEstado);
+
+    // 4. Limpiar caché
+    purgarCache();
+
+    return { 
+      exito: true, 
+      idRecurso: idRecurso,
+      nuevoEstado: nuevoEstado 
+    };
+
+  } catch (e) {
+    Logger.log('Error backend_toggleMantenimiento: ' + e);
+    return { exito: false, error: e.toString() };
+  }
+}
+
+/**
+ * Actualizar estado de incidencia (solo admin) ¿¿ESTO SOBRA??
+ */
+function actualizarEstadoIncidencia(idIncidencia, nuevoEstado, notasAdmin) {
+  try {
+    if (!isUserAdmin()) throw new Error("Permiso denegado");
+
+    const ss = getDB();
+    const sheet = ss.getSheetByName(SHEETS.INCIDENCIAS);
+    const data = sheet.getDataRange().getValues();
+
+    let filaEncontrada = -1;
+    let emailUsuario = '';
+    let nombreRecurso = '';
+
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === String(idIncidencia)) {
+        filaEncontrada = i + 1;
+        emailUsuario = data[i][3];
+        nombreRecurso = data[i][2];
+        break;
+      }
+    }
+
+    if (filaEncontrada === -1) {
+      throw new Error("Incidencia no encontrada");
+    }
+
+    // Actualizar estado (columna I = 9)
+    sheet.getRange(filaEncontrada, 9).setValue(nuevoEstado);
+
+    // Actualizar notas admin (columna J = 10)
+    if (notasAdmin !== undefined) {
+      sheet.getRange(filaEncontrada, 10).setValue(notasAdmin);
+    }
+
+    // Si se marca como resuelta, guardar fecha (columna K = 11)
+    if (nuevoEstado === 'Resuelta') {
+      sheet.getRange(filaEncontrada, 11).setValue(new Date());
+
+      // Email al usuario
+      enviarEmailIncidenciaResuelta({
+        id: idIncidencia,
+        recurso: nombreRecurso,
+        email: emailUsuario,
+        notas: notasAdmin
+      });
+    }
+
+    purgarCache();
+
+    return { success: true, message: 'Estado actualizado' };
+
+  } catch (e) {
+    Logger.log('Error actualizarEstadoIncidencia: ' + e);
+    return { success: false, error: e.toString() };
+  }
+}
+
+
+
+
+/* =========================================================
+   EMAILS AUTOMÁTICOS
+   ========================================================= */
+
+function enviarEmailNuevaIncidencia(datos) {
+  try {
+    // Obtener email del admin desde CONFIG
+    const ss = getDB();
+    const configSheet = ss.getSheetByName('CONFIG');
+    let emailAdmin = '';
+
+    if (configSheet) {
+      const configData = configSheet.getDataRange().getValues();
+      for (let i = 1; i < configData.length; i++) {
+        if (configData[i][0] === 'email_admin') {
+          emailAdmin = configData[i][1];
+          break;
+        }
+      }
+    }
+
+    // Fallback: enviar al primer admin activo
+    if (!emailAdmin) {
+      const admins = getAdminsEmails();
+      emailAdmin = admins[0] || Session.getActiveUser().getEmail();
+    }
+
+    const prioridadIcon = datos.prioridad === 'Crítica' ? '🔴' :
+      datos.prioridad === 'Alta' ? '🟠' :
+        datos.prioridad === 'Media' ? '🟡' : '🟢';
+
+    const asunto = `⚠️ Nueva incidencia [${datos.prioridad}] - ${datos.recurso}`;
+
+    const cuerpo = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #eee; padding: 20px; border-radius: 8px;">
+        <h2 style="color: #f57c00; margin-top: 0;">⚠️ Nueva Incidencia Reportada</h2>
+        
+        <div style="background: #fff3e0; padding: 15px; border-radius: 5px; border-left: 4px solid #ff9800; margin: 20px 0;">
+          <p style="margin: 5px 0;"><strong>ID:</strong> ${datos.id}</p>
+          <p style="margin: 5px 0;"><strong>Recurso:</strong> ${datos.recurso}</p>
+          <p style="margin: 5px 0;"><strong>Categoría:</strong> ${datos.categoria}</p>
+          <p style="margin: 5px 0;"><strong>Prioridad:</strong> ${prioridadIcon} ${datos.prioridad}</p>
+          <p style="margin: 5px 0;"><strong>Reportado por:</strong> ${datos.usuario}</p>
+        </div>
+        
+        <h3>Descripción:</h3>
+        <p style="background: #f5f5f5; padding: 15px; border-radius: 5px; white-space: pre-wrap;">${datos.descripcion}</p>
+        
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+        
+        <p style="font-size: 0.9em; color: #666;">
+          Accede al panel de administración para gestionar esta incidencia.
+        </p>
+      </div>
+    `;
+
+    MailApp.sendEmail({
+      to: emailAdmin,
+      subject: asunto,
+      htmlBody: cuerpo
+    });
+
+    Logger.log(`📧 Email enviado a admin: ${emailAdmin}`);
+
+  } catch (e) {
+    Logger.log('⚠️ Error enviando email admin: ' + e);
+  }
+}
+
+
+function enviarEmailIncidenciaResuelta(datos) {
+  try {
+    const asunto = `✅ Incidencia resuelta - ${datos.recurso}`;
+
+    const cuerpo = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #eee; padding: 20px; border-radius: 8px;">
+        <h2 style="color: #4caf50; margin-top: 0;">✅ Incidencia Resuelta</h2>
+        
+        <p>La incidencia que reportaste ha sido marcada como <strong>resuelta</strong>.</p>
+        
+        <div style="background: #e8f5e9; padding: 15px; border-radius: 5px; border-left: 4px solid #4caf50; margin: 20px 0;">
+          <p style="margin: 5px 0;"><strong>ID:</strong> ${datos.id}</p>
+          <p style="margin: 5px 0;"><strong>Recurso:</strong> ${datos.recurso}</p>
+        </div>
+        
+        ${datos.notas ? `
+        <h3>Notas del administrador:</h3>
+        <p style="background: #f5f5f5; padding: 15px; border-radius: 5px; white-space: pre-wrap;">${datos.notas}</p>
+        ` : ''}
+        
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+        
+        <p style="font-size: 0.9em; color: #666;">
+          El recurso ya está disponible para reservar nuevamente.
+        </p>
+      </div>
+    `;
+
+    MailApp.sendEmail({
+      to: datos.email,
+      subject: asunto,
+      htmlBody: cuerpo
+    });
+
+    Logger.log(`📧 Email enviado a usuario: ${datos.email}`);
+
+  } catch (e) {
+    Logger.log('⚠️ Error enviando email usuario: ' + e);
+  }
+}
+
+
+/**
  * ===========================================================================
  * 🔄 AUTO-UPDATER - SISTEMA DE ACTUALIZACIÓN AUTOMÁTICA v1.5.0
  * ===========================================================================
@@ -42,38 +720,65 @@ const SYSTEM_VERSION = '1.5.0';
  * 3. Despliégalo como Web App (Ejecutar como: Yo, Acceso: Cualquiera)
  * 4. Copia la URL y pégala aquí abajo
  */
-const UPDATE_SERVER_URL = ''; // ← PEGAR AQUÍ la URL de tu servidor de versiones
+const UPDATE_SERVER_URL = ''; // ← PEGAR AQUÍ la URL de tu servidor de versiones (y COMMITEARLA al repo)
 
 /**
- * URL base del repositorio en GitHub (para descargar código fuente).
- * Se usa la API raw de GitHub para obtener los archivos .gs y .html
+ * Devuelve la URL del servidor de versiones.
+ * La propiedad UPDATE_SERVER_URL de ScriptProperties tiene prioridad sobre la
+ * constante, de modo que una copia puede sobrescribirla sin tocar el código
+ * y las actualizaciones no la borran.
  */
-const GITHUB_REPO_RAW = 'https://raw.githubusercontent.com/maestroseb/reservasrecursosysalas/main';
+function getUpdateServerUrl_() {
+  return PropertiesService.getScriptProperties().getProperty('UPDATE_SERVER_URL') || UPDATE_SERVER_URL;
+}
 
 /**
- * Lista de archivos que componen el sistema y deben actualizarse.
- * 'name' es el nombre del archivo en GitHub (con extensión).
- * 'type' es el tipo de archivo en la API de Apps Script:
- *   - 'SERVER_JS' para archivos .gs
- *   - 'HTML' para archivos .html
- * 'scriptName' es el nombre SIN extensión que usa la API de Apps Script.
+ * URL base del repositorio en GitHub (SIN rama/tag; el ref lo decide el
+ * manifiesto que envía el servidor de versiones, con fallback a 'main').
+ */
+const GITHUB_REPO_RAW = 'https://raw.githubusercontent.com/maestroseb/reservasrecursosysalas';
+
+/**
+ * Lista LOCAL de archivos del sistema (fallback).
+ * ⚠️ La lista autoritativa la envía el servidor de versiones en el campo
+ * 'files' del JSON (ver VersionServidor.gs): así las copias antiguas siempre
+ * actualizan con la lista de archivos de la versión NUEVA, no con la suya.
+ * 'type': 'SERVER_JS' para .gs, 'HTML' para .html.
+ * 'scriptName': nombre SIN extensión en la API de Apps Script.
  */
 const UPDATABLE_FILES = [
   { name: 'Codigo.gs', type: 'SERVER_JS', scriptName: 'Codigo' },
   { name: 'AdminFunctions.gs', type: 'SERVER_JS', scriptName: 'AdminFunctions' },
-  { name: 'Setup.gs', type: 'SERVER_JS', scriptName: 'Setup' },
-  { name: 'Incidencias.gs', type: 'SERVER_JS', scriptName: 'Incidencias' },
   { name: 'ReservasRecurrentes.gs', type: 'SERVER_JS', scriptName: 'ReservasRecurrentes' },
-  { name: 'AutoUpdater.gs', type: 'SERVER_JS', scriptName: 'AutoUpdater' },
+  { name: 'Sistema.gs', type: 'SERVER_JS', scriptName: 'Sistema' },
   { name: 'index.html', type: 'HTML', scriptName: 'index' },
   { name: 'admin-panel.html', type: 'HTML', scriptName: 'admin-panel' },
   { name: 'admin-scripts.html', type: 'HTML', scriptName: 'admin-scripts' },
   { name: 'scripts.html', type: 'HTML', scriptName: 'scripts' },
   { name: 'styles.html', type: 'HTML', scriptName: 'styles' },
-  { name: 'Sidebar.html', type: 'HTML', scriptName: 'Sidebar' },
-  { name: 'ActivacionSistema.html', type: 'HTML', scriptName: 'ActivacionSistema' },
-  { name: 'registro.html', type: 'HTML', scriptName: 'registro' }
+  { name: 'instalacion.html', type: 'HTML', scriptName: 'instalacion' }
 ];
+
+/**
+ * Devuelve el manifiesto de actualización guardado en la última comprobación:
+ * { ref, files }. Si el servidor no envió manifiesto, usa los valores locales.
+ * @private
+ */
+function getUpdateManifest_() {
+  let ref = 'main';
+  let files = UPDATABLE_FILES;
+  try {
+    const guardado = PropertiesService.getScriptProperties().getProperty('UPDATE_MANIFEST');
+    if (guardado) {
+      const manifest = JSON.parse(guardado);
+      if (manifest.ref) ref = manifest.ref;
+      if (manifest.files && manifest.files.length) files = manifest.files;
+    }
+  } catch (e) {
+    Logger.log('⚠️ Manifiesto inválido, usando lista local: ' + e.toString());
+  }
+  return { ref: ref, files: files };
+}
 
 
 /* ============================================
@@ -86,12 +791,13 @@ const UPDATABLE_FILES = [
  */
 function comprobarActualizaciones() {
   try {
-    if (!UPDATE_SERVER_URL) {
+    const serverUrl = getUpdateServerUrl_();
+    if (!serverUrl) {
       Logger.log('⚠️ UPDATE_SERVER_URL no configurada.');
       return { hayActualizacion: false, error: 'Servidor de actualizaciones no configurado' };
     }
 
-    const response = UrlFetchApp.fetch(UPDATE_SERVER_URL, {
+    const response = UrlFetchApp.fetch(serverUrl, {
       muteHttpExceptions: true,
       headers: { 'Accept': 'application/json' }
     });
@@ -120,6 +826,16 @@ function comprobarActualizaciones() {
     const props = PropertiesService.getScriptProperties();
     props.setProperty('LAST_UPDATE_CHECK', new Date().toISOString());
     props.setProperty('LATEST_REMOTE_VERSION', versionRemota);
+
+    // Guardar el manifiesto remoto (ref + lista de archivos de la versión nueva)
+    if (datos.files || datos.ref) {
+      props.setProperty('UPDATE_MANIFEST', JSON.stringify({
+        ref: datos.ref || 'main',
+        files: datos.files || null
+      }));
+    } else {
+      props.deleteProperty('UPDATE_MANIFEST');
+    }
 
     if (hayActualizacion) {
       props.setProperty('UPDATE_AVAILABLE', 'true');
@@ -404,7 +1120,7 @@ function actualizarCodigoViaAPI_(archivos) {
     // Primero: incluir el manifiesto (appsscript.json) - OBLIGATORIO
     // Descargarlo de GitHub también
     try {
-      const manifestResp = UrlFetchApp.fetch(GITHUB_REPO_RAW + '/appsscript.json', { muteHttpExceptions: true });
+      const manifestResp = UrlFetchApp.fetch(GITHUB_REPO_RAW + '/' + getUpdateManifest_().ref + '/appsscript.json', { muteHttpExceptions: true });
       if (manifestResp.getResponseCode() === 200) {
         apiFiles.push({
           name: 'appsscript',
@@ -497,10 +1213,11 @@ function actualizarCodigoViaAPI_(archivos) {
  */
 function descargarArchivosDesdeGitHub_() {
   const resultados = [];
+  const manifest = getUpdateManifest_();
 
-  for (const archivo of UPDATABLE_FILES) {
+  for (const archivo of manifest.files) {
     try {
-      const url = GITHUB_REPO_RAW + '/' + archivo.name;
+      const url = GITHUB_REPO_RAW + '/' + manifest.ref + '/' + archivo.name;
       const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
 
       if (response.getResponseCode() === 200) {

@@ -66,7 +66,6 @@ function onOpen() {
     menu.addItem('🔗 Ver URL de acceso', 'mostrarURLRapido');
     menu.addSeparator();
     menu.addItem('🔄 Buscar actualizaciones', 'comprobarActualizacionesManual');
-    menu.addItem('🔄 Aplicar actualización', 'aplicarActualizacion');
     menu.addSeparator();
     menu.addItem('⚙️ Cambiar URL manualmente', 'cambiarURLManual');
     menu.addItem('ℹ️ Versión v' + SYSTEM_VERSION, 'mostrarInfoVersion');
@@ -75,7 +74,9 @@ function onOpen() {
 }
 
 function mostrarInstruccionesSidebar() {
-  const html = HtmlService.createHtmlOutputFromFile('Sidebar')
+  const template = HtmlService.createTemplateFromFile('instalacion');
+  template.vista = 'sidebar';
+  const html = template.evaluate()
     .setTitle('🚀 Guía de Instalación')
     .setWidth(420);
 
@@ -645,12 +646,14 @@ function doGet(e) {
   // Esta comprobación debe ir PRIMERO. Si no está instalado, no permitimos nada más.
   const props = PropertiesService.getScriptProperties();
 
-  // Usamos la misma clave que definimos en Setup.gs ('SETUP_COMPLETED')
+  // Usamos la misma clave que definimos en Sistema.gs ('SETUP_COMPLETED')
   const isInstalled = props.getProperty('SETUP_COMPLETED');
 
   // Si NO está instalado (o es distinto de 'true'), lanzamos el Instalador
   if (isInstalled !== 'true') {
-    return HtmlService.createTemplateFromFile('ActivacionSistema') // Asegúrate de que el HTML se llama 'ActivacionSistema'
+    const instalador = HtmlService.createTemplateFromFile('instalacion');
+    instalador.vista = 'activacion';
+    return instalador
       .evaluate()
       .setTitle('🚀 Setup del Sistema')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
@@ -701,7 +704,8 @@ function doGet(e) {
   if (!authResult.isAuthorized) {
     Logger.log(">> Usuario no autorizado. Mostrando Registro.");
 
-    const template = HtmlService.createTemplateFromFile('registro');
+    const template = HtmlService.createTemplateFromFile('instalacion');
+    template.vista = 'registro';
     template.email = userEmail;
 
     return template.evaluate()

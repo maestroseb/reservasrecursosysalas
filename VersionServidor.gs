@@ -15,7 +15,7 @@
  *    - Ejecutar como: YO MISMO
  *    - Quién tiene acceso: CUALQUIERA
  * 5. Copia la URL generada
- * 6. Pega esa URL en la constante UPDATE_SERVER_URL de "AutoUpdater.gs"
+ * 6. Pega esa URL en la constante UPDATE_SERVER_URL de "Sistema.gs"
  *    en tu repositorio principal
  *
  * CÓMO PUBLICAR UNA NUEVA VERSIÓN:
@@ -25,7 +25,7 @@
  * 3. IMPORTANTE: Crea una nueva implementación (o actualiza la existente)
  *    Para actualizar sin cambiar la URL:
  *    - "Implementar" → "Gestionar implementaciones" → Editar → "Nueva versión"
- * 4. Actualiza SYSTEM_VERSION en AutoUpdater.gs del repo principal
+ * 4. Actualiza SYSTEM_VERSION en Sistema.gs del repo principal
  * 5. Haz push a GitHub
  *
  * Así de simple: cada vez que publiques una versión, editas este archivo
@@ -57,7 +57,27 @@ const VERSION_INFO = {
   urlDescarga: 'https://github.com/maestroseb/reservasrecursosysalas',
 
   // 📌 Versión mínima compatible (opcional - para avisar a los muy desactualizados)
-  versionMinima: '1.0.0'
+  versionMinima: '1.0.0',
+
+  // 🌿 Ref de GitHub de donde descargar esta versión (tag recomendado, ej: 'v1.5.0').
+  // Crea el tag con: git tag v1.5.0 && git push origin v1.5.0
+  ref: 'main',
+
+  // 📂 Lista AUTORITATIVA de archivos de esta versión.
+  // ⚠️ La API de Apps Script REEMPLAZA el proyecto entero: cualquier archivo
+  // que no esté aquí desaparecerá de las copias. Mantenla sincronizada con el repo.
+  files: [
+    { name: 'Codigo.gs', type: 'SERVER_JS', scriptName: 'Codigo' },
+    { name: 'AdminFunctions.gs', type: 'SERVER_JS', scriptName: 'AdminFunctions' },
+    { name: 'ReservasRecurrentes.gs', type: 'SERVER_JS', scriptName: 'ReservasRecurrentes' },
+    { name: 'Sistema.gs', type: 'SERVER_JS', scriptName: 'Sistema' },
+    { name: 'index.html', type: 'HTML', scriptName: 'index' },
+    { name: 'admin-panel.html', type: 'HTML', scriptName: 'admin-panel' },
+    { name: 'admin-scripts.html', type: 'HTML', scriptName: 'admin-scripts' },
+    { name: 'scripts.html', type: 'HTML', scriptName: 'scripts' },
+    { name: 'styles.html', type: 'HTML', scriptName: 'styles' },
+    { name: 'instalacion.html', type: 'HTML', scriptName: 'instalacion' }
+  ]
 };
 
 
@@ -122,6 +142,8 @@ function doGet(e) {
         critica: VERSION_INFO.critica,
         urlDescarga: VERSION_INFO.urlDescarga,
         versionMinima: VERSION_INFO.versionMinima,
+        ref: VERSION_INFO.ref,
+        files: VERSION_INFO.files,
         timestamp: new Date().toISOString()
       };
       break;
