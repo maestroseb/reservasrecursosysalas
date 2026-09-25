@@ -123,18 +123,6 @@ function hideMessages() {
    UTILIDADES GENERALES
    ============================================ */
 
-function debounce(func, wait) {
-  let timeout;
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
-}
-
 // Selector rápido de elementos
 const $ = (id) => document.getElementById(id);
 
@@ -3350,39 +3338,6 @@ function actualizarContadorIncidencias() {
  * CAMBIAR ESTADO (Botón Verde)
  */
 
-function cambiarEstadoIncidencia(idIncidencia, nuevoEstado) {
-  // Solo permitimos resolver por ahora con este botón
-  if (nuevoEstado !== 'Resuelta') return;
-
-  if (!confirm(`¿Confirmas que la incidencia ${idIncidencia} está resuelta?\n\nSe enviará un correo al usuario.`)) {
-    return;
-  }
-
-  document.body.style.cursor = 'wait';
-
-  // Llamada al nuevo backend
-  google.script.run
-    .withSuccessHandler(function(res) {
-      document.body.style.cursor = 'default';
-      if (res.exito) {
-        // Actualizar UI Localmente
-        const index = incidenciasActuales.findIndex(i => i.ID_Incidencia === idIncidencia);
-        if (index !== -1) {
-          incidenciasActuales[index].Estado = 'Resuelta';
-        }
-        renderIncidencias(); // Redibujar
-        // alert(res.mensaje); // Opcional: mostrar mensaje
-      } else {
-        alert('❌ Error: ' + res.error);
-      }
-    })
-    .withFailureHandler(function(err) {
-      document.body.style.cursor = 'default';
-      alert('Error de conexión');
-    })
-    .backend_actualizarIncidencia(idIncidencia, 'RESOLVER', null);
-}
-
 
 // ========== MODAL EDITAR NOTA INCIDENCIA ==========
 
@@ -3463,131 +3418,6 @@ function guardarNotaIncidenciaModal() {
       showToast('error', 'Error de conexión');
     })
     .backend_actualizarIncidencia(incidenciaIdActual, 'EDITAR_NOTA', nuevaNota);
-}
-
-/**
- * Ajusta el tamaño del header según incidencias y rol de usuario
- */
-function ajustarHeaderSegunIncidencias() {
-  const numIncidencias = todasLasIncidencias.filter(i =>
-    i.Estado === 'Pendiente' || i.Estado === 'En proceso'
-  ).length;
-
-  const esAdmin = globalState && globalState.isAdmin === true;
-
-  const btnIncidencias = document.getElementById('btnIncidenciasGlobal');
-  const headerLogo = document.getElementById('headerLogo') || document.getElementById('headerLogoPlaceholder');
-  const headerTitle = document.getElementById('headerTitle');
-  const headerBranding = document.getElementById('headerBranding');
-  const myReservationsBtn = document.getElementById('myReservationsButton');
-
-  // ========== LÓGICA PRINCIPAL ==========
-
-  // Si hay incidencias pendientes y es admin, ajustar layout
-  if (numIncidencias > 0 && esAdmin && btnIncidencias) {
-    
-    // SOLO compactar si ES ADMIN
-    if (esAdmin) {
-      // --- MODO COMPACTO (Admin con incidencias) ---
-      
-      // Logo/placeholder
-      if (headerLogo) {
-        headerLogo.classList.remove('h-10', 'w-10');
-        headerLogo.classList.add('h-9', 'w-9', 'md:h-10', 'md:w-10');
-      }
-      
-      // Título
-      if (headerTitle) {
-        headerTitle.classList.remove('text-lg');
-        headerTitle.classList.add('text-base', 'md:text-lg', 'truncate', 'max-w-[160px]', 'sm:max-w-none');
-      }
-      
-      // Branding container
-      if (headerBranding) {
-        headerBranding.classList.remove('gap-4');
-        headerBranding.classList.add('gap-3', 'md:gap-4');
-      }
-      
-      // Botón incidencias
-      btnIncidencias.classList.remove('h-10', 'px-4');
-      btnIncidencias.classList.add('h-9', 'w-9', 'md:w-auto', 'md:h-10', 'md:px-4', 'justify-center', 'md:justify-start');
-      
-      const spanIncidencias = btnIncidencias.querySelector('span:not([id])');
-      if (spanIncidencias) {
-        spanIncidencias.classList.remove('hidden', 'sm:inline');
-        spanIncidencias.classList.add('hidden', 'md:inline');
-      }
-      
-      // Botón Mis Reservas
-      if (myReservationsBtn) {
-        myReservationsBtn.classList.remove('h-10', 'px-3', 'min-[480px]:px-4');
-        myReservationsBtn.classList.add('h-9', 'w-9', 'md:w-auto', 'md:h-10', 'md:px-4', 'justify-center', 'md:justify-start');
-        
-        const spanReservas = myReservationsBtn.querySelector('span');
-        if (spanReservas) {
-          spanReservas.classList.remove('hidden', 'min-[480px]:inline');
-          spanReservas.classList.add('hidden', 'md:inline');
-        }
-        
-        // Ajustar icono
-        const iconReservas = myReservationsBtn.querySelector('iconify-icon');
-        if (iconReservas) {
-          iconReservas.classList.remove('text-xl', 'min-[480px]:text-lg');
-          iconReservas.classList.add('text-xl', 'md:text-lg');
-        }
-      }
-      
-      // Botones Admin
-      const btnAdmin = document.getElementById('btnIrAdmin');
-      const btnVolver = document.getElementById('btnVolverApp');
-      
-      if (btnAdmin) {
-        btnAdmin.classList.remove('h-10', 'px-3', 'min-[480px]:px-4');
-        btnAdmin.classList.add('h-9', 'w-9', 'md:w-auto', 'md:h-10', 'md:px-4', 'justify-center', 'md:justify-start');
-        
-        const spanAdmin = btnAdmin.querySelector('span');
-        if (spanAdmin) {
-          spanAdmin.classList.remove('hidden', 'min-[480px]:inline');
-          spanAdmin.classList.add('hidden', 'md:inline');
-        }
-        
-        const iconAdmin = btnAdmin.querySelector('iconify-icon');
-        if (iconAdmin) {
-          iconAdmin.classList.remove('text-xl', 'min-[480px]:text-lg');
-          iconAdmin.classList.add('text-xl', 'md:text-lg');
-        }
-      }
-      
-      if (btnVolver) {
-        btnVolver.classList.remove('h-10', 'px-3', 'min-[480px]:px-4');
-        btnVolver.classList.add('h-9', 'w-9', 'md:w-auto', 'md:h-10', 'md:px-4', 'justify-center', 'md:justify-start');
-        
-        const spanVolver = btnVolver.querySelector('span');
-        if (spanVolver) {
-          spanVolver.classList.remove('hidden', 'min-[480px]:inline');
-          spanVolver.classList.add('hidden', 'md:inline');
-        }
-        
-        const iconVolver = btnVolver.querySelector('iconify-icon');
-        if (iconVolver) {
-          iconVolver.classList.remove('text-xl', 'min-[480px]:text-lg');
-          iconVolver.classList.add('text-xl', 'md:text-lg');
-        }
-      }
-    }
-    // Si NO es admin, mantener header GRANDE aunque haya incidencias
-  }
-
-  console.log(`📐 Header ajustado: ${numIncidencias} incidencias, Admin: ${esAdmin}`);
-}
-
-/**
- * Helper: ¿Hay incidencias pendientes?
- */
-function hayIncidenciasPendientes() {
-  return todasLasIncidencias.some(i => 
-    i.Estado === 'Pendiente' || i.Estado === 'En proceso'
-  );
 }
 
 

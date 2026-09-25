@@ -59,20 +59,28 @@ Con *Ejecutar como: Usuario que implementa*, Google **solo** facilita el email d
 - Renombrar el ID de un tramo no actualiza Reservas ni SolicitudesRecurrentes.
 - Si se aprueba un usuario por email con el panel admin abierto, el siguiente "Guardar usuarios" lo borra.
 
-## 🚀 Fase 3 — velocidad de carga
-1. **No incluir `admin-panel` + `admin-scripts` (≈320 KB, 60 % de la página) para no-admin.** Requiere Fase 1 (ya hecha).
-2. **Tailwind se compila en el navegador** (tailwind.js runtime): sustituir por CSS precompilado. Es la mejora de carga más grande.
-3. Iconify con `defer`.
-4. `crearNuevaReserva`: lee Reservas ~6 veces y Usuarios 3 dentro del lock, envía el email antes de liberar el lock y purga la caché estática sin necesidad.
-5. `getAdminData` ejecuta la migración `migrarIdSolicitudRecurrente` en cada carga; `purgarCache` recalcula `getStaticData` entero.
-6. `getAppConfig` sin caché en cada `doGet`; `checkUserAuthorization` se ejecuta 2 veces por carga.
+## ✅ Fase 3 — velocidad de carga (aplicada)
+| Cambio | Efecto |
+|---|---|
+| Tailwind precompilado en `tailwind-css.html` (62 KB) en vez de `tailwind.js` compilando en el navegador | Sin bloqueo de render ni recompilación en cada cambio del DOM; sin depender de GitHub Pages/CDN |
+| `admin-panel` + `admin-scripts` solo para administradores | ~250 KB menos por carga para el profesorado |
+| Iconify con `defer` | No bloquea el render |
+| `getStaticData`: Reservas se lee 1 vez (antes 2) | |
+| `crearNuevaReserva`: Reservas 1 lectura (antes ~4), sin releer todas las hojas, email tras liberar el lock, sin purgar la caché estática | Reservas más rápidas y menos esperas con varios usuarios |
+| `getAppConfig` usa la configuración cacheada | Una lectura menos en cada carga |
+| `purgarCache` ya no regenera todos los datos | Guardados del panel admin más rápidos |
+| Migración de `ID_Solicitud_Recurrente` solo una vez y en bloque | Apertura del panel admin más rápida |
 
-## 🧟 Fase 4 — código zombie (≈1.500 líneas, borrado sin riesgo funcional)
-- **AdminFunctions.gs**: `createRecurso/updateRecurso/deleteRecurso`, `generarDisponibilidadRecurso`, `createTramo/updateTramo/deleteTramo`, `updateDisponibilidad`, `createUsuario` (¡escribe columnas en orden incorrecto!), `updateUsuario/deleteUsuario`, `updateReservaAdmin/deleteReservaAdmin` + sus emails, `getSolicitudesPendientesGlobal`.
-- **ReservasRecurrentes.gs**: `getMisSolicitudesRecurrentes`, `actualizarNotasRecurrencia`, `getReservasDeGrupoRecurrente`, `getMisReservasRecurrentes`, `contarSolicitudesPendientes`.
-- **Incidencias.gs**: `actualizarEstadoIncidencia`. **Codigo.gs**: fallback inalcanzable en `getReservasFrescas`, `CACHE_KEYS.STATIC_DATA`, `CACHE_TIMES.STATIC`.
-- **scripts.html**: `ajustarHeaderSegunIncidencias` (110 líneas), `cambiarEstadoIncidencia`, `debounce`.
-- **admin-scripts.html**: lista de recurrentes sin contenedor en el HTML (~660 líneas), `aprobarSolicitudRapida`, `aprobarTodasPendientes`, `verDetalleSolicitud`, `ICONIFY_ICONS`, `getDispKey`, `setVal/getVal/...`.
-- **admin-panel.html**: modales `modalRecurso` y `modalDisponibilidad` (~325 líneas).
-- **styles.html**: ~450 líneas de CSS sin uso y reglas duplicadas (`.spinner`, `dialog`, `.admin-subtab`…).
+⚠️ **Nuevo flujo de trabajo**: si añades clases de Tailwind nuevas hay que regenerar `tailwind-css.html` (README > "Regenerar el CSS de Tailwind").
+
+## ✅ Fase 4 — código zombie (aplicada, ~2.600 líneas)
+- **Servidor**: 22 funciones sin ninguna llamada (CRUD antiguos de recursos/tramos/usuarios/reservas, emails asociados, consultas de recurrentes, `actualizarEstadoIncidencia`), constantes de caché obsoletas y fallback inalcanzable.
+- **Cliente**: `debounce`, `cambiarEstadoIncidencia`, `ajustarHeaderSegunIncidencias`, `hayIncidenciasPendientes`, `aprobarSolicitudRapida`, `aprobarTodasPendientes`, `renderizarSolicitudesRecurrentes`, `verDetalleSolicitud`, filtros de la lista antigua, helpers `setVal/getVal…`, `ICONIFY_ICONS`.
+- **HTML**: modales `modalRecurso` y `modalDisponibilidad`.
+- **CSS**: 70 reglas de 33 clases sin uso.
+
+### Pendiente / a decidir
+- **Editar tramos de una recurrencia aprobada** (`abrirModalEditarTramosRecurrencia` + `editarTramosRecurrencia`): el código existe y funciona, pero ya no hay ningún botón que lo abra. ¿Recuperarlo en la UI o eliminarlo?
+- Reglas CSS duplicadas (`.spinner`, `dialog`, `.admin-subtab`): unificarlas cambia el aspecto, no lo he tocado.
+- `button:focus { outline: none !important }` quita el foco visible con teclado (accesibilidad).
 - Config sin efecto: `horas_cancelacion`, `exigir_motivo`, `permitir_multitramo`, `max_tramos_simultaneos` se guardan pero ningún código las aplica.

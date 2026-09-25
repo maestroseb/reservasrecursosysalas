@@ -260,65 +260,6 @@ function backend_toggleMantenimiento(idRecurso, nuevoEstado) {
   }
 }
 
-/**
- * Actualizar estado de incidencia (solo admin) ¿¿ESTO SOBRA??
- */
-function actualizarEstadoIncidencia(idIncidencia, nuevoEstado, notasAdmin) {
-  try {
-    if (!isUserAdmin()) throw new Error("Permiso denegado");
-
-    const ss = getDB();
-    const sheet = ss.getSheetByName(SHEETS.INCIDENCIAS);
-    const data = sheet.getDataRange().getValues();
-
-    let filaEncontrada = -1;
-    let emailUsuario = '';
-    let nombreRecurso = '';
-
-    for (let i = 1; i < data.length; i++) {
-      if (String(data[i][0]) === String(idIncidencia)) {
-        filaEncontrada = i + 1;
-        emailUsuario = data[i][3];
-        nombreRecurso = data[i][2];
-        break;
-      }
-    }
-
-    if (filaEncontrada === -1) {
-      throw new Error("Incidencia no encontrada");
-    }
-
-    // Actualizar estado (columna I = 9)
-    sheet.getRange(filaEncontrada, 9).setValue(nuevoEstado);
-
-    // Actualizar notas admin (columna J = 10)
-    if (notasAdmin !== undefined) {
-      sheet.getRange(filaEncontrada, 10).setValue(notasAdmin);
-    }
-
-    // Si se marca como resuelta, guardar fecha (columna K = 11)
-    if (nuevoEstado === 'Resuelta') {
-      sheet.getRange(filaEncontrada, 11).setValue(new Date());
-
-      // Email al usuario
-      enviarEmailIncidenciaResuelta_({
-        id: idIncidencia,
-        recurso: nombreRecurso,
-        email: emailUsuario,
-        notas: notasAdmin
-      });
-    }
-
-    purgarCache();
-
-    return { success: true, message: 'Estado actualizado' };
-
-  } catch (e) {
-    Logger.log('Error actualizarEstadoIncidencia: ' + e);
-    return { success: false, error: e.toString() };
-  }
-}
-
 
 
 

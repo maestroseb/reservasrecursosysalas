@@ -1,11 +1,14 @@
 /**
  * SISTEMA DE RESERVAS - CÓDIGO PRINCIPAL
- * Versión 1.3 - Modular y Optimizado con Panel Admin Integrado
+ * Versión: ver APP_VERSION (historial en CHANGELOG.md)
  * 
  * Este archivo contiene las funciones principales del sistema.
  * Las funciones de administración están en AdminFunctions.gs
- * Las funciones de setup están en SetupFunctions.gs
+ * Las funciones de setup están en Setup.gs
  */
+
+// Versión de la aplicación (se muestra al pie de la página)
+const APP_VERSION = '1.5.0';
 
 function getDB() {
   return SpreadsheetApp.getActiveSpreadsheet();
@@ -27,13 +30,11 @@ const SHEETS = {
 };
 
 const CACHE_KEYS = {
-  STATIC_DATA: 'STATIC_DATA_V5',
   DISPONIBILIDAD: 'DISP_',
   CONFIGURACION: "configuracion_v1"
 };
 
 const CACHE_TIMES = {
-  STATIC: 3600,
   DISPONIBILIDAD: 1800
 };
 
@@ -71,7 +72,7 @@ function onOpen() {
 }
 
 function mostrarInstruccionesSidebar() {
-  const html = HtmlService.createHtmlOutputFromFile('Sidebar')
+  const html = HtmlService.createTemplateFromFile('Sidebar').evaluate()
     .setTitle('🚀 Guía de Instalación')
     .setWidth(420);
 
@@ -366,6 +367,124 @@ const CACHE_KEY_STATIC = "STATIC_DATA_V6_FULL"; // Clave única
 const CACHE_TIME = 21600; // 6 Horas
 
 /**
+ * Datos estáticos (recursos, tramos, usuarios, cursos, config) desde caché o desde las hojas.
+ * Separado de getStaticData para que reservar / purgar caché no relean también las reservas.
+ */
+function getDatosEstaticos_() {
+  // 2. CACHÉ DE DATOS ESTÁTICOS
+  const cache = CacheService.getScriptCache();
+  const cachedJSON = cache.get(CACHE_KEY_STATIC);
+
+  let recursos, tramos, usuariosMap, cursos, modoVisualizacionCursos, configuracion;  // ✅ MODIFICADO
+
+  if (cachedJSON) {
+    Logger.log("✅ Datos estáticos desde CACHÉ V6");
+    const staticData = JSON.parse(cachedJSON);
+    recursos = staticData.recursos;
+    tramos = staticData.tramos;
+    usuariosMap = staticData.usuariosMap;
+    cursos = staticData.cursos;
+    modoVisualizacionCursos = staticData.modoVisualizacionCursos;
+    configuracion = staticData.configuracion || {};  // ✅ AÑADIDO
+  } else {
+    Logger.log("🔄 Generando datos estáticos desde Excel...");
+    const ss = getDB();
+
+    // RECURSOS (solo activos)
+    const sheetRecursos = ss.getSheetByName(SHEETS.RECURSOS);
+    recursos = sheetToObjects(sheetRecursos)
+      .filter(r => r.estado && r.estado.toLowerCase() === 'activo');
+
+    // TRAMOS (con normalización de campos)
+    const sheetTramos = ss.getSheetByName(SHEETS.TRAMOS);
+    const tramosRaw = sheetToObjects(sheetTramos);
+
+    tramos = tramosRaw.map(t => {
+      const nombreCampo = t.nombre_tramo || t.nombretramo || t['nombre tramo'] ||
+        t.nombre || t.tramo || Object.values(t)[1] || 'Tramo sin nombre';
+
+      const horainicioCampo = t.hora_inicio || t.horainicio || t['hora inicio'] ||
+        t.hora_ini || t.inicio || '';
+
+      const horafinCampo = t.hora_fin || t.horafin || t['hora fin'] ||
+        t.hora_final || t.fin || '';
+
+      return {
+        id_tramo: t.id_tramo || t.idtramo || t.id || Object.values(t)[0],
+        nombre_tramo: nombreCampo,
+        hora_inicio: horainicioCampo,
+        hora_fin: horafinCampo,
+        activo: t.activo !== undefined ? t.activo : true
+      };
+    });
+
+    // USUARIOS → MAPA (email → nombre)
+    const sheetUsuarios = ss.getSheetByName(SHEETS.USUARIOS);
+    const allUsuarios = sheetToObjects(sheetUsuarios);
+    usuariosMap = {};
+    allUsuarios.forEach(u => {
+      if (u.email_usuario) {
+        usuariosMap[u.email_usuario.toLowerCase()] = u.nombre_completo || u.email_usuario;
+      }
+    });
+
+    // CURSOS + MODO VISUALIZACIÓN
+    const sheetCursos = ss.getSheetByName(SHEETS.CURSOS);
+    let cursosData = { cursos: [], modoVisualizacion: 'botones' };
+
+    if (sheetCursos) {
+      const modoViz = sheetCursos.getRange('D1').getValue();
+      cursosData.modoVisualizacion = modoViz && modoViz.toString().toLowerCase() === 'listado' ? 'listado' : 'botones';
+
+      const allCursos = sheetToObjects(sheetCursos);
+      cursosData.cursos = allCursos
+        .map(c => ({ etapa: c.etapa || '', curso: c.curso || '' }))
+        .filter(c => c.etapa && c.curso);
+    }
+
+    cursos = cursosData.cursos;
+    modoVisualizacionCursos = cursosData.modoVisualizacion;
+
+    // ✅ CONFIGURACIÓN (NUEVO)
+    Logger.log("📋 Cargando configuración del sistema...");
+    const sheetConfig = ss.getSheetByName(SHEETS.CONFIG);
+    configuracion = {};
+    
+    if (sheetConfig) {
+      const configData = sheetToObjects(sheetConfig);
+      configData.forEach(item => {
+        const clave = item.clave;
+        let valor = item.valor;
+        
+        if (!clave) return;
+        
+        configuracion[clave] = parsearValorConfig_(valor);
+      });
+      Logger.log(`⚙️ Configuración cargada: ${Object.keys(configuracion).length} parámetros`);
+    }
+
+    // GUARDAR EN CACHÉ V6
+    const dataToCache = {
+      recursos,
+      tramos,
+      usuariosMap,
+      cursos,
+      modoVisualizacionCursos,
+      configuracion  // ✅ AÑADIDO
+    };
+
+    try {
+      cache.put(CACHE_KEY_STATIC, JSON.stringify(dataToCache), CACHE_TIME);
+      Logger.log(`💾 Cache V6 guardado: ${recursos.length} recursos, ${tramos.length} tramos`);
+    } catch (e) {
+      Logger.log("⚠️ Error guardando caché: " + e.message);
+    }
+  }
+
+  return { recursos, tramos, usuariosMap, cursos, modoVisualizacionCursos, configuracion };
+}
+
+/**
  * FUNCIÓN ÚNICA - TODO EN UNO
  * Devuelve: Datos estáticos + Reservas + Info del usuario
  */
@@ -383,121 +502,16 @@ function getStaticData() {
     const isAdmin = auth ? auth.isAdmin : false;
     const userName = auth ? auth.userName : email;
 
-    // 2. CACHÉ DE DATOS ESTÁTICOS
-    const cache = CacheService.getScriptCache();
-    const cachedJSON = cache.get(CACHE_KEY_STATIC);
-
-    let recursos, tramos, usuariosMap, cursos, modoVisualizacionCursos, configuracion;  // ✅ MODIFICADO
-
-    if (cachedJSON) {
-      Logger.log("✅ Datos estáticos desde CACHÉ V6");
-      const staticData = JSON.parse(cachedJSON);
-      recursos = staticData.recursos;
-      tramos = staticData.tramos;
-      usuariosMap = staticData.usuariosMap;
-      cursos = staticData.cursos;
-      modoVisualizacionCursos = staticData.modoVisualizacionCursos;
-      configuracion = staticData.configuracion || {};  // ✅ AÑADIDO
-    } else {
-      Logger.log("🔄 Generando datos estáticos desde Excel...");
-      const ss = getDB();
-
-      // RECURSOS (solo activos)
-      const sheetRecursos = ss.getSheetByName(SHEETS.RECURSOS);
-      recursos = sheetToObjects(sheetRecursos)
-        .filter(r => r.estado && r.estado.toLowerCase() === 'activo');
-
-      // TRAMOS (con normalización de campos)
-      const sheetTramos = ss.getSheetByName(SHEETS.TRAMOS);
-      const tramosRaw = sheetToObjects(sheetTramos);
-
-      tramos = tramosRaw.map(t => {
-        const nombreCampo = t.nombre_tramo || t.nombretramo || t['nombre tramo'] ||
-          t.nombre || t.tramo || Object.values(t)[1] || 'Tramo sin nombre';
-
-        const horainicioCampo = t.hora_inicio || t.horainicio || t['hora inicio'] ||
-          t.hora_ini || t.inicio || '';
-
-        const horafinCampo = t.hora_fin || t.horafin || t['hora fin'] ||
-          t.hora_final || t.fin || '';
-
-        return {
-          id_tramo: t.id_tramo || t.idtramo || t.id || Object.values(t)[0],
-          nombre_tramo: nombreCampo,
-          hora_inicio: horainicioCampo,
-          hora_fin: horafinCampo,
-          activo: t.activo !== undefined ? t.activo : true
-        };
-      });
-
-      // USUARIOS → MAPA (email → nombre)
-      const sheetUsuarios = ss.getSheetByName(SHEETS.USUARIOS);
-      const allUsuarios = sheetToObjects(sheetUsuarios);
-      usuariosMap = {};
-      allUsuarios.forEach(u => {
-        if (u.email_usuario) {
-          usuariosMap[u.email_usuario.toLowerCase()] = u.nombre_completo || u.email_usuario;
-        }
-      });
-
-      // CURSOS + MODO VISUALIZACIÓN
-      const sheetCursos = ss.getSheetByName(SHEETS.CURSOS);
-      let cursosData = { cursos: [], modoVisualizacion: 'botones' };
-
-      if (sheetCursos) {
-        const modoViz = sheetCursos.getRange('D1').getValue();
-        cursosData.modoVisualizacion = modoViz && modoViz.toString().toLowerCase() === 'listado' ? 'listado' : 'botones';
-
-        const allCursos = sheetToObjects(sheetCursos);
-        cursosData.cursos = allCursos
-          .map(c => ({ etapa: c.etapa || '', curso: c.curso || '' }))
-          .filter(c => c.etapa && c.curso);
-      }
-
-      cursos = cursosData.cursos;
-      modoVisualizacionCursos = cursosData.modoVisualizacion;
-
-      // ✅ CONFIGURACIÓN (NUEVO)
-      Logger.log("📋 Cargando configuración del sistema...");
-      const sheetConfig = ss.getSheetByName(SHEETS.CONFIG);
-      configuracion = {};
-      
-      if (sheetConfig) {
-        const configData = sheetToObjects(sheetConfig);
-        configData.forEach(item => {
-          const clave = item.clave;
-          let valor = item.valor;
-          
-          if (!clave) return;
-          
-          configuracion[clave] = parsearValorConfig_(valor);
-        });
-        Logger.log(`⚙️ Configuración cargada: ${Object.keys(configuracion).length} parámetros`);
-      }
-
-      // GUARDAR EN CACHÉ V6
-      const dataToCache = {
-        recursos,
-        tramos,
-        usuariosMap,
-        cursos,
-        modoVisualizacionCursos,
-        configuracion  // ✅ AÑADIDO
-      };
-
-      try {
-        cache.put(CACHE_KEY_STATIC, JSON.stringify(dataToCache), CACHE_TIME);
-        Logger.log(`💾 Cache V6 guardado: ${recursos.length} recursos, ${tramos.length} tramos`);
-      } catch (e) {
-        Logger.log("⚠️ Error guardando caché: " + e.message);
-      }
-    }
+    // 2. DATOS ESTÁTICOS (caché)
+    const { recursos, tramos, usuariosMap, cursos, modoVisualizacionCursos, configuracion } = getDatosEstaticos_();
 
     // 3. RESERVAS FRESCAS (SIEMPRE desde Excel)
-    const reservas = getReservasFrescas();
+    // (antes se leía la hoja Reservas dos veces: una para todas y otra para las mías)
+    const objsReservas = leerReservasObjetos_();
+    const reservas = getActiveReservations_(objsReservas);
 
     // 4. MIS RESERVAS ACTIVAS
-    const misReservasActivas = getMyActiveReservationsData(email);
+    const misReservasActivas = getMyActiveReservationsData_(email, objsReservas);
 
     // 4b. MOTIVOS DE RECURRENCIAS (para mostrar en "Mis Reservas")
     const misRecurrencias = {};
@@ -555,16 +569,16 @@ function getStaticData() {
    GESTIÓN DE RESERVAS
    ============================================ */
 
-function getActiveReservations() {
+// Lee la hoja Reservas como objetos (una sola lectura reutilizable dentro de la misma petición)
+function leerReservasObjetos_() {
   const sheetReservas = getDB().getSheetByName(SHEETS.RESERVAS);
+  if (!sheetReservas || sheetReservas.getLastRow() < 2) return [];
+  return sheetToObjects(sheetReservas);
+}
 
-  // 🛑 FIX: Si la hoja tiene menos de 2 filas (solo cabecera o vacía), devolvemos lista vacía
-  if (sheetReservas.getLastRow() < 2) {
-    return [];
-  }
-
-  // Ahora ya es seguro ejecutar esto:
-  const todasLasReservas = sheetToObjects(sheetReservas);
+// todasLasReservas (opcional): resultado de leerReservasObjetos_() para no volver a leer la hoja
+function getActiveReservations_(todasLasReservas) {
+  if (!todasLasReservas) todasLasReservas = leerReservasObjetos_();
 
   const hoy = new Date();
   hoy.setHours(0, 0, 0, 0);
@@ -600,10 +614,9 @@ function getActiveReservations() {
 /* ============================================
    OBTENER RESERVAS ACTIVAS DEL USUARIO (PARA CARGA INICIAL)
    ============================================ */
-function getMyActiveReservationsData(userEmail) {
+function getMyActiveReservationsData_(userEmail, todasLasReservas) {
   try {
-    const sheetReservas = getDB().getSheetByName(SHEETS.RESERVAS);
-    const allReservas = sheetToObjects(sheetReservas);
+    const allReservas = todasLasReservas || leerReservasObjetos_();
 
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
@@ -730,6 +743,7 @@ function doGet(e) {
   template.userEmailForHtml = userEmail;
   template.appName = appConfig.appName || "Sistema de Reservas";
   template.logoUrl = appConfig.logoUrl || "";
+  template.appVersion = APP_VERSION;
 
   // Variables para Javascript (JSON stringified)
   template.userNameForJs = JSON.stringify(authResult.userName || userEmail);
@@ -747,39 +761,8 @@ function doGet(e) {
    ============================================ */
 
 // Función separada para Reservas (No cacheable)
-function getReservasFrescas() {
-  const ss = getDB();
-  // Si tienes tu función getActiveReservations, la llamamos aquí:
-  if (typeof getActiveReservations === 'function') {
-    return getActiveReservations();
-  }
-
-  // Si no, usamos tu fallback original:
-  const sheetRes = ss.getSheetByName('Reservas');
-  let reservas = [];
-  if (sheetRes && sheetRes.getLastRow() > 1) {
-    const dataR = sheetRes.getRange(2, 1, sheetRes.getLastRow() - 1, 10).getValues();
-    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-
-    reservas = dataR
-      .filter(r => {
-        // Validación de fecha segura
-        const fechaReserva = r[3] instanceof Date ? r[3] : new Date(r[3]);
-        return fechaReserva >= hoy && String(r[7]) !== 'Cancelada';
-      })
-      .map(r => ({
-        id_reserva: r[0],
-        id_recurso: r[1],
-        email_usuario: r[2],
-        fecha: r[3] instanceof Date ? Utilities.formatDate(r[3], Session.getScriptTimeZone(), 'yyyy-MM-dd') : r[3],
-        id_tramo: r[5],
-        estado: r[7],
-        cantidad: r[6],
-        curso: r[4],
-        notas: r[8]
-      }));
-  }
-  return reservas;
+function getReservasFrescas_() {
+  return getActiveReservations_();
 }
 
 
@@ -793,7 +776,7 @@ function cargarDisponibilidadRecurso(recursoId) {
     Logger.log(`Cargada disponibilidad para ${recursoId}: ${disponibilidad.length} registros`);
 
     // Incluir reservas frescas para que el cliente siempre tenga datos actualizados
-    const reservas = getReservasFrescas();
+    const reservas = getReservasFrescas_();
 
     return {
       success: true,
@@ -873,11 +856,11 @@ function getDisponibilidadRecurso(recursoId) {
 /* ============================================
    VALIDACIÓN DE DISPONIBILIDAD (LÓGICA PERMISIVA ✅)
    ============================================ */
-function checkAvailability(recursoId, fechaISO, tramoId, cantidadPedida, recurso = null, staticData = null) {
+function checkAvailability(recursoId, fechaISO, tramoId, cantidadPedida, recurso = null, staticData = null, reservasActivasPrevias = null) {
 
   // ✅ Solo cargar si no se pasaron como parámetro
   if (!staticData) {
-    staticData = getStaticData();
+    staticData = getDatosEstaticos_();
   }
 
   if (!recurso) {
@@ -910,7 +893,7 @@ function checkAvailability(recursoId, fechaISO, tramoId, cantidadPedida, recurso
   }
 
   // 3. Validar Ocupación
-  const reservasActivas = getActiveReservations();
+  const reservasActivas = reservasActivasPrevias || getActiveReservations_();
 
   let cantidadReservada = 0;
 
@@ -974,10 +957,12 @@ function crearNuevaReserva(reservaData) {
 
     // ✅ VALIDACIONES DE CONFIGURACIÓN (NUEVO - ANTES DE TODO)
     Logger.log("🔍 Validando restricciones de configuración...");
-    validarRestriccionesConfiguracion(email, fechaISO, tramoId);
+    // Una sola lectura de Reservas para todas las validaciones (antes se leía varias veces con el lock cogido)
+    const reservasActivas = getActiveReservations_();
+    validarRestriccionesConfiguracion(email, fechaISO, tramoId, reservasActivas);
 
     // ✅ PASO 1: Cargar datos UNA sola vez
-    const staticData = getStaticData();
+    const staticData = getDatosEstaticos_();
     const recurso = staticData.recursos.find(r => String(r.id_recurso) === String(recursoId));
 
     if (!recurso) {
@@ -985,7 +970,7 @@ function crearNuevaReserva(reservaData) {
     }
 
     Logger.log(`[crearNuevaReserva] Validando disponibilidad para ${recursoId} en ${fechaISO}...`);
-    checkAvailability(recursoId, fechaISO, tramoId, cantidad, recurso, staticData);
+    checkAvailability(recursoId, fechaISO, tramoId, cantidad, recurso, staticData, reservasActivas);
     Logger.log(`[crearNuevaReserva] Validación superada.`);
 
     const idReserva = Utilities.getUuid();
@@ -1037,6 +1022,14 @@ function crearNuevaReserva(reservaData) {
       day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC'
     });
 
+    // ✅ Limpiar caché de disponibilidad del recurso.
+    // (La caché estática NO contiene reservas: borrarla solo obligaba a releer todas las hojas.)
+    const cache = CacheService.getScriptCache();
+    cache.remove(CACHE_KEYS.DISPONIBILIDAD + recursoId);
+
+    // La fila ya está escrita: liberamos el lock antes de enviar el email (lento)
+    lock.releaseLock();
+
     sendConfirmationEmail_(email, authResult.userName, {
       idReserva: idReserva,
       recursoNombre: recursoNombre,
@@ -1046,14 +1039,6 @@ function crearNuevaReserva(reservaData) {
       cantidad: cantidad,
       notas: notas
     });
-
-    // ✅ Limpiar caché (ACTUALIZADO)
-    const cache = CacheService.getScriptCache();
-    cache.remove(CACHE_KEYS.DISPONIBILIDAD + recursoId);
-    cache.remove(CACHE_KEY_STATIC);  // Limpiar caché estática para recargar reservas
-    Logger.log(`💾 Caché limpiada para ${recursoId}`);
-
-    lock.releaseLock();
 
     const nuevaReservaObjeto = {
       id_reserva: idReserva,
@@ -1963,7 +1948,7 @@ function validarAntelacionMinima(fechaISO, tramoId) {
   const minutosMinimos = getConfigValue('minutos_antelacion', 30);
   
   // Obtener el tramo para conocer su hora de inicio
-  const staticData = getStaticData();
+  const staticData = getDatosEstaticos_();
   const tramo = staticData.tramos.find(t => String(t.id_tramo) === String(tramoId));
   
   if (!tramo || !tramo.hora_inicio) {
@@ -2007,13 +1992,14 @@ function validarAntelacionMinima(fechaISO, tramoId) {
  * @param {string} email - Email del usuario
  * @throws {Error} Si el usuario excede el límite de reservas
  */
-function validarLimiteReservas(email) {
+function validarLimiteReservas(email, reservasActivasPrevias) {
   const limiteReservas = getConfigValue('limite_reservas', 3);
 
-  const reservasActivas = getActiveReservations();
+  const reservasActivas = reservasActivasPrevias || getActiveReservations_();
+  const emailNorm = String(email).toLowerCase().trim();
   // Solo contar reservas manuales (excluir las generadas por recurrencias)
   const reservasUsuario = reservasActivas.filter(r =>
-    r.email_usuario === email && !r.id_solicitud_recurrente
+    String(r.email_usuario).toLowerCase().trim() === emailNorm && !r.id_solicitud_recurrente
   );
 
   if (reservasUsuario.length >= limiteReservas) {
@@ -2031,13 +2017,13 @@ function validarLimiteReservas(email) {
  * @param {string} fechaISO - Fecha en formato YYYY-MM-DD
  * @param {string} tramoId - ID del tramo horario
  */
-function validarRestriccionesConfiguracion(email, fechaISO, tramoId) {
+function validarRestriccionesConfiguracion(email, fechaISO, tramoId, reservasActivasPrevias) {
   Logger.log("🔍 Iniciando validaciones de configuración...");
   
   validarModoMantenimiento();
   validarDiasVista(fechaISO);
   validarAntelacionMinima(fechaISO, tramoId);
-  validarLimiteReservas(email);
+  validarLimiteReservas(email, reservasActivasPrevias);
   
   Logger.log("✅ Todas las validaciones de configuración superadas");
   return true;
@@ -2047,26 +2033,12 @@ function validarRestriccionesConfiguracion(email, fechaISO, tramoId) {
    FUNCIÓN AUXILIAR PARA LEER LA CONFIG RÁPIDO Y ACTUALIZAR
    ============================================ */
 function getAppConfig() {
-  // Leemos la configuración para la vista pública
-  const ss = getDB();
-  const sheet = ss.getSheetByName('Config'); // O usa SHEETS.CONFIG si tienes constante
-  const config = {};
-
-  // Valores por defecto
-  config.appName = "Sistema de Reservas";
-  config.logoUrl = "";
-
-  if (sheet && sheet.getLastRow() > 1) {
-    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
-    data.forEach(r => {
-      if (r[0] === 'nombre_centro') config.appName = r[1];
-      if (r[0] === 'url_logo') {
-        // Convertir URL de Drive al formato de imagen pública si es necesario
-        config.logoUrl = convertirUrlLogoParaMostrar(r[1]);
-      }
-    });
-  }
-  return config;
+  // Usa la configuración cacheada (antes se leía la hoja Config en cada carga de página)
+  const cfg = getConfiguracion();
+  return {
+    appName: cfg.nombre_centro ? String(cfg.nombre_centro) : "Sistema de Reservas",
+    logoUrl: cfg.url_logo ? convertirUrlLogoParaMostrar(String(cfg.url_logo)) : ""
+  };
 }
 
 /* ============================================
@@ -2097,10 +2069,19 @@ function purgarCache() {
 
   console.log("✅ Caché purgada correctamente. La próxima carga será desde Excel.");
 
-  const staticData = getStaticData();
-  staticData.recursos.forEach(r => {
-    cache.remove(CACHE_KEYS.DISPONIBILIDAD + r.id_recurso);
-  });
+  // Disponibilidad por recurso: basta con los IDs (columna A de Recursos, incluidos los inactivos).
+  // Antes se regeneraban todos los datos estáticos solo para obtener esta lista.
+  try {
+    const sheetRec = getDB().getSheetByName(SHEETS.RECURSOS);
+    if (sheetRec && sheetRec.getLastRow() > 1) {
+      const claves = sheetRec.getRange(2, 1, sheetRec.getLastRow() - 1, 1).getValues()
+        .map(r => String(r[0]).trim()).filter(Boolean)
+        .map(id => CACHE_KEYS.DISPONIBILIDAD + id);
+      if (claves.length) cache.removeAll(claves);
+    }
+  } catch (e) {
+    Logger.log('⚠️ No se pudo purgar la caché de disponibilidad: ' + e.message);
+  }
 
   Logger.log('Cachés de disponibilidad purgadas.');
 }

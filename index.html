@@ -8,10 +8,10 @@
   <title>Sistema de Reservas</title>
 
   <!-- Iconify CDN -->
-  <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+  <script defer src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
 
-  <!-- Tailwind CSS (el original es https://cdn.tailwindcss.com pero ahora mismo Andared lo bloquea y lo he desviado a una copia que he hecho en Github Pages-->
-  <script src="https://maestroseb.github.io/recursos/tailwind.js"></script>
+  <!-- Tailwind CSS precompilado (antes se compilaba en el navegador con tailwind.js) -->
+  <?!= include('tailwind-css'); ?>
 
   <!-- Estilos Modulares y del Panel Admin -->
   <?!= include('styles'); ?>
@@ -339,8 +339,10 @@
       </div>
     </div>
 
-    <!-- Tab: Panel Admin (MODULAR) -->
+    <!-- Tab: Panel Admin (MODULAR) - solo se envía a administradores (~80 KB menos para el resto) -->
+    <? if (isAdminForJs === 'true') { ?>
     <?!= include('admin-panel'); ?>
+    <? } ?>
 
   </div>
 
@@ -1202,12 +1204,6 @@
         btnVolver.classList.add('hidden');
         btnIrAdmin.classList.remove('hidden');
         
-        // ✅ AÑADIDO: Restaurar botón incidencias si hay pendientes
-        const btnVerInc = document.getElementById('btnVerIncidencias');
-        if (btnVerInc && typeof hayIncidenciasPendientes === 'function' && hayIncidenciasPendientes()) {
-          btnVerInc.classList.remove('hidden');
-        }
-        
         // 6. Ocultar mensajes de error/éxito
         if (typeof hideMessages === 'function') {
           hideMessages();
@@ -1246,9 +1242,13 @@
 
   </script>
 
+  <p class="text-center text-xs text-gray-400 mt-4">v<?= appVersion ?></p>
+
   <?!= include('scripts'); ?>
 
+  <? if (isAdminForJs === 'true') { ?>
   <?!= include('admin-scripts'); ?>
+  <? } ?>
 
 </body>
 
