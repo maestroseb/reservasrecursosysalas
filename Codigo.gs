@@ -280,6 +280,11 @@ function checkUserAuthorization(emailUser) {
       return { isAuthorized: false, isAdmin: false, error: "Falta hoja Usuarios" };
     }
 
+    // Sin email de sesión no se puede identificar a nadie (evita que una fila vacía "coincida")
+    if (!emailUser || !String(emailUser).trim()) {
+      return { isAuthorized: false, isAdmin: false, error: "EMAIL_NO_DISPONIBLE" };
+    }
+
     const data = sheet.getDataRange().getValues();
     if (data.length < 2) return { isAuthorized: false, isAdmin: false }; // Hoja vacía
 
@@ -317,7 +322,8 @@ function checkUserAuthorization(emailUser) {
         // ¡TE ENCONTRÉ!
 
         // Verificar si estás activo (si no existe columna Activo, asumimos que sí)
-        const isActive = colActivo === -1 ? true : (String(row[colActivo]).toLowerCase() === 'true' || String(row[colActivo]).toLowerCase() === 'si' || row[colActivo] === true);
+        const valActivo = String(row[colActivo]).toLowerCase().trim().replace('í', 'i');
+        const isActive = colActivo === -1 ? true : (row[colActivo] === true || valActivo === 'true' || valActivo === 'si');
 
         if (!isActive) {
           return { isAuthorized: false, isAdmin: false, error: "Usuario inactivo" };
@@ -327,7 +333,7 @@ function checkUserAuthorization(emailUser) {
         // Aceptamos: TRUE, true, "Si", "Yes", "Admin"
         let isAdmin = false;
         if (colAdmin !== -1) {
-          const valAdmin = String(row[colAdmin]).toLowerCase();
+          const valAdmin = String(row[colAdmin]).toLowerCase().trim().replace('í', 'i');
           isAdmin = (valAdmin === 'true' || valAdmin === 'si' || valAdmin === 'yes' || valAdmin === 'admin');
         }
 
@@ -692,6 +698,16 @@ function doGet(e) {
   // Verificar permisos
   const authResult = checkUserAuthorization(userEmail);
   Logger.log("¿Está autorizado?: " + authResult.isAuthorized);
+
+  // 🛑 Google no nos da el email del usuario -> registrarse no serviría de nada
+  // (ocurre si la app se implementó con una cuenta de otro dominio, p.ej. @gmail.com,
+  //  o si el usuario entra con una cuenta distinta a la del centro)
+  if (!userEmail) {
+    return HtmlService.createHtmlOutput(buildHtmlEmailNoDisponible_())
+      .setTitle("No se pudo identificar tu cuenta")
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
 
   // 🛑 Si NO está autorizado -> Pantalla de Registro
   if (!authResult.isAuthorized) {
@@ -1526,6 +1542,13 @@ function buildHtmlCancelPage(titulo, mensaje, details) {
    ============================================ */
 function handleAprobarRecurrenteDesdeEmail(idSolicitud) {
   try {
+    if (!isUserAdmin()) {
+      return HtmlService.createHtmlOutput(buildHtmlCancelPage(
+        "Acceso denegado",
+        "Solo un administrador puede aprobar solicitudes."
+      ));
+    }
+
     // Obtener datos de la solicitud
     const sheet = getOrCreateSheetSolicitudesRecurrentes();
     const data = sheet.getDataRange().getValues();
@@ -1598,14 +1621,38 @@ function handleAprobarRecurrenteDesdeEmail(idSolicitud) {
    NUEVAS FUNCIONES DE ALTA DE USUARIO 🚀
    ============================================ */
 
+// Página mostrada cuando Session.getActiveUser() devuelve vacío
+function buildHtmlEmailNoDisponible_() {
+  let dominioDespliegue = '';
+  try { dominioDespliegue = (Session.getEffectiveUser().getEmail() || '').split('@')[1] || ''; } catch (e) { }
+  return `
+    <!DOCTYPE html>
+    <html>
+      <body style="font-family: sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background-color: #fef2f2; padding: 16px; box-sizing: border-box;">
+        <div style="max-width: 520px; text-align: center; padding: 32px; background: white; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);">
+          <div style="font-size: 50px; margin-bottom: 10px;">🔒</div>
+          <h1 style="color: #991b1b; margin: 0; font-size: 22px;">No se pudo identificar tu cuenta</h1>
+          <p style="color: #4b5563; margin-top: 14px; line-height: 1.5;">
+            Google no ha facilitado tu correo a la aplicación, por lo que no es posible comprobar tu acceso.
+          </p>
+          <ul style="text-align: left; color: #4b5563; line-height: 1.6; font-size: 14px;">
+            <li>Entra con tu cuenta del centro${dominioDespliegue ? ' (<b>@' + dominioDespliegue + '</b>)' : ''}. Si tienes varias cuentas abiertas, prueba en una ventana de incógnito.</li>
+            <li><b>Administrador/a:</b> la aplicación debe implementarse desde una cuenta del <b>mismo dominio</b> que el profesorado (p.ej. @g.educaand.es). Si se implementó desde una cuenta @gmail.com u otro dominio, Google oculta el correo de los usuarios y la aplicación les pedirá registrarse siempre.</li>
+          </ul>
+        </div>
+      </body>
+    </html>`;
+}
+
 // 1. EL USUARIO ENVÍA LA SOLICITUD (CORREGIDO)
 function procesarSolicitudRegistro(nombreSolicitante, emailManual) {
   // Intentamos obtenerlo de la sesión, si falla, usamos el que escribió el usuario
-  const emailSession = Session.getActiveUser().getEmail();
-  const emailFinal = emailSession && emailSession !== "" ? emailSession : emailManual;
+  // Solo se admite el email de la sesión: un email tecleado no se puede verificar
+  // y, tras aprobarlo, el usuario seguiría sin poder entrar (bucle de registro).
+  const emailFinal = Session.getActiveUser().getEmail();
 
   if (!emailFinal) {
-    throw new Error("No se ha podido identificar tu correo electrónico.");
+    throw new Error("Google no ha facilitado tu correo a la aplicación. Entra con tu cuenta del centro o avisa al administrador (la app debe implementarse desde una cuenta del mismo dominio).");
   }
 
   const scriptUrl = ScriptApp.getService().getUrl();
@@ -1675,7 +1722,7 @@ function handleAdminApproval(emailNuevo, nombreNuevo) {
     // B. PURGAR CACHÉ (¡ESTO SOLUCIONA TU ESPERA!) 🧹
     // Obligamos al sistema a volver a leer el Excel en la próxima carga
     const cache = CacheService.getScriptCache();
-    cache.remove(CACHE_KEYS.STATIC_DATA);
+    cache.remove(CACHE_KEY_STATIC);
 
     // C. ENVIAR CORREO DE BIENVENIDA 📧
     try {
@@ -1995,7 +2042,8 @@ function purgarCache() {
   cache.removeAll([
     'STATIC_DATA_V5',
     'STATIC_DATA_V4',
-    'STATIC_DATA_V3'
+    'STATIC_DATA_V3',
+    CACHE_KEYS.CONFIGURACION
   ]);
 
   console.log("✅ Caché purgada correctamente. La próxima carga será desde Excel.");
@@ -2067,6 +2115,9 @@ function convertirUrlLogoParaMostrar(url) {
  */
 function procesarUrlLogoDrive(url) {
   try {
+    if (!isUserAdmin()) {
+      return { success: false, message: 'No tienes permisos de administrador', convertedUrl: '' };
+    }
     if (!url || typeof url !== 'string') {
       return { success: false, message: 'URL vacía', convertedUrl: '' };
     }

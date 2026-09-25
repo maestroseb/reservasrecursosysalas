@@ -333,6 +333,10 @@ function aprobarSolicitudRecurrente(idSolicitud, notasAdmin) {
   try {
     Logger.log('✅ Aprobando solicitud: ' + idSolicitud);
 
+    if (!isUserAdmin()) {
+      return { success: false, error: 'No tienes permisos de administrador' };
+    }
+
     const adminEmail = Session.getActiveUser().getEmail();
     const sheet = getOrCreateSheetSolicitudesRecurrentes();
     const data = sheet.getDataRange().getValues();
@@ -430,6 +434,10 @@ function aprobarSolicitudRecurrente(idSolicitud, notasAdmin) {
 function rechazarSolicitudRecurrente(idSolicitud, motivoRechazo) {
   try {
     Logger.log('❌ Rechazando solicitud: ' + idSolicitud);
+
+    if (!isUserAdmin()) {
+      return { success: false, error: 'No tienes permisos de administrador' };
+    }
 
     if (!motivoRechazo || motivoRechazo.trim().length < 5) {
       throw new Error('Indica un motivo para el rechazo');

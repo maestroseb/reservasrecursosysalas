@@ -985,7 +985,7 @@ function renderCursoSelector() {
   globalState.cursoSeleccionado = null;
   if(errorMsg) errorMsg.classList.add('hidden');
   
-  const modo = AdminState.modoVisualizacion || 'botones';
+  const modo = globalState.modoVisualizacionCursos || 'botones';
   console.log('[Selector Cursos] Modo:', modo);
   
   // Crear mapa de etapas
@@ -2551,7 +2551,8 @@ function mostrarSeccionIncidencias() {
   // El botón de incidencias permanece visible (ya no se oculta)
   
   // ✅ ESPERAR A ADMINSTATE SI NO ESTÁ LISTO
-  if (typeof AdminState === 'undefined' || !AdminState.recursos || AdminState.recursos.length === 0) {
+  // Solo los admin cargan AdminState; el resto usa globalState (antes: spinner infinito para no-admin)
+  if (window.IS_ADMIN && (typeof AdminState === 'undefined' || !AdminState.recursos || AdminState.recursos.length === 0)) {
     console.log('⏳ Esperando a que AdminState cargue...');
     
     const lista = document.getElementById('listaIncidencias');

@@ -48,7 +48,8 @@ window.escaparHTML = (str) => {
     if (!str) return '';
     const div = document.createElement('div');
     div.textContent = str;
-    return div.innerHTML;
+    // textContent no escapa comillas: necesario para valores dentro de atributos value="..."
+    return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 };
 
 /* LÓGICA DE CONFIRMACIÓN (MODAL INTELIGENTE) */
@@ -1477,7 +1478,7 @@ function actualizarPanelPendientesRecurso() {
       <div id="pendiente-row-${sol.id_solicitud}" class="px-3 py-2.5 flex items-center justify-between gap-2 border-b border-amber-100 last:border-b-0 hover:bg-amber-100/30 transition-colors">
         <div class="flex-1 min-w-0">
           <div class="text-sm font-medium text-gray-800 truncate">${escaparHTML(sol.nombre_usuario)}</div>
-          <div class="text-xs text-gray-500">${diasDisplay} | ${escaparHTML(tramosDisplay)}</div>
+          <div class="text-xs text-gray-500">${escaparHTML(diasDisplay)} | ${escaparHTML(tramosDisplay)}</div>
         </div>
         <div class="flex gap-1 shrink-0">
           <button id="btn-aprobar-${sol.id_solicitud}" onclick="aprobarSolicitudRapidaConSpinner('${sol.id_solicitud}', this)"
@@ -3141,7 +3142,7 @@ function editarCurso(index, campo, valor) {
 }
 
 function agregarNuevoCurso() {
-  const searchInput = document.getElementById('searchCursos');
+  const searchInput = document.getElementById('buscadorCursos');
   if(searchInput) { searchInput.value = ''; }
   
   CursosState.cursosEnMemoria.push({ etapa: '', curso: '' });
@@ -3176,7 +3177,8 @@ function eliminarCurso(index) {
 }
 
 function filtrarCursos() {
-  const term = document.getElementById('searchCursos').value.toLowerCase();
+  const input = document.getElementById('buscadorCursos');
+  const term = (input ? input.value : '').toLowerCase();
   const filtrados = CursosState.cursosEnMemoria.filter(c => 
     (c.etapa || '').toLowerCase().includes(term) || 
     (c.curso || '').toLowerCase().includes(term)
@@ -3239,7 +3241,11 @@ function guardarCambiosCursos() {
     CursosState.cursosOriginales = JSON.parse(JSON.stringify(CursosState.cursosEnMemoria));
     CursosState.modoOriginal = CursosState.modoVisualizacion;
     
-    if(AdminState) AdminState.modoVisualizacion = CursosState.modoVisualizacion;
+    if(AdminState) {
+      AdminState.modoVisualizacion = CursosState.modoVisualizacion;
+      AdminState.cursos = JSON.parse(JSON.stringify(CursosState.cursosEnMemoria)); // evita que al cambiar de pestaña vuelva la lista antigua
+    }
+    if(typeof globalState !== "undefined") globalState.modoVisualizacionCursos = CursosState.modoVisualizacion;
     
     CursosState.cambiosPendientes = false; 
     SaveBarManager.hide();
@@ -4413,6 +4419,7 @@ function loadAdminData(isSilent = false) {
    ========================================================= */
 // Se ejecuta 3 segundos después de entrar en la web
 function initAdminPrefetch() {
+  if (!window.IS_ADMIN) return; // Los no-admin no tienen permiso: evitamos una llamada inútil al servidor
   setTimeout(() => {
     // Si aún no están listos y no se están cargando...
     if (!adminDataReady && !adminDataLoading) {
@@ -4592,7 +4599,7 @@ function actualizarPanelPendientesGlobal() {
         <div class="flex items-center justify-between gap-2">
           <div class="flex-1 min-w-0">
             <div class="font-medium text-gray-800 text-xs truncate">${escaparHTML(sol.nombre_usuario)}</div>
-            <div class="text-[10px] text-gray-500">${escaparHTML(sol.nombre_recurso)} · ${diasDisplay}</div>
+            <div class="text-[10px] text-gray-500">${escaparHTML(sol.nombre_recurso)} · ${escaparHTML(diasDisplay)}</div>
           </div>
           <div class="flex gap-1 shrink-0">
             <button onclick="event.stopPropagation(); verDetalleSolicitudDirecto('${sol.id_solicitud}')"

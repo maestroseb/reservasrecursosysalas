@@ -22,6 +22,11 @@ const DB_SCHEMA = {
 // ==========================================
 function ejecutarSetupVinculado() {
   try {
+    // 🛡️ Nunca re-ejecutar sobre un sistema ya instalado (sobrescribiría datos y daría admin a quien lo llame)
+    if (PropertiesService.getScriptProperties().getProperty('SETUP_COMPLETED') === 'true') {
+      throw new Error("El sistema ya está instalado.");
+    }
+
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const currentUser = Session.getActiveUser().getEmail();
     
