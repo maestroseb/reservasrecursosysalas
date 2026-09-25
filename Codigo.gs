@@ -662,7 +662,18 @@ function getMyActiveReservationsData_(userEmail, todasLasReservas) {
 /* ===========================================================================
    1. CONTROLADOR DE ACCESO (doGet)
    =========================================================================== */
+// Favicon de la app (calendario, mismo estilo que la cabecera). Se sirve desde el repositorio público vía jsDelivr.
+// Un centro puede cambiarlo por su propia URL de imagen .png.
+const FAVICON_URL = 'https://cdn.jsdelivr.net/gh/maestroseb/reservasrecursosysalas@main/favicon.png';
+
 function doGet(e) {
+  const salida = doGetInterno_(e);
+  // Todas las páginas (app, registro, instalación, cancelaciones...) con el mismo favicon
+  try { if (salida && salida.setFaviconUrl) salida.setFaviconUrl(FAVICON_URL); } catch (err) { }
+  return salida;
+}
+
+function doGetInterno_(e) {
 
   // --- FASE 0: DETECCIÓN DE INSTALACIÓN ---
   // Esta comprobación debe ir PRIMERO. Si no está instalado, no permitimos nada más.

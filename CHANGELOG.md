@@ -48,6 +48,7 @@
 - Eliminado el modal "Editar tramos" de recurrencias (no era accesible y el detalle de la recurrencia ya permite quitar tramos uno a uno).
 - Reglas CSS duplicadas unificadas; el foco vuelve a verse al navegar con teclado.
 - Versión visible al pie de la página.
+- Favicon propio (calendario con check, mismo estilo que la cabecera) en todas las páginas de la app.
 
 ## v1.4.1
 Versión estable previa a la auditoría.
