@@ -229,6 +229,7 @@ function onInitialDataSuccess(data) {
   globalState.usuariosMap = data.usuariosMap || {};
   globalState.misReservasActivas = data.misReservasActivas || [];
   globalState.misRecurrencias = data.misRecurrencias || {};
+  globalState.configuracion = data.configuracion || {};
 
   
   console.log(`📊 Datos cargados: ${globalState.recursos.length} recursos, ${globalState.tramos.length} tramos, ${globalState.reservas.length} reservas activas, ${globalState.cursos.length} cursos.`);
@@ -823,6 +824,89 @@ function loadTramos() {
 }
 
 /* ============================================
+   MULTITRAMO: reservar varios tramos seguidos 🔗
+   Se activa en Config (permitir_multitramo + max_tramos_simultaneos)
+   ============================================ */
+function multitramoActivo() {
+  const cfg = globalState.configuracion || {};
+  const permitir = cfg.permitir_multitramo === true || String(cfg.permitir_multitramo).toLowerCase() === 'true';
+  const maxTramos = Math.max(1, parseInt(cfg.max_tramos_simultaneos, 10) || 1);
+  return permitir && maxTramos > 1 ? maxTramos : 0;
+}
+
+function prepararMultitramo(tramoBtn, esAgrupado) {
+  const cont = $('multitramoContainer');
+  const opciones = $('multitramoOpciones');
+  globalState.tramosSeguidos = [{ id: tramoBtn.dataset.tramoId, disponibles: parseInt(tramoBtn.dataset.disponibles, 10) || 1 }];
+  globalState.numTramosSeleccionados = 1;
+  if (!cont || !opciones) return;
+
+  const maxTramos = multitramoActivo();
+  if (maxTramos) {
+    // Tramos libres inmediatamente posteriores (mismo orden que en pantalla)
+    const botones = Array.from(tramosContainer.querySelectorAll('.tramo-btn'));
+    for (let k = botones.indexOf(tramoBtn) + 1; k < botones.length && globalState.tramosSeguidos.length < maxTramos; k++) {
+      if (botones[k].disabled) break;
+      globalState.tramosSeguidos.push({ id: botones[k].dataset.tramoId, disponibles: parseInt(botones[k].dataset.disponibles, 10) || 1 });
+    }
+  }
+
+  if (globalState.tramosSeguidos.length < 2) {
+    cont.classList.add('hidden');
+    opciones.innerHTML = '';
+    return;
+  }
+
+  opciones.innerHTML = globalState.tramosSeguidos.map((t, i) => {
+    const tramo = globalState.tramos.find(x => String(x.id_tramo) === String(t.id)) || {};
+    return `<button type="button" data-num="${i + 1}" onclick="seleccionarNumTramos(${i + 1}, ${esAgrupado})"
+      class="multitramo-opcion px-3 py-2 rounded-lg border text-sm font-semibold transition-colors">
+      ${i + 1} ${i === 0 ? 'tramo' : 'tramos'}<span class="block text-xs font-normal opacity-75">hasta ${escHTML(tramo.hora_fin || '')}</span>
+    </button>`;
+  }).join('');
+  cont.classList.remove('hidden');
+  seleccionarNumTramos(1, esAgrupado);
+}
+
+function seleccionarNumTramos(n, esAgrupado) {
+  const seguidos = (globalState.tramosSeguidos || []).slice(0, n);
+  if (!seguidos.length) return;
+  globalState.numTramosSeleccionados = seguidos.length;
+
+  document.querySelectorAll('#multitramoOpciones .multitramo-opcion').forEach(b => {
+    const activo = parseInt(b.dataset.num, 10) === seguidos.length;
+    b.classList.toggle('bg-blue-600', activo);
+    b.classList.toggle('text-white', activo);
+    b.classList.toggle('border-blue-600', activo);
+    b.classList.toggle('bg-white', !activo);
+    b.classList.toggle('text-gray-700', !activo);
+    b.classList.toggle('border-gray-300', !activo);
+  });
+
+  // Texto de horario: "T1 – T3 (09:00 - 12:00)"
+  const primero = globalState.tramos.find(x => String(x.id_tramo) === String(seguidos[0].id)) || {};
+  const ultimo = globalState.tramos.find(x => String(x.id_tramo) === String(seguidos[seguidos.length - 1].id)) || {};
+  const modalTime = $('modalTimeString');
+  if (modalTime) {
+    modalTime.textContent = seguidos.length === 1
+      ? `${primero.nombre_tramo} (${primero.hora_inicio} - ${primero.hora_fin})`
+      : `${primero.nombre_tramo} – ${ultimo.nombre_tramo} (${primero.hora_inicio} - ${ultimo.hora_fin})`;
+  }
+
+  // Recursos agrupados: la cantidad máxima es la menor disponible entre los tramos elegidos
+  if (esAgrupado) {
+    const maxDisp = Math.min(...seguidos.map(t => t.disponibles));
+    const maxSpan = $('maxCantidad');
+    const inputCant = $('cantidadInput');
+    if (maxSpan) maxSpan.textContent = maxDisp;
+    if (inputCant) {
+      inputCant.max = maxDisp;
+      if ((parseInt(inputCant.value, 10) || 1) > maxDisp) inputCant.value = maxDisp;
+    }
+  }
+}
+
+/* ============================================
    ABRIR MODAL DE RESERVA (LÓGICA ACTUALIZADA 🔓)
    ============================================ */
 function handleTramoClick(tramoBtn) {
@@ -895,6 +979,9 @@ function handleTramoClick(tramoBtn) {
     inputCant.max = 1;
   }
   
+  // 4b. MULTITRAMO (tramos seguidos) 🔗
+  prepararMultitramo(tramoBtn, esAgrupado);
+
   // 5. LIMPIEZA FINAL Y ABRIR
   
   if(notas) notas.value = '';
@@ -1222,6 +1309,17 @@ function handleConfirmReservation() {
     curso: globalState.cursoSeleccionado
   };
   
+  // Multitramo: varios tramos seguidos en una sola operación (todo o nada)
+  const numTramos = globalState.numTramosSeleccionados || 1;
+  if (numTramos > 1 && globalState.tramosSeguidos) {
+    const tramoIds = globalState.tramosSeguidos.slice(0, numTramos).map(t => t.id);
+    google.script.run
+      .withSuccessHandler(onReservaSuccess)
+      .withFailureHandler(onFailure)
+      .crearReservasMultitramo(reservaData, tramoIds);
+    return;
+  }
+
   google.script.run
     .withSuccessHandler(onReservaSuccess)
     .withFailureHandler(onFailure)
@@ -1235,11 +1333,12 @@ function onReservaSuccess(response) {
   if (response.success) {
     showSuccess(response.message);
     
-    // Agregar a reservas globales (para disponibilidad)
-    globalState.reservas.push(response.nuevaReserva);
-    
-    // Agregar también a mis reservas activas
-    globalState.misReservasActivas.push(response.nuevaReserva);
+    // Agregar a reservas globales (para disponibilidad) y a mis reservas activas
+    const nuevas = response.nuevasReservas || [response.nuevaReserva];
+    nuevas.forEach(r => {
+      globalState.reservas.push(r);
+      globalState.misReservasActivas.push(r);
+    });
     
     // Ordenar mis reservas por fecha
     globalState.misReservasActivas.sort((a, b) => {

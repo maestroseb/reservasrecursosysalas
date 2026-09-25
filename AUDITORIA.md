@@ -79,8 +79,10 @@ Con *Ejecutar como: Usuario que implementa*, Google **solo** facilita el email d
 - **HTML**: modales `modalRecurso` y `modalDisponibilidad`.
 - **CSS**: 70 reglas de 33 clases sin uso.
 
+### Resuelto después
+- **Multitramo** implementado (`permitir_multitramo`, `max_tramos_simultaneos`).
+- **Editar tramos de recurrencia**: eliminado por redundante (el modal de detalle ya permite quitar tramos).
+- Reglas CSS duplicadas unificadas sin cambio visual; foco visible con teclado (`:focus-visible`).
+
 ### Pendiente / a decidir
-- **Editar tramos de una recurrencia aprobada** (`abrirModalEditarTramosRecurrencia` + `editarTramosRecurrencia`): el código existe y funciona, pero ya no hay ningún botón que lo abra. ¿Recuperarlo en la UI o eliminarlo?
-- Reglas CSS duplicadas (`.spinner`, `dialog`, `.admin-subtab`): unificarlas cambia el aspecto, no lo he tocado.
-- `button:focus { outline: none !important }` quita el foco visible con teclado (accesibilidad).
-- Config sin efecto: `horas_cancelacion`, `exigir_motivo`, `permitir_multitramo`, `max_tramos_simultaneos` se guardan pero ningún código las aplica.
+- Config sin efecto: `horas_cancelacion`, `exigir_motivo` se guardan pero ningún código las aplica.

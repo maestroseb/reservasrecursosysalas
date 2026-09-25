@@ -928,6 +928,52 @@ function checkAvailability(recursoId, fechaISO, tramoId, cantidadPedida, recurso
 }
 
 function crearNuevaReserva(reservaData) {
+  return crearReservas_(reservaData, [reservaData && reservaData.tramoId]);
+}
+
+/**
+ * MULTITRAMO: reserva varios tramos SEGUIDOS del mismo recurso y día en una sola operación.
+ * Requiere Config: permitir_multitramo = TRUE y max_tramos_simultaneos >= nº de tramos.
+ * Es "todo o nada": si un tramo falla, no se crea ninguna reserva.
+ */
+function crearReservasMultitramo(reservaData, tramoIds) {
+  try {
+    if (!Array.isArray(tramoIds) || tramoIds.length === 0) {
+      throw new Error("No se han indicado tramos.");
+    }
+    const ids = tramoIds.map(t => String(t).trim());
+    if (new Set(ids).size !== ids.length) throw new Error("Hay tramos repetidos.");
+
+    if (ids.length > 1) {
+      if (getConfigValue('permitir_multitramo', false) !== true) {
+        throw new Error("La reserva de varios tramos seguidos no está activada.");
+      }
+      const maxTramos = parseInt(getConfigValue('max_tramos_simultaneos', 1), 10) || 1;
+      if (ids.length > maxTramos) {
+        throw new Error(`Solo puedes reservar hasta ${maxTramos} tramos seguidos.`);
+      }
+      // Deben ser consecutivos según el orden de la hoja Tramos
+      const orden = getDatosEstaticos_().tramos.map(t => String(t.id_tramo).trim());
+      const posiciones = ids.map(id => orden.indexOf(id));
+      if (posiciones.some(p => p === -1)) throw new Error("Algún tramo no existe.");
+      posiciones.sort((a, b) => a - b);
+      for (let k = 1; k < posiciones.length; k++) {
+        if (posiciones[k] !== posiciones[k - 1] + 1) throw new Error("Los tramos deben ser seguidos.");
+      }
+      // Guardamos en el orden del horario
+      ids.splice(0, ids.length, ...posiciones.map(p => orden[p]));
+    }
+    return crearReservas_(reservaData, ids);
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
+}
+
+/**
+ * Núcleo común de reserva (1 o varios tramos). Todas las validaciones se hacen
+ * antes de escribir nada y con el lock cogido; las filas se escriben de una vez.
+ */
+function crearReservas_(reservaData, tramoIds) {
   const lock = LockService.getScriptLock();
 
   try {
@@ -943,7 +989,9 @@ function crearNuevaReserva(reservaData) {
       throw new Error("Tu sesión ha caducado o ya no tienes permisos.");
     }
 
-    const { recursoId, recursoNombre, fechaISO, tramoId, tramoNombre, notas, curso } = reservaData;
+    const { recursoId, recursoNombre, fechaISO, tramoNombre, notas, curso } = reservaData;
+    tramoIds = (tramoIds || []).map(t => String(t || '').trim()).filter(Boolean);
+    if (tramoIds.length === 0) throw new Error("Debes seleccionar un tramo.");
 
     // Cantidad: entero >= 1 (una cantidad negativa "liberaba" aforo en recursos agrupados)
     const cantidad = parseInt(reservaData.cantidad, 10) || 1;
@@ -955,13 +1003,13 @@ function crearNuevaReserva(reservaData) {
       throw new Error("Debes seleccionar un curso para realizar la reserva.");
     }
 
-    // ✅ VALIDACIONES DE CONFIGURACIÓN (NUEVO - ANTES DE TODO)
-    Logger.log("🔍 Validando restricciones de configuración...");
-    // Una sola lectura de Reservas para todas las validaciones (antes se leía varias veces con el lock cogido)
+    // ✅ VALIDACIONES DE CONFIGURACIÓN (una sola lectura de Reservas para todas)
     const reservasActivas = getActiveReservations_();
-    validarRestriccionesConfiguracion(email, fechaISO, tramoId, reservasActivas);
+    validarModoMantenimiento();
+    validarDiasVista(fechaISO);
+    tramoIds.forEach(t => validarAntelacionMinima(fechaISO, t));
+    validarLimiteReservas(email, reservasActivas, tramoIds.length); // cada tramo cuenta como una reserva
 
-    // ✅ PASO 1: Cargar datos UNA sola vez
     const staticData = getDatosEstaticos_();
     const recurso = staticData.recursos.find(r => String(r.id_recurso) === String(recursoId));
 
@@ -969,11 +1017,16 @@ function crearNuevaReserva(reservaData) {
       throw new Error("El recurso seleccionado no existe.");
     }
 
-    Logger.log(`[crearNuevaReserva] Validando disponibilidad para ${recursoId} en ${fechaISO}...`);
-    checkAvailability(recursoId, fechaISO, tramoId, cantidad, recurso, staticData, reservasActivas);
-    Logger.log(`[crearNuevaReserva] Validación superada.`);
+    tramoIds.forEach(t => {
+      try {
+        checkAvailability(recursoId, fechaISO, t, cantidad, recurso, staticData, reservasActivas);
+      } catch (errDisp) {
+        if (tramoIds.length === 1) throw errDisp;
+        const tr = staticData.tramos.find(x => String(x.id_tramo).trim() === t);
+        throw new Error(`${tr ? tr.nombre_tramo : t}: ${errDisp.message}`);
+      }
+    });
 
-    const idReserva = Utilities.getUuid();
     const timestamp = new Date();
     const fechaReserva = new Date(fechaISO + "T12:00:00Z");
 
@@ -986,37 +1039,52 @@ function crearNuevaReserva(reservaData) {
       headerMap[h.toString().trim().toLowerCase()] = i;
     });
 
-    const nuevaFilaArray = new Array(numCols).fill("");
+    const filas = [];
+    const nuevasReservas = [];
+    const tramosTexto = [];
 
-    if (headerMap['id_reserva'] !== undefined) nuevaFilaArray[headerMap['id_reserva']] = idReserva;
-    if (headerMap['id_recurso'] !== undefined) nuevaFilaArray[headerMap['id_recurso']] = recursoId;
-    if (headerMap['email_usuario'] !== undefined) nuevaFilaArray[headerMap['email_usuario']] = email;
-    if (headerMap['fecha'] !== undefined) nuevaFilaArray[headerMap['fecha']] = fechaReserva;
-    if (headerMap['id_tramo'] !== undefined) nuevaFilaArray[headerMap['id_tramo']] = tramoId;
-    if (headerMap['cantidad'] !== undefined) nuevaFilaArray[headerMap['cantidad']] = cantidad;
-    if (headerMap['estado'] !== undefined) nuevaFilaArray[headerMap['estado']] = "Confirmada";
-    if (headerMap['notas'] !== undefined) nuevaFilaArray[headerMap['notas']] = notas;
-    if (headerMap['curso'] !== undefined) nuevaFilaArray[headerMap['curso']] = curso;
-    if (headerMap['timestamp'] !== undefined) nuevaFilaArray[headerMap['timestamp']] = timestamp;
+    tramoIds.forEach(tramoId => {
+      const idReserva = Utilities.getUuid();
+      const fila = new Array(numCols).fill("");
+      if (headerMap['id_reserva'] !== undefined) fila[headerMap['id_reserva']] = idReserva;
+      if (headerMap['id_recurso'] !== undefined) fila[headerMap['id_recurso']] = recursoId;
+      if (headerMap['email_usuario'] !== undefined) fila[headerMap['email_usuario']] = email;
+      if (headerMap['fecha'] !== undefined) fila[headerMap['fecha']] = fechaReserva;
+      if (headerMap['id_tramo'] !== undefined) fila[headerMap['id_tramo']] = tramoId;
+      if (headerMap['cantidad'] !== undefined) fila[headerMap['cantidad']] = cantidad;
+      if (headerMap['estado'] !== undefined) fila[headerMap['estado']] = "Confirmada";
+      if (headerMap['notas'] !== undefined) fila[headerMap['notas']] = notas;
+      if (headerMap['curso'] !== undefined) fila[headerMap['curso']] = curso;
+      if (headerMap['timestamp'] !== undefined) fila[headerMap['timestamp']] = timestamp;
+      filas.push(fila);
 
-    sheetReservas.appendRow(nuevaFilaArray);
-    Logger.log(`[crearNuevaReserva] Reserva creada con ID: ${idReserva}`);
-
-    const tramo = staticData.tramos.find(t => String(t.id_tramo).trim() === String(tramoId).trim()) || null;
-
-    let tramoCompletoConHoras = tramoNombre;
-
-    if (tramo) {
-      const nombreTramo = tramo.nombre_tramo || tramoNombre;
-      const horaInicio = tramo.hora_inicio || '';
-      const horaFin = tramo.hora_fin || '';
-
-      if (horaInicio && horaFin) {
-        tramoCompletoConHoras = `${nombreTramo} (${horaInicio} - ${horaFin})`;
-      } else {
-        tramoCompletoConHoras = nombreTramo;
+      const tramo = staticData.tramos.find(t => String(t.id_tramo).trim() === tramoId) || null;
+      let texto = tramoIds.length === 1 ? (tramoNombre || tramoId) : tramoId;
+      if (tramo) {
+        const nombreTramo = tramo.nombre_tramo || texto;
+        texto = (tramo.hora_inicio && tramo.hora_fin)
+          ? `${nombreTramo} (${tramo.hora_inicio} - ${tramo.hora_fin})`
+          : nombreTramo;
       }
-    }
+      tramosTexto.push(texto);
+
+      nuevasReservas.push({
+        id_reserva: idReserva,
+        id_recurso: recursoId,
+        email_usuario: email,
+        fecha: fechaISO,
+        id_tramo: tramoId,
+        cantidad: cantidad,
+        estado: 'Confirmada',
+        notas: notas,
+        curso: curso,
+        timestamp_creacion: timestamp.toISOString()
+      });
+    });
+
+    // Una sola escritura para todas las filas
+    sheetReservas.getRange(sheetReservas.getLastRow() + 1, 1, filas.length, numCols).setValues(filas);
+    Logger.log(`[crearReservas_] ${filas.length} reserva(s) creada(s): ${nuevasReservas.map(r => r.id_reserva).join(', ')}`);
 
     const fechaFormateada = fechaReserva.toLocaleDateString('es-ES', {
       day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC'
@@ -1027,41 +1095,32 @@ function crearNuevaReserva(reservaData) {
     const cache = CacheService.getScriptCache();
     cache.remove(CACHE_KEYS.DISPONIBILIDAD + recursoId);
 
-    // La fila ya está escrita: liberamos el lock antes de enviar el email (lento)
+    // Las filas ya están escritas: liberamos el lock antes de enviar el email (lento)
     lock.releaseLock();
 
     sendConfirmationEmail_(email, authResult.userName, {
-      idReserva: idReserva,
+      idReserva: nuevasReservas[0].id_reserva,
+      reservas: nuevasReservas.map((r, k) => ({ idReserva: r.id_reserva, tramo: tramosTexto[k] })),
       recursoNombre: recursoNombre,
       fechaFormateada: fechaFormateada,
-      tramoNombre: tramoCompletoConHoras,
+      tramoNombre: tramosTexto.join(', '),
       curso: curso,
       cantidad: cantidad,
       notas: notas
     });
 
-    const nuevaReservaObjeto = {
-      id_reserva: idReserva,
-      id_recurso: recursoId,
-      email_usuario: email,
-      fecha: fechaISO,
-      id_tramo: tramoId,
-      cantidad: cantidad,
-      estado: 'Confirmada',
-      notas: notas,
-      curso: curso,
-      timestamp_creacion: timestamp.toISOString()
-    };
-
     return {
       success: true,
-      message: "¡Reserva confirmada! Se ha enviado un correo de confirmación.",
-      nuevaReserva: nuevaReservaObjeto
+      message: nuevasReservas.length > 1
+        ? `¡${nuevasReservas.length} tramos reservados! Se ha enviado un correo de confirmación.`
+        : "¡Reserva confirmada! Se ha enviado un correo de confirmación.",
+      nuevaReserva: nuevasReservas[0],
+      nuevasReservas: nuevasReservas
     };
 
   } catch (error) {
     lock.releaseLock();
-    Logger.log(`❌ Error en crearNuevaReserva: ${error.message}`);
+    Logger.log(`❌ Error en crearReservas_: ${error.message}`);
     return { success: false, message: error.message };  // ✅ Sin el prefijo "Error al crear la reserva:"
   }
 }
@@ -1078,22 +1137,30 @@ function escHtml_(v) {
 
 function sendConfirmationEmail_(email, userName, details) {
   try {
-    // Generar URL de cancelación (dentro del try-catch para que un fallo aquí no impida el email)
-    let urlCancelacion = '';
+    // Generar URL(s) de cancelación (dentro del try-catch para que un fallo aquí no impida el email)
+    // Multitramo: un enlace por tramo, para poder cancelar solo uno de ellos
+    const reservasEmail = (details.reservas && details.reservas.length) ? details.reservas
+      : [{ idReserva: details.idReserva, tramo: details.tramoNombre }];
+    let urlApp = '';
     try {
-      const urlApp = ScriptApp.getService().getUrl();
-      urlCancelacion = `${urlApp}?action=cancel&id=${details.idReserva}&t=${firmarIdReserva_(details.idReserva)}`;
+      urlApp = ScriptApp.getService().getUrl();
     } catch (urlError) {
       Logger.log(`⚠️ No se pudo obtener URL de la app: ${urlError.message}`);
     }
+    const urlCancelar = id => `${urlApp}?action=cancel&id=${id}&t=${firmarIdReserva_(id)}`;
+    const estiloBoton = 'padding: 10px 15px; background-color: #d9534f; color: white; text-decoration: none; border-radius: 5px; display: inline-block; margin: 4px 0;';
 
     const asunto = `Reserva Confirmada: ${details.recursoNombre} - ${details.fechaFormateada}`;
 
     // Bloque de cancelación: solo si tenemos URL
-    const bloqueCancelacion = urlCancelacion
-      ? `<p>Si necesitas cancelar la reserva, puedes hacerlo desde este enlace:</p>
-         <p><a href="${urlCancelacion}" style="padding: 10px 15px; background-color: #d9534f; color: white; text-decoration: none; border-radius: 5px;">Cancelar esta Reserva</a></p>`
-      : '';
+    let bloqueCancelacion = '';
+    if (urlApp && reservasEmail.length === 1) {
+      bloqueCancelacion = `<p>Si necesitas cancelar la reserva, puedes hacerlo desde este enlace:</p>
+         <p><a href="${urlCancelar(reservasEmail[0].idReserva)}" style="${estiloBoton}">Cancelar esta Reserva</a></p>`;
+    } else if (urlApp) {
+      bloqueCancelacion = `<p>Si necesitas cancelar algún tramo, puedes hacerlo desde estos enlaces:</p>` +
+        reservasEmail.map(r => `<p><a href="${urlCancelar(r.idReserva)}" style="${estiloBoton}">Cancelar ${escHtml_(r.tramo)}</a></p>`).join('');
+    }
 
     const cuerpoHtml = `
       <p>¡Hola ${userName || ''}!</p>
@@ -1102,7 +1169,7 @@ function sendConfirmationEmail_(email, userName, details) {
       <ul>
         <li><strong>Recurso:</strong> ${escHtml_(details.recursoNombre)}</li>
         <li><strong>Fecha:</strong> ${details.fechaFormateada}</li>
-        <li><strong>Tramo:</strong> ${escHtml_(details.tramoNombre)}</li>
+        <li><strong>${reservasEmail.length > 1 ? 'Tramos' : 'Tramo'}:</strong> ${escHtml_(details.tramoNombre)}</li>
         <li><strong>Curso:</strong> ${escHtml_(details.curso)}</li>
         ${details.cantidad > 1 ? `<li><strong>Cantidad:</strong> ${details.cantidad}</li>` : ''}
         ${details.notas ? `<li><strong>Notas:</strong> ${escHtml_(details.notas)}</li>` : ''}
@@ -1992,7 +2059,7 @@ function validarAntelacionMinima(fechaISO, tramoId) {
  * @param {string} email - Email del usuario
  * @throws {Error} Si el usuario excede el límite de reservas
  */
-function validarLimiteReservas(email, reservasActivasPrevias) {
+function validarLimiteReservas(email, reservasActivasPrevias, nuevas) {
   const limiteReservas = getConfigValue('limite_reservas', 3);
 
   const reservasActivas = reservasActivasPrevias || getActiveReservations_();
@@ -2002,30 +2069,14 @@ function validarLimiteReservas(email, reservasActivasPrevias) {
     String(r.email_usuario).toLowerCase().trim() === emailNorm && !r.id_solicitud_recurrente
   );
 
-  if (reservasUsuario.length >= limiteReservas) {
+  if (reservasUsuario.length + (nuevas || 1) > limiteReservas) {
+    if (nuevas > 1 && reservasUsuario.length < limiteReservas) {
+      throw new Error(`Con ${nuevas} tramos superarías tu límite de ${limiteReservas} reservas activas (tienes ${reservasUsuario.length}).`);
+    }
     throw new Error(`Has alcanzado el límite de ${limiteReservas} reservas activas. Cancela alguna para continuar.`);
   }
 
   Logger.log(`✅ Límite de reservas: ${reservasUsuario.length}/${limiteReservas}`);
-  return true;
-}
-
-/**
- * Valida todas las restricciones de configuración
- * Función wrapper que ejecuta todas las validaciones
- * @param {string} email - Email del usuario
- * @param {string} fechaISO - Fecha en formato YYYY-MM-DD
- * @param {string} tramoId - ID del tramo horario
- */
-function validarRestriccionesConfiguracion(email, fechaISO, tramoId, reservasActivasPrevias) {
-  Logger.log("🔍 Iniciando validaciones de configuración...");
-  
-  validarModoMantenimiento();
-  validarDiasVista(fechaISO);
-  validarAntelacionMinima(fechaISO, tramoId);
-  validarLimiteReservas(email, reservasActivasPrevias);
-  
-  Logger.log("✅ Todas las validaciones de configuración superadas");
   return true;
 }
 

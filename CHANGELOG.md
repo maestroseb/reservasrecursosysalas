@@ -2,6 +2,9 @@
 
 ## v1.5.0 — Auditoría completa (septiembre 2026)
 
+### Nuevo
+- **Multitramo**: con `permitir_multitramo` activado en *Config*, al reservar se puede elegir cuántos tramos seguidos coger (hasta `max_tramos_simultaneos`). Solo se ofrecen tramos libres consecutivos; en recursos agrupados la cantidad máxima es la menor disponible entre ellos. La reserva es "todo o nada", cada tramo cuenta como una reserva para el límite, y el email incluye un enlace de cancelación por tramo.
+
 ### Corregido
 - **Bucle de registro**: cuando Google no facilita el email del usuario (app implementada desde otro dominio o cuenta @gmail.com) se muestra una pantalla que explica la causa en lugar de pedir el registro una y otra vez.
 - **Modo mantenimiento** y **copia de reservas al admin** no funcionaban nunca (los valores de Config se leían mal). ⚠️ Revisa sus valores en la hoja *Config* al actualizar.
@@ -35,6 +38,8 @@
 
 ### Limpieza
 - Eliminadas ~2.600 líneas de código y CSS sin uso.
+- Eliminado el modal "Editar tramos" de recurrencias (no era accesible y el detalle de la recurrencia ya permite quitar tramos uno a uno).
+- Reglas CSS duplicadas unificadas; el foco vuelve a verse al navegar con teclado.
 - Versión visible al pie de la página.
 
 ## v1.4.1
