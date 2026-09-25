@@ -1061,7 +1061,7 @@
      ========================================== */
 
   // 1. VARIABLES GLOBALES (Inyectadas por Google Apps Script)
-  // <?= ?> ya emite un literal JS; como el servidor además hace JSON.stringify,
+  // Los scriptlets de impresión ya emiten un literal JS; como el servidor además hace JSON.stringify,
   // el valor podía llegar con comillas dobles ("\"x@y\""). Lo normalizamos en ambos casos.
   function desenvolverValorServidor(v) {
     try { if (typeof v === 'string' && v.charAt(0) === '"') return JSON.parse(v); } catch (e) {}
