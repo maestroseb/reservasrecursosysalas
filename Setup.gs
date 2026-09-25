@@ -241,3 +241,53 @@ function repararInstalacionYGuardarURL() {
     Logger.log(e.toString());
   }
 }
+/**
+ * 🩺 DIAGNÓSTICO DE ARCHIVOS HTML (ejecutar desde el editor: seleccionar "diagnosticarArchivos" y pulsar Ejecutar)
+ * Comprueba que cada archivo está completo y que su JavaScript es válido, y lo muestra en el registro de ejecución.
+ * Útil tras copiar/pegar archivos a mano: detecta archivos cortados o con errores de sintaxis.
+ */
+function diagnosticarArchivos() {
+  const archivos = ['index', 'scripts', 'admin-scripts', 'admin-panel', 'styles', 'tailwind-css', 'registro', 'Sidebar', 'ActivacionSistema'];
+  archivos.forEach(nombre => {
+    let contenido;
+    try {
+      contenido = HtmlService.createHtmlOutputFromFile(nombre).getContent();
+    } catch (e) {
+      Logger.log(`❌ ${nombre}: NO EXISTE en el proyecto (${e.message})`);
+      return;
+    }
+    const lineas = contenido.split('\n');
+    const final = contenido.trim().slice(-60).replace(/\s+/g, ' ');
+    let informe = `${nombre}: ${lineas.length} líneas · termina en «…${final}»`;
+
+    // ¿Archivo cortado? (distinto número de aperturas y cierres de <script>/<style>)
+    ['script', 'style'].forEach(tag => {
+      const abre = (contenido.match(new RegExp('<' + tag + '[\\s>]', 'g')) || []).length;
+      const cierra = (contenido.match(new RegExp('</' + tag + '>', 'g')) || []).length;
+      if (abre !== cierra) informe += `\n   ❌ Parece CORTADO: ${abre} <${tag}> abiertos y ${cierra} cerrados. Vuelve a copiar el archivo entero.`;
+    });
+
+    // Validar cada bloque <script> sin src con el motor JS (quitando los scriptlets <? ?> de las plantillas)
+    const re = /<script>([\s\S]*?)<\/script>/g;
+    let m, n = 0;
+    while ((m = re.exec(contenido))) {
+      n++;
+      const codigo = m[1].replace(/<\?[\s\S]*?\?>/g, '"x"');
+      try {
+        new Function(codigo);
+      } catch (e) {
+        // Localizar la línea aproximada: se busca el primer prefijo de líneas que ya produce ESE error
+        const ls = codigo.split('\n');
+        const lineaInicio = contenido.slice(0, m.index).split('\n').length;
+        let pista = '';
+        for (let k = 1; k <= ls.length; k++) {
+          try { new Function(ls.slice(0, k).join('\n') + '\n}}}}}}}}}}'); } catch (e2) {
+            if (e2.message === e.message) { pista = ` (hacia la línea ${lineaInicio + k - 1}: «${ls[k - 1].trim().slice(0, 80)}»)`; break; }
+          }
+        }
+        informe += `\n   ❌ Script ${n}: ${e.message}${pista}`;
+      }
+    }
+    Logger.log((informe.includes('❌') ? '' : '✅ ') + informe);
+  });
+}
