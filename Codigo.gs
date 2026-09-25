@@ -2201,6 +2201,13 @@ function purgarCache() {
     Logger.log('⚠️ No se pudo purgar la caché de disponibilidad: ' + e.message);
   }
 
+  // Reconstruir ya la caché estática: así la paga quien guarda, no el siguiente usuario que abre la app
+  try {
+    getDatosEstaticos_();
+  } catch (e) {
+    Logger.log('⚠️ No se pudo regenerar la caché estática: ' + e.message);
+  }
+
   Logger.log('Cachés de disponibilidad purgadas.');
 }
 
