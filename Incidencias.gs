@@ -9,6 +9,7 @@ function reportarIncidencia(datos) {
   try {
     const userEmail = Session.getActiveUser().getEmail();
     if (!userEmail) throw new Error("Usuario no identificado");
+    if (!checkUserAuthorization(userEmail).isAuthorized) throw new Error("No tienes acceso al sistema.");
 
     const ss = getDB();
     const sheet = ss.getSheetByName(SHEETS.INCIDENCIAS);
@@ -54,7 +55,7 @@ function reportarIncidencia(datos) {
     sheet.appendRow(nuevaFila);
 
     // Email al admin
-    enviarEmailNuevaIncidencia({
+    enviarEmailNuevaIncidencia_({
       id: nuevoId,
       recurso: datos.nombre_recurso,
       usuario: userEmail,
@@ -84,6 +85,9 @@ function reportarIncidencia(datos) {
 
 function getIncidencias() {
   try {
+    if (!checkUserAuthorization(Session.getActiveUser().getEmail()).isAuthorized) {
+      return { success: false, error: "No tienes acceso al sistema." };
+    }
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName('Incidencias'); // Asegúrate que el nombre coincide
 
@@ -189,7 +193,7 @@ function backend_actualizarIncidencia(idIncidencia, accion, valor) {
       let notaFinal = valor || oldNote;
       if (valor) sheet.getRange(fila, 10).setValue(valor);
 
-      enviarEmailIncidenciaResuelta({
+      enviarEmailIncidenciaResuelta_({
         id: idIncidencia, recurso: recName, email: userEmail, notas: notaFinal
       });
       return { exito: true };
@@ -297,7 +301,7 @@ function actualizarEstadoIncidencia(idIncidencia, nuevoEstado, notasAdmin) {
       sheet.getRange(filaEncontrada, 11).setValue(new Date());
 
       // Email al usuario
-      enviarEmailIncidenciaResuelta({
+      enviarEmailIncidenciaResuelta_({
         id: idIncidencia,
         recurso: nombreRecurso,
         email: emailUsuario,
@@ -322,7 +326,7 @@ function actualizarEstadoIncidencia(idIncidencia, nuevoEstado, notasAdmin) {
    EMAILS AUTOMÁTICOS
    ========================================================= */
 
-function enviarEmailNuevaIncidencia(datos) {
+function enviarEmailNuevaIncidencia_(datos) {
   try {
     // Obtener email del admin desde CONFIG
     const ss = getDB();
@@ -341,7 +345,7 @@ function enviarEmailNuevaIncidencia(datos) {
 
     // Fallback: enviar al primer admin activo
     if (!emailAdmin) {
-      const admins = getAdminsEmails();
+      const admins = getAdminsEmails_();
       emailAdmin = admins[0] || Session.getActiveUser().getEmail();
     }
 
@@ -357,14 +361,14 @@ function enviarEmailNuevaIncidencia(datos) {
         
         <div style="background: #fff3e0; padding: 15px; border-radius: 5px; border-left: 4px solid #ff9800; margin: 20px 0;">
           <p style="margin: 5px 0;"><strong>ID:</strong> ${datos.id}</p>
-          <p style="margin: 5px 0;"><strong>Recurso:</strong> ${datos.recurso}</p>
+          <p style="margin: 5px 0;"><strong>Recurso:</strong> ${escHtml_(datos.recurso)}</p>
           <p style="margin: 5px 0;"><strong>Categoría:</strong> ${datos.categoria}</p>
           <p style="margin: 5px 0;"><strong>Prioridad:</strong> ${prioridadIcon} ${datos.prioridad}</p>
-          <p style="margin: 5px 0;"><strong>Reportado por:</strong> ${datos.usuario}</p>
+          <p style="margin: 5px 0;"><strong>Reportado por:</strong> ${escHtml_(datos.usuario)}</p>
         </div>
         
         <h3>Descripción:</h3>
-        <p style="background: #f5f5f5; padding: 15px; border-radius: 5px; white-space: pre-wrap;">${datos.descripcion}</p>
+        <p style="background: #f5f5f5; padding: 15px; border-radius: 5px; white-space: pre-wrap;">${escHtml_(datos.descripcion)}</p>
         
         <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
         
@@ -388,7 +392,7 @@ function enviarEmailNuevaIncidencia(datos) {
 }
 
 
-function enviarEmailIncidenciaResuelta(datos) {
+function enviarEmailIncidenciaResuelta_(datos) {
   try {
     const asunto = `✅ Incidencia resuelta - ${datos.recurso}`;
 
@@ -400,12 +404,12 @@ function enviarEmailIncidenciaResuelta(datos) {
         
         <div style="background: #e8f5e9; padding: 15px; border-radius: 5px; border-left: 4px solid #4caf50; margin: 20px 0;">
           <p style="margin: 5px 0;"><strong>ID:</strong> ${datos.id}</p>
-          <p style="margin: 5px 0;"><strong>Recurso:</strong> ${datos.recurso}</p>
+          <p style="margin: 5px 0;"><strong>Recurso:</strong> ${escHtml_(datos.recurso)}</p>
         </div>
         
         ${datos.notas ? `
         <h3>Notas del administrador:</h3>
-        <p style="background: #f5f5f5; padding: 15px; border-radius: 5px; white-space: pre-wrap;">${datos.notas}</p>
+        <p style="background: #f5f5f5; padding: 15px; border-radius: 5px; white-space: pre-wrap;">${escHtml_(datos.notas)}</p>
         ` : ''}
         
         <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">

@@ -13,6 +13,12 @@ A ti no te pasa porque tu implementación y tu profesorado están en el mismo do
 
 **Cambios en código:** si el email llega vacío ya no se muestra el registro (inútil) sino una pantalla que explica la causa. El email del registro ya no se puede teclear (solo el de la sesión) y `checkUserAuthorization('')` ya no puede coincidir con una fila vacía.
 
+## 🌐 Centros con otros dominios o cuentas Gmail
+Con *Ejecutar como: Usuario que implementa*, Google **solo** facilita el email de los usuarios del **mismo dominio Workspace** que la cuenta que implementa. Por tanto:
+- Centro Workspace (g.educaand.es, dominio propio…) cuyos usuarios son todos de ese dominio → funciona si se implementa desde ese dominio.
+- Usuarios de otro dominio o cuentas @gmail.com → la app **no puede identificarlos** (la pantalla de diagnóstico lo explica).
+- Para admitirlos haría falta otro sistema de identidad (p.ej. código de verificación por email). Pendiente de decisión.
+
 ## ✅ Fase 1 — aplicada (bajo riesgo)
 | Cambio | Fichero |
 |---|---|
@@ -30,21 +36,28 @@ A ti no te pasa porque tu implementación y tu profesorado están en el mismo do
 | Tras guardar cursos, cambiar de pestaña restauraba la lista antigua | admin-scripts.html |
 | XSS en panel de pendientes (`diasDisplay`) y `escaparHTML` no escapaba comillas | admin-scripts.html |
 
-## ⚠️ Fase 2 — pendiente de tu OK (cambian comportamiento)
-1. **Modo mantenimiento y "copia al admin" nunca funcionan**: los booleanos de Config se convierten a `1` y se comparan con `true`. Al arreglarlo *empezarán a funcionar*: revisa antes sus valores en Config.
-2. **Seguridad RPC**: con `google.script.run` cualquier usuario puede llamar funciones internas: envío de emails arbitrarios desde tu cuenta (`sendConfirmationEmail`, `enviarEmail*`…), `generarReservasDesdeRecurrente`, `cancelarReservasFuturasDeTramos`, `procesarCancelacionesPorDisponibilidad`, `migrarIdSolicitudRecurrente`. Solución: renombrarlas con `_` final (privadas).
-3. **Cancelar por enlace de email** (`?action=cancel&id=`) no comprueba quién hace clic: cualquiera puede cancelar reservas ajenas.
-4. `getStaticData` / `getIncidencias` devuelven emails y datos de todos incluso a no registrados.
-5. `cantidad` negativa en recursos agrupados rompe el aforo.
-6. `validarAntelacionMinima` usa UTC: permite reservar un tramo ya empezado (1-2 h de desfase).
-7. Bloquear disponibilidad **no cancela** las reservas recurrentes (busca columna `tipo_reserva` inexistente).
-8. `cancelarReservasFuturasDeTramos` cancela también reservas normales de otros usuarios en ese tramo.
-9. `getDatosMatrizUnificada`: mapa de usuarios con columnas cruzadas (nombre/email).
-10. Falta `LockService` en escrituras de admin/recurrentes (riesgo de doble reserva o fila equivocada).
-11. `getAdminData` marca como activo a un usuario con "FALSE"/"No" en texto y al guardar lo reactiva.
-12. `saveBatchUsuarios` no reescribe la columna Especialidad (se desplaza al borrar usuarios).
-13. Escapado XSS en `scripts.html` (incidencias, motivo, notas, nombres) y en emails HTML.
-14. `USER_EMAIL` posiblemente llega con comillas dobles (`<?= JSON.stringify ?>`): comprueba en consola `window.USER_EMAIL`; si sale `"\"x@..\""` las marcas "Tú"/"Reservado por ti" no funcionan.
+## ✅ Fase 2 — aplicada
+| Cambio | Nota |
+|---|---|
+| Config: booleanos se leían como `1` → **modo mantenimiento y copia al admin ahora SÍ funcionan** | Revisar sus valores en *Config* tras desplegar |
+| Funciones internas privadas (sufijo `_`): emails, `generarReservasDesdeRecurrente_`, cancelaciones masivas, migración | Ya no se pueden invocar desde el navegador |
+| Enlace de cancelación del email firmado (HMAC); enlaces antiguos solo valen al dueño o a un admin | Funciona aunque Google no identifique al usuario |
+| `getStaticData`, `getIncidencias`, `reportarIncidencia` exigen usuario autorizado | |
+| `cantidad` validada (≥1) | |
+| Antelación mínima calculada en hora local (antes UTC: 1-2 h de desfase) | Ya no se puede reservar un tramo empezado |
+| Bloquear disponibilidad cancela las reservas de las recurrencias afectadas (buscaba columna inexistente) | |
+| Editar tramos de una recurrencia ya no cancela reservas normales de otros usuarios | |
+| Matriz de disponibilidad: nombre/área de usuario con columnas correctas | |
+| `LockService` en recurrentes, cancelación de grupo, eliminar tramo, cancelación admin y guardado de usuarios | |
+| Usuarios: "FALSE"/"No" ya no se reactivan; se conserva la columna *Especialidad* | |
+| `checkIfAdmin` y `getAdminsEmails_` usan la misma regla que el login (respetan *Activo*, aceptan "Sí") | |
+| XSS escapado en `scripts.html` (incidencias, motivo, notas, cursos, nombres) y en todos los emails HTML | |
+| `USER_EMAIL`/`USER_NAME` sin comillas dobles | |
+
+### Pendiente (cambia comportamiento, a decidir)
+- Las recurrencias aprobadas días después generan reservas en fechas pasadas y no comprueban *Disponibilidad*.
+- Renombrar el ID de un tramo no actualiza Reservas ni SolicitudesRecurrentes.
+- Si se aprueba un usuario por email con el panel admin abierto, el siguiente "Guardar usuarios" lo borra.
 
 ## 🚀 Fase 3 — velocidad de carga
 1. **No incluir `admin-panel` + `admin-scripts` (≈320 KB, 60 % de la página) para no-admin.** Requiere Fase 1 (ya hecha).

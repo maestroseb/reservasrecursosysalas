@@ -376,6 +376,10 @@ function getStaticData() {
     // 1. AUTORIZACIÓN (necesaria para el frontend)
     const email = Session.getActiveUser().getEmail();
     const auth = checkUserAuthorization(email);
+    // Los no registrados (pantalla de registro) no deben poder leer reservas ni emails de otros
+    if (!auth || !auth.isAuthorized) {
+      throw new Error("No tienes acceso al sistema.");
+    }
     const isAdmin = auth ? auth.isAdmin : false;
     const userName = auth ? auth.userName : email;
 
@@ -466,14 +470,7 @@ function getStaticData() {
           
           if (!clave) return;
           
-          // Convertir tipos de datos
-          if (valor === 'TRUE' || valor === 'FALSE') {
-            valor = (valor === 'TRUE');
-          } else if (!isNaN(valor) && valor !== '') {
-            valor = Number(valor);
-          }
-          
-          configuracion[clave] = valor;
+          configuracion[clave] = parsearValorConfig_(valor);
         });
         Logger.log(`⚙️ Configuración cargada: ${Object.keys(configuracion).length} parámetros`);
       }
@@ -666,7 +663,7 @@ function doGet(e) {
   if (e.parameter.action === "cancel" && e.parameter.id) {
     try {
       const reservaId = e.parameter.id;
-      return handleEmailCancelation(reservaId);
+      return handleEmailCancelation(reservaId, e.parameter.t);
     } catch (error) {
       Logger.log(error);
       return HtmlService.createHtmlOutput(
@@ -963,7 +960,13 @@ function crearNuevaReserva(reservaData) {
       throw new Error("Tu sesión ha caducado o ya no tienes permisos.");
     }
 
-    const { recursoId, recursoNombre, fechaISO, tramoId, tramoNombre, notas, cantidad, curso } = reservaData;
+    const { recursoId, recursoNombre, fechaISO, tramoId, tramoNombre, notas, curso } = reservaData;
+
+    // Cantidad: entero >= 1 (una cantidad negativa "liberaba" aforo en recursos agrupados)
+    const cantidad = parseInt(reservaData.cantidad, 10) || 1;
+    if (cantidad < 1) {
+      throw new Error("La cantidad debe ser al menos 1.");
+    }
 
     if (!curso || curso.trim() === '') {
       throw new Error("Debes seleccionar un curso para realizar la reserva.");
@@ -1034,7 +1037,7 @@ function crearNuevaReserva(reservaData) {
       day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC'
     });
 
-    sendConfirmationEmail(email, authResult.userName, {
+    sendConfirmationEmail_(email, authResult.userName, {
       idReserva: idReserva,
       recursoNombre: recursoNombre,
       fechaFormateada: fechaFormateada,
@@ -1081,13 +1084,20 @@ function crearNuevaReserva(reservaData) {
 /* ============================================
    EMAIL DE CONFIRMACIÓN DE RESERVA
    ============================================ */
-function sendConfirmationEmail(email, userName, details) {
+// Escapa texto de usuario antes de insertarlo en HTML (emails y páginas)
+function escHtml_(v) {
+  if (v === null || v === undefined) return '';
+  return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function sendConfirmationEmail_(email, userName, details) {
   try {
     // Generar URL de cancelación (dentro del try-catch para que un fallo aquí no impida el email)
     let urlCancelacion = '';
     try {
       const urlApp = ScriptApp.getService().getUrl();
-      urlCancelacion = `${urlApp}?action=cancel&id=${details.idReserva}`;
+      urlCancelacion = `${urlApp}?action=cancel&id=${details.idReserva}&t=${firmarIdReserva_(details.idReserva)}`;
     } catch (urlError) {
       Logger.log(`⚠️ No se pudo obtener URL de la app: ${urlError.message}`);
     }
@@ -1105,12 +1115,12 @@ function sendConfirmationEmail(email, userName, details) {
       <p>Tu reserva ha sido confirmada con éxito.</p>
       <hr>
       <ul>
-        <li><strong>Recurso:</strong> ${details.recursoNombre}</li>
+        <li><strong>Recurso:</strong> ${escHtml_(details.recursoNombre)}</li>
         <li><strong>Fecha:</strong> ${details.fechaFormateada}</li>
-        <li><strong>Tramo:</strong> ${details.tramoNombre}</li>
-        <li><strong>Curso:</strong> ${details.curso}</li>
+        <li><strong>Tramo:</strong> ${escHtml_(details.tramoNombre)}</li>
+        <li><strong>Curso:</strong> ${escHtml_(details.curso)}</li>
         ${details.cantidad > 1 ? `<li><strong>Cantidad:</strong> ${details.cantidad}</li>` : ''}
-        ${details.notas ? `<li><strong>Notas:</strong> ${details.notas}</li>` : ''}
+        ${details.notas ? `<li><strong>Notas:</strong> ${escHtml_(details.notas)}</li>` : ''}
       </ul>
       <hr>
       ${bloqueCancelacion}
@@ -1247,7 +1257,7 @@ function cancelarReservaCliente(reservaId) {
       tramoNombre: tramoNombre
     };
 
-    sendCancelationEmail(userEmail, authResult.userName, details);
+    sendCancelationEmail_(userEmail, authResult.userName, details);
 
     cache.remove(CACHE_KEYS.DISPONIBILIDAD + recursoId);
 
@@ -1265,7 +1275,25 @@ function cancelarReservaCliente(reservaId) {
    CANCELACIÓN VÍA EMAIL
    ============================================ */
 
-function handleEmailCancelation(reservaId) {
+/* Firma HMAC para los enlaces de cancelación de los emails.
+   Así el enlace funciona aunque Google no identifique al usuario (otras cuentas/dominios)
+   y nadie puede cancelar reservas ajenas adivinando o copiando un ID. */
+function getSecretoEnlaces_() {
+  const props = PropertiesService.getScriptProperties();
+  let secreto = props.getProperty('SECRETO_ENLACES');
+  if (!secreto) {
+    secreto = Utilities.getUuid() + Utilities.getUuid();
+    props.setProperty('SECRETO_ENLACES', secreto);
+  }
+  return secreto;
+}
+
+function firmarIdReserva_(idReserva) {
+  const firma = Utilities.computeHmacSha256Signature(String(idReserva), getSecretoEnlaces_());
+  return Utilities.base64EncodeWebSafe(firma).replace(/=+$/, '').substring(0, 24);
+}
+
+function handleEmailCancelation(reservaId, firma) {
   const sheetReservas = getDB().getSheetByName(SHEETS.RESERVAS);
   if (!sheetReservas) {
     return HtmlService.createHtmlOutput(buildHtmlCancelPage("Error", "No se encuentra la hoja de Reservas."));
@@ -1294,6 +1322,17 @@ function handleEmailCancelation(reservaId) {
   const filaEncontrada = celdaEncontrada.getRow();
   const rowData = sheetReservas.getRange(filaEncontrada, 1, 1, headers.length).getValues()[0];
   const estadoActual = rowData[COL_ESTADO_INDEX];
+
+  // 🛡️ Autorización: enlace firmado (emails nuevos) o bien el propio dueño / un admin (emails antiguos)
+  const firmaValida = firma && firma === firmarIdReserva_(reservaId);
+  if (!firmaValida) {
+    const emailActual = String(Session.getActiveUser().getEmail() || '').toLowerCase().trim();
+    const emailDueno = String(rowData[COL_EMAIL_INDEX] || '').toLowerCase().trim();
+    const esDueno = emailActual && emailActual === emailDueno;
+    if (!esDueno && !(emailActual && checkUserAuthorization(emailActual).isAdmin)) {
+      return HtmlService.createHtmlOutput(buildHtmlCancelPage("Acceso denegado", "Solo quien hizo la reserva o un administrador puede cancelarla. Hazlo desde la aplicación."));
+    }
+  }
 
   // ✅ OBTENER DATOS
   const recursoId = rowData[COL_RECURSO_ID_INDEX];
@@ -1362,7 +1401,7 @@ function handleEmailCancelation(reservaId) {
 
   const email = rowData[COL_EMAIL_INDEX];
   const authResult = checkUserAuthorization(email);
-  sendCancelationEmail(email, authResult.userName, details);
+  sendCancelationEmail_(email, authResult.userName, details);
 
   // ✅ Reutilizar la variable cache que ya existe arriba
   cache.remove(CACHE_KEYS.DISPONIBILIDAD + recursoId);
@@ -1376,7 +1415,7 @@ function handleEmailCancelation(reservaId) {
    UTILIDADES DE EMAIL Y HTML
    ============================================ */
 
-function sendCancelationEmail(email, userName, details) {
+function sendCancelationEmail_(email, userName, details) {
   const asunto = `Cancelación Confirmada: ${details.recursoNombre} - ${details.fechaFormateada}`;
   const cuerpoHtml = `
     <p>¡Hola ${userName || ''}!</p>
@@ -1384,9 +1423,9 @@ function sendCancelationEmail(email, userName, details) {
     <hr>
     <p>Detalles de la reserva cancelada:</p>
     <ul>
-      <li><strong>Recurso:</strong> ${details.recursoNombre}</li>
+      <li><strong>Recurso:</strong> ${escHtml_(details.recursoNombre)}</li>
       <li><strong>Fecha:</strong> ${details.fechaFormateada}</li>
-      <li><strong>Tramo:</strong> ${details.tramoNombre}</li>
+      <li><strong>Tramo:</strong> ${escHtml_(details.tramoNombre)}</li>
     </ul>
     <hr>
     <p style="font-size: 0.9em; color: #777;">Si has cancelado por error, deberás volver a realizar la reserva desde la aplicación.</p>
@@ -1410,9 +1449,9 @@ function buildHtmlCancelPage(titulo, mensaje, details) {
     detailsHtml = `
       <hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">
       <ul style="text-align: left; list-style: none; padding-left: 0; margin: 0;">
-        <li style="margin-bottom: 8px;"><strong>Recurso:</strong> ${details.recursoNombre}</li>
+        <li style="margin-bottom: 8px;"><strong>Recurso:</strong> ${escHtml_(details.recursoNombre)}</li>
         <li style="margin-bottom: 8px;"><strong>Fecha:</strong> ${details.fechaFormateada}</li>
-        <li style="margin-bottom: 8px;"><strong>Tramo:</strong> ${details.tramoNombre}</li>
+        <li style="margin-bottom: 8px;"><strong>Tramo:</strong> ${escHtml_(details.tramoNombre)}</li>
       </ul>
       <hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">
     `;
@@ -1593,7 +1632,7 @@ function handleAprobarRecurrenteDesdeEmail(idSolicitud) {
     if (resultado && resultado.success) {
       return HtmlService.createHtmlOutput(buildHtmlCancelPage(
         "Solicitud Aprobada",
-        `La solicitud de reserva recurrente de <strong>${solicitud.usuario}</strong> para <strong>${solicitud.recurso}</strong> ha sido aprobada correctamente.`,
+        `La solicitud de reserva recurrente de <strong>${escHtml_(solicitud.usuario)}</strong> para <strong>${escHtml_(solicitud.recurso)}</strong> ha sido aprobada correctamente.`,
         {
           recursoNombre: solicitud.recurso,
           fechaFormateada: `${solicitud.dias}`,
@@ -1656,7 +1695,7 @@ function procesarSolicitudRegistro(nombreSolicitante, emailManual) {
   }
 
   const scriptUrl = ScriptApp.getService().getUrl();
-  const admins = getAdminsEmails();
+  const admins = getAdminsEmails_();
   if (admins.length === 0) {
     throw new Error("No hay administradores configurados. Contacta con el responsable del sistema.");
   }
@@ -1675,7 +1714,7 @@ function procesarSolicitudRegistro(nombreSolicitante, emailManual) {
         <p>Hola Admin,</p>
         <p>Un nuevo compañero quiere acceder al sistema:</p>
         <ul style="background: #f9f9f9; padding: 15px; border-radius: 5px; list-style: none;">
-          <li>👤 <strong>Nombre:</strong> ${nombreSolicitante}</li>
+          <li>👤 <strong>Nombre:</strong> ${escHtml_(nombreSolicitante)}</li>
           <li>📧 <strong>Email:</strong> ${emailFinal}</li>
         </ul>
         <p>Haz clic abajo para darle acceso inmediato:</p>
@@ -1733,7 +1772,7 @@ function handleAdminApproval(emailNuevo, nombreNuevo) {
             <h2 style="margin: 0;">¡Bienvenido/a a bordo!</h2>
           </div>
           <div style="padding: 20px;">
-            <p>Hola <strong>${nombreNuevo}</strong>,</p>
+            <p>Hola <strong>${escHtml_(nombreNuevo)}</strong>,</p>
             <p>Tu solicitud de acceso ha sido aprobada por el administrador.</p>
             <p>Ya puedes entrar y realizar reservas.</p>
             <div style="text-align: center; margin-top: 25px;">
@@ -1765,8 +1804,8 @@ function handleAdminApproval(emailNuevo, nombreNuevo) {
           <div style="font-size: 60px; margin-bottom: 20px;">✅</div>
           <h1 style="color: #166534; margin: 0;">Usuario Registrado</h1>
           <p style="color: #4b5563; margin-top: 10px;">
-            Se ha dado de alta a <b>${nombreNuevo}</b><br>
-            <span style="font-size: 0.9em; color: #6b7280;">(${emailNuevo})</span>
+            Se ha dado de alta a <b>${escHtml_(nombreNuevo)}</b><br>
+            <span style="font-size: 0.9em; color: #6b7280;">(${escHtml_(emailNuevo)})</span>
           </p>
           <p style="margin-top: 20px; color: #059669; font-weight: bold;">
             📧 Se le ha enviado un correo de aviso.
@@ -1781,14 +1820,16 @@ function handleAdminApproval(emailNuevo, nombreNuevo) {
 }
 
 // Helper para buscar emails de admins
-function getAdminsEmails() {
+function getAdminsEmails_() {
   try {
     const ss = getDB();
     const sheet = ss.getSheetByName(SHEETS.USUARIOS);
     const data = sheet.getDataRange().getValues();
     // Asumimos Col B=Email, Col D=Admin
     // Filtramos filas donde Col D es true/si/yes
-    const admins = data.filter((row, i) => i > 0 && (String(row[3]).toLowerCase() === 'true' || row[3] === true))
+    // Mismos valores que acepta checkUserAuthorization (TRUE, Sí, yes, admin)
+    const admins = data.filter((row, i) => i > 0 && row[1] &&
+        (esValorVerdadero_(row[3]) || String(row[3]).toLowerCase().trim() === 'admin'))
       .map(row => row[1]);
     return admins;
   } catch (e) { return []; }
@@ -1829,14 +1870,7 @@ function getConfiguracion() {
     
     if (!clave) continue;
     
-    // Convertir tipos
-    if (valor === 'TRUE' || valor === 'FALSE') {
-      valor = (valor === 'TRUE');
-    } else if (!isNaN(valor) && valor !== '') {
-      valor = Number(valor);
-    }
-    
-    config[clave] = valor;
+    config[clave] = parsearValorConfig_(valor);
   }
   
   // Cachear por 5 minutos
@@ -1848,6 +1882,20 @@ function getConfiguracion() {
   }
   
   return config;
+}
+
+/**
+ * Convierte un valor de la hoja Config a su tipo JS.
+ * Antes los booleanos reales (casillas) acababan como Number(true) = 1 y
+ * las comprobaciones "=== true" nunca se cumplían.
+ */
+function parsearValorConfig_(valor) {
+  if (typeof valor === 'boolean' || typeof valor === 'number') return valor;
+  if (valor instanceof Date) return valor;
+  const txt = String(valor).trim();
+  if (/^(true|false)$/i.test(txt)) return txt.toLowerCase() === 'true';
+  if (txt !== '' && !isNaN(txt)) return Number(txt);
+  return valor;
 }
 
 /**
@@ -1934,9 +1982,10 @@ function validarAntelacionMinima(fechaISO, tramoId) {
   }
   
   // Construir la fecha/hora exacta del inicio del tramo
-  const [horas, minutos] = tramo.hora_inicio.split(':').map(Number);
-  const fechaHoraTramo = new Date(fechaISO + "T00:00:00Z");
-  fechaHoraTramo.setUTCHours(horas, minutos, 0, 0);
+  // Hora local del centro (zona del script). Antes se usaba UTC: desfase de 1-2 h.
+  const [horas, minutos] = String(tramo.hora_inicio).split(':').map(Number);
+  const hhmm = ('0' + horas).slice(-2) + ':' + ('0' + (minutos || 0)).slice(-2);
+  const fechaHoraTramo = Utilities.parseDate(fechaISO + ' ' + hhmm, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
   
   // Obtener la hora actual
   const ahora = new Date();

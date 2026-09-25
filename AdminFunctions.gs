@@ -7,6 +7,26 @@
    VERIFICACIÓN DE PERMISOS
    ============================================ */
 
+// Interpreta casillas / textos de la hoja: TRUE, "true", "Si", "Sí", "yes"
+function esValorVerdadero_(v) {
+  if (v === true) return true;
+  const t = String(v).toLowerCase().trim().replace('í', 'i');
+  return t === 'true' || t === 'si' || t === 'yes';
+}
+
+// Ejecuta fn con el bloqueo global del script (mismo que usa crearNuevaReserva)
+function conLockScript_(fn) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) {
+    return { success: false, error: "El sistema está ocupado. Inténtalo de nuevo en unos segundos." };
+  }
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function isUserAdmin() {
   const email = Session.getActiveUser().getEmail();
   const authResult = checkUserAuthorization(email);
@@ -30,7 +50,7 @@ function getAdminData() {
 
     // Ejecutar migración de ID_Solicitud_Recurrente si es necesario
     try {
-      migrarIdSolicitudRecurrente();
+      migrarIdSolicitudRecurrente_();
     } catch (migErr) {
       Logger.log('⚠️ Error en migración (no crítico): ' + migErr.message);
     }
@@ -103,8 +123,8 @@ function getAdminData() {
       usuarios = dataUsers.map(row => ({
         Nombre: String(row[0]).trim(), 
         Email: String(row[1]).trim(), 
-        Activo: Boolean(row[2]), 
-        Admin: Boolean(row[3])
+        Activo: esValorVerdadero_(row[2]), // Boolean('FALSE') era true y reactivaba usuarios
+        Admin: esValorVerdadero_(row[3])
       }));
     }
 
@@ -713,7 +733,7 @@ function updateReservaAdmin(reservaData) {
     if (estado && headerMap['estado']) sheetReservas.getRange(fila, headerMap['estado']).setValue(estado);
     
     if (emailUsuario && (id_recurso !== oldValues.id_recurso || fecha !== oldValues.fecha || id_tramo !== oldValues.id_tramo)) {
-      enviarNotificacionCambioReserva(emailUsuario, reservaData);
+      enviarNotificacionCambioReserva_(emailUsuario, reservaData);
     }
     
     purgarCache();
@@ -752,7 +772,7 @@ function deleteReservaAdmin(idReserva) {
     sheetReservas.deleteRow(fila);
     
     if (emailUsuario) {
-      enviarNotificacionEliminacionReserva(emailUsuario, rowData, headers);
+      enviarNotificacionEliminacionReserva_(emailUsuario, rowData, headers);
     }
     
     purgarCache();
@@ -769,7 +789,7 @@ function deleteReservaAdmin(idReserva) {
    NOTIFICACIONES POR EMAIL
    ============================================ */
 
-function enviarNotificacionCambioReserva(emailUsuario, nuevosValores) {
+function enviarNotificacionCambioReserva_(emailUsuario, nuevosValores) {
   try {
     const staticData = getStaticData();
     const authResult = checkUserAuthorization(emailUsuario);
@@ -795,7 +815,7 @@ function enviarNotificacionCambioReserva(emailUsuario, nuevosValores) {
           <table style="width: 100%; border-collapse: collapse;">
             <tr>
               <td style="padding: 10px; background: #f9f9f9;"><strong>Recurso:</strong></td>
-              <td style="padding: 10px;">${recurso.nombre}</td>
+              <td style="padding: 10px;">${escHtml_(recurso.nombre)}</td>
             </tr>
             <tr>
               <td style="padding: 10px; background: #f9f9f9;"><strong>Fecha:</strong></td>
@@ -803,12 +823,12 @@ function enviarNotificacionCambioReserva(emailUsuario, nuevosValores) {
             </tr>
             <tr>
               <td style="padding: 10px; background: #f9f9f9;"><strong>Tramo:</strong></td>
-              <td style="padding: 10px;">${tramo.nombre_tramo} (${tramo.hora_inicio} - ${tramo.hora_fin})</td>
+              <td style="padding: 10px;">${escHtml_(tramo.nombre_tramo)} (${escHtml_(tramo.hora_inicio)} - ${escHtml_(tramo.hora_fin)})</td>
             </tr>
             ${nuevosValores.curso ? `
             <tr>
               <td style="padding: 10px; background: #f9f9f9;"><strong>Curso:</strong></td>
-              <td style="padding: 10px;">${nuevosValores.curso}</td>
+              <td style="padding: 10px;">${escHtml_(nuevosValores.curso)}</td>
             </tr>` : ''}
             ${nuevosValores.cantidad > 1 ? `
             <tr>
@@ -818,7 +838,7 @@ function enviarNotificacionCambioReserva(emailUsuario, nuevosValores) {
             ${nuevosValores.notas ? `
             <tr>
               <td style="padding: 10px; background: #f9f9f9;"><strong>Notas:</strong></td>
-              <td style="padding: 10px;">${nuevosValores.notas}</td>
+              <td style="padding: 10px;">${escHtml_(nuevosValores.notas)}</td>
             </tr>` : ''}
           </table>
           <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
@@ -840,7 +860,7 @@ function enviarNotificacionCambioReserva(emailUsuario, nuevosValores) {
   }
 }
 
-function enviarNotificacionEliminacionReserva(emailUsuario, rowData, headers) {
+function enviarNotificacionEliminacionReserva_(emailUsuario, rowData, headers) {
   try {
     const staticData = getStaticData();
     const authResult = checkUserAuthorization(emailUsuario);
@@ -869,7 +889,7 @@ function enviarNotificacionEliminacionReserva(emailUsuario, rowData, headers) {
           <table style="width: 100%; border-collapse: collapse;">
             <tr>
               <td style="padding: 10px; background: #f9f9f9;"><strong>Recurso:</strong></td>
-              <td style="padding: 10px;">${recurso.nombre}</td>
+              <td style="padding: 10px;">${escHtml_(recurso.nombre)}</td>
             </tr>
             <tr>
               <td style="padding: 10px; background: #f9f9f9;"><strong>Fecha:</strong></td>
@@ -877,7 +897,7 @@ function enviarNotificacionEliminacionReserva(emailUsuario, rowData, headers) {
             </tr>
             <tr>
               <td style="padding: 10px; background: #f9f9f9;"><strong>Tramo:</strong></td>
-              <td style="padding: 10px;">${tramo.nombre_tramo} (${tramo.hora_inicio} - ${tramo.hora_fin})</td>
+              <td style="padding: 10px;">${escHtml_(tramo.nombre_tramo)} (${escHtml_(tramo.hora_inicio)} - ${escHtml_(tramo.hora_fin)})</td>
             </tr>
           </table>
           <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
@@ -1198,7 +1218,7 @@ function saveBatchDisponibilidadConValidacion(cambios, forzar = false) {
 
     // Si hay conflictos y se fuerza, procesar las cancelaciones
     if (conflictos.tieneConflictos && forzar) {
-      const resultadoCancelaciones = procesarCancelacionesPorDisponibilidad(conflictos.afectados);
+      const resultadoCancelaciones = procesarCancelacionesPorDisponibilidad_(conflictos.afectados);
       if (!resultadoCancelaciones.success) {
         return resultadoCancelaciones;
       }
@@ -1218,7 +1238,7 @@ function saveBatchDisponibilidadConValidacion(cambios, forzar = false) {
  * @param {Array} afectados - Lista de tramos afectados
  * @returns {Object}
  */
-function procesarCancelacionesPorDisponibilidad(afectados) {
+function procesarCancelacionesPorDisponibilidad_(afectados) {
   try {
     const sheetRecurrentes = getOrCreateSheetSolicitudesRecurrentes();
     const data = sheetRecurrentes.getDataRange().getValues();
@@ -1278,16 +1298,16 @@ function procesarCancelacionesPorDisponibilidad(afectados) {
       }
 
       // Enviar notificación al usuario
-      enviarNotificacionCancelacionDisponibilidad(porSolicitud[idSolicitud]);
+      enviarNotificacionCancelacionDisponibilidad_(porSolicitud[idSolicitud]);
     }
 
     // También cancelar las reservas individuales futuras de esos tramos
-    cancelarReservasFuturasPorDisponibilidad(afectados);
+    cancelarReservasFuturasPorDisponibilidad_(afectados);
 
     return { success: true };
 
   } catch (e) {
-    Logger.log('Error en procesarCancelacionesPorDisponibilidad: ' + e.message);
+    Logger.log('Error en procesarCancelacionesPorDisponibilidad_: ' + e.message);
     return { success: false, error: e.message };
   }
 }
@@ -1295,7 +1315,7 @@ function procesarCancelacionesPorDisponibilidad(afectados) {
 /**
  * Cancela reservas futuras individuales afectadas por cambio de disponibilidad
  */
-function cancelarReservasFuturasPorDisponibilidad(afectados) {
+function cancelarReservasFuturasPorDisponibilidad_(afectados) {
   try {
     const ss = getDB();
     const sheetReservas = ss.getSheetByName(SHEETS.RESERVAS);
@@ -1308,9 +1328,10 @@ function cancelarReservasFuturasPorDisponibilidad(afectados) {
     const colFecha = headers.indexOf('fecha');
     const colIdTramo = headers.indexOf('id_tramo');
     const colEstado = headers.indexOf('estado');
-    const colTipoReserva = headers.indexOf('tipo_reserva');
+    // La columna 'tipo_reserva' no existe en Reservas: se identifica la recurrencia por su ID
+    const colIdSolRec = headers.indexOf('id_solicitud_recurrente');
 
-    if (colIdRecurso < 0 || colFecha < 0 || colIdTramo < 0 || colEstado < 0) return;
+    if (colIdRecurso < 0 || colFecha < 0 || colIdTramo < 0 || colEstado < 0 || colIdSolRec < 0) return;
 
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
@@ -1325,8 +1346,8 @@ function cancelarReservasFuturasPorDisponibilidad(afectados) {
       // Aceptar tanto 'activa' como 'confirmada'
       if (estado !== 'activa' && estado !== 'confirmada') continue;
 
-      const tipoReserva = String(row[colTipoReserva] || '').toLowerCase();
-      if (tipoReserva !== 'recurrente') continue;
+      const idSolRec = String(row[colIdSolRec] || '').trim();
+      if (!idSolRec) continue; // Solo reservas generadas por una recurrencia
 
       const fechaReserva = new Date(row[colFecha]);
       if (isNaN(fechaReserva.getTime())) continue;
@@ -1338,6 +1359,7 @@ function cancelarReservasFuturasPorDisponibilidad(afectados) {
 
       // Verificar si está afectada (debe coincidir recurso, día Y tramo)
       const esAfectada = afectados.some(a =>
+        String(a.id_solicitud || '').trim() === idSolRec &&
         String(a.id_recurso || '').trim() === idRecurso &&
         a.dia_letra === diaSemana &&
         String(a.id_tramo).trim() === idTramo
@@ -1350,14 +1372,14 @@ function cancelarReservasFuturasPorDisponibilidad(afectados) {
     }
 
   } catch (e) {
-    Logger.log('Error en cancelarReservasFuturasPorDisponibilidad: ' + e.message);
+    Logger.log('Error en cancelarReservasFuturasPorDisponibilidad_: ' + e.message);
   }
 }
 
 /**
  * Envía notificación al usuario sobre cancelación por disponibilidad
  */
-function enviarNotificacionCancelacionDisponibilidad(info) {
+function enviarNotificacionCancelacionDisponibilidad_(info) {
   try {
     const email = info.email;
     const nombre = info.nombre || email;
@@ -1404,35 +1426,47 @@ function saveBatchUsuarios(usuariosList) {
   try {
     if (!isUserAdmin()) throw new Error("Permiso denegado");
     
+    var lock = LockService.getScriptLock();
+    lock.waitLock(15000);
+    try {
     var ss = getDB();
     var sheet = ss.getSheetByName(SHEETS.USUARIOS);
+    var lastRow = sheet.getLastRow();
+
+    // Conservar la Especialidad (columna E) de cada usuario por su email:
+    // antes solo se reescribían A-D y la columna E quedaba desplazada al borrar usuarios.
+    var especialidadPorEmail = {};
+    if (lastRow > 1) {
+      sheet.getRange(2, 1, lastRow - 1, 5).getValues().forEach(function (r) {
+        var em = String(r[1]).toLowerCase().trim();
+        if (em) especialidadPorEmail[em] = r[4];
+      });
+    }
     
     var dataToSave = [];
     
     for (var i = 0; i < usuariosList.length; i++) {
       var u = usuariosList[i];
+      var email = String(u.Email || u.Email_Usuario || '').trim();
       
-      // Normalizamos booleanos
-      var esActivo = (u.Activo === true || u.Activo === "TRUE" || u.Activo === "Si");
-      var esAdmin = (u.Admin === true || u.Admin === "TRUE" || u.Admin === "Si");
-      
-      // AQUÍ ESTÁ EL CAMBIO: Primero Nombre, luego Email
       dataToSave.push([
-        u.Nombre || u.Nombre_Completo,  // Columna A: Nombre
-        u.Email || u.Email_Usuario,     // Columna B: Email
-        esActivo,                       // Columna C: Activo
-        esAdmin                         // Columna D: Admin
+        u.Nombre || u.Nombre_Completo,          // Columna A: Nombre
+        email,                                  // Columna B: Email
+        esValorVerdadero_(u.Activo),            // Columna C: Activo
+        esValorVerdadero_(u.Admin),             // Columna D: Admin
+        especialidadPorEmail[email.toLowerCase()] || '' // Columna E: Especialidad
       ]);
     }
     
-    // Guardar...
-    var lastRow = sheet.getLastRow();
     if (lastRow > 1) {
-      sheet.getRange(2, 1, lastRow - 1, 4).clearContent();
+      sheet.getRange(2, 1, lastRow - 1, 5).clearContent();
     }
     
     if (dataToSave.length > 0) {
-      sheet.getRange(2, 1, dataToSave.length, 4).setValues(dataToSave);
+      sheet.getRange(2, 1, dataToSave.length, 5).setValues(dataToSave);
+    }
+    } finally {
+      lock.releaseLock();
     }
     
     purgarCache();
@@ -1446,7 +1480,12 @@ function saveBatchUsuarios(usuariosList) {
 /* ==========================================================
    CANCELAR RESERVA (CON CRUCE DE DATOS Y NOMBRES REALES 🕵️‍♂️)
    ========================================================== */
+// Envoltorio con LockService: evita dobles reservas / filas desplazadas si coincide con otra escritura
 function adminCancelarReserva(idReserva) {
+  return conLockScript_(() => adminCancelarReservaSinLock_(idReserva));
+}
+
+function adminCancelarReservaSinLock_(idReserva) {
   try {
     if (!isUserAdmin()) throw new Error("Permiso denegado");
     
@@ -1532,7 +1571,7 @@ function adminCancelarReserva(idReserva) {
           <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; padding: 20px; border-radius: 8px;">
             <h2 style="color: #d32f2f; margin-top: 0;">Reserva Cancelada</h2>
             
-            <p>Hola <strong>${reservaInfo.usuario}</strong>,</p>
+            <p>Hola <strong>${escHtml_(reservaInfo.usuario)}</strong>,</p>
             
             <p>Te informamos que <b>un administrador ha cancelado tu reserva</b>.</p>
             
@@ -1540,7 +1579,7 @@ function adminCancelarReserva(idReserva) {
             
             <p style="font-weight: bold; margin-bottom: 10px;">Detalles de la reserva eliminada:</p>
             <ul style="background-color: #fff1f0; padding: 15px 30px; border-radius: 5px; list-style-type: none; border: 1px solid #ffccc7;">
-              <li style="margin-bottom: 8px;">📦 <strong>Recurso:</strong> ${reservaInfo.recurso}</li>
+              <li style="margin-bottom: 8px;">📦 <strong>Recurso:</strong> ${escHtml_(reservaInfo.recurso)}</li>
               <li style="margin-bottom: 8px;">📅 <strong>Fecha:</strong> ${reservaInfo.fecha}</li>
               <li>⏰ <strong>Tramo:</strong> ${reservaInfo.tramo}</li>
             </ul>
@@ -1633,7 +1672,7 @@ function saveBatchConfig(configList) {
  * Migra las reservas recurrentes existentes para añadir el ID_Solicitud_Recurrente
  * basándose en el campo Notas que contiene "Reserva recurrente: [ID]"
  */
-function migrarIdSolicitudRecurrente() {
+function migrarIdSolicitudRecurrente_() {
   try {
     const ss = getDB();
     const sheet = ss.getSheetByName(SHEETS.RESERVAS);
@@ -1775,8 +1814,9 @@ function getDatosMatrizUnificada(idRecurso) {
       if (sheetUsers && sheetUsers.getLastRow() > 1) {
         const usersData = sheetUsers.getRange(2, 1, sheetUsers.getLastRow() - 1, 5).getValues();
         usersData.forEach(u => {
-          usuariosMap.set(String(u[0]).trim().toLowerCase(), {
-            nombre: String(u[1]).trim(),
+          // Usuarios: A=Nombre, B=Email, E=Especialidad
+          usuariosMap.set(String(u[1]).trim().toLowerCase(), {
+            nombre: String(u[0]).trim(),
             area: String(u[4]).trim() || ''
           });
         });
