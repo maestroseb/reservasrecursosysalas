@@ -152,8 +152,11 @@ npx tailwindcss@3.4.19 -c tailwind.config.js -i <(printf '@tailwind base;@tailwi
    - En el editor de Apps Script, ve a **Desplegar > Nueva implementación**.
    - Tipo: **Aplicación web**.
    - Ejecutar como: **Usuario que implementa**.
-   - Acceso: **Cualquier usuario del dominio** (o según las necesidades del centro).
-   - ⚠️ **Implementa desde una cuenta del mismo dominio que el profesorado** (p. ej. @g.educaand.es o el dominio Workspace del centro). Google solo facilita a la aplicación el email de los usuarios de ese dominio; con cuentas de otro dominio o @gmail.com la app no puede identificarlos y les pedirá registrarse una y otra vez.
+   - Acceso: **Cualquier usuario del dominio**, o **Cualquier usuario con cuenta de Google** si el profesorado usa otros dominios o cuentas @gmail.com.
+   - **Identificación del profesorado** (desde la v1.6.0):
+     - Si el usuario es del **mismo dominio** que la cuenta que implementa, entra directamente con su cuenta de Google.
+     - Si no (otro dominio, @gmail.com…), entra con un **código de 6 cifras** que recibe por email; el navegador lo recuerda 30 días (botón *Salir* para olvidarlo).
+     - Opcional: en la hoja *Config*, la clave `dominios_acceso` (p. ej. `g.educaand.es, gmail.com`) limita a qué dominios se envían códigos.
 
 3. **Inicializar el sistema**
    - Abre la URL generada del despliegue.

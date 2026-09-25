@@ -8,7 +8,7 @@
  */
 
 // Versión de la aplicación (se muestra al pie de la página)
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 
 function getDB() {
   return SpreadsheetApp.getActiveSpreadsheet();
@@ -493,7 +493,7 @@ function getStaticData() {
 
   try {
     // 1. AUTORIZACIÓN (necesaria para el frontend)
-    const email = Session.getActiveUser().getEmail();
+    const email = emailActual_();
     const auth = checkUserAuthorization(email);
     // Los no registrados (pantalla de registro) no deben poder leer reservas ni emails de otros
     if (!auth || !auth.isAuthorized) {
@@ -709,20 +709,29 @@ function doGetInterno_(e) {
 
   // 1.2. Aprobación de usuarios por Admin
   if (e.parameter.action === "approve" && e.parameter.email && e.parameter.nombre) {
-    return handleAdminApproval(e.parameter.email, e.parameter.nombre);
+    return handleAdminApproval(e.parameter.email, e.parameter.nombre, e.parameter.f);
   }
 
   // 1.3. Aprobación de solicitud recurrente desde email
   if (e.parameter.action === "aprobar_recurrente" && e.parameter.id) {
-    return handleAprobarRecurrenteDesdeEmail(e.parameter.id);
+    return handleAprobarRecurrenteDesdeEmail(e.parameter.id, e.parameter.f);
   }
 
   // (LA ANTIGUA FASE 2 SE ELIMINA PORQUE ERA REDUNDANTE Y PROVOCABA ERROR)
 
   // --- FASE 2: AUTENTICACIÓN Y AUTORIZACIÓN ---
 
-  // Obtener usuario actual
-  const userEmail = Session.getActiveUser().getEmail();
+  // Obtener usuario actual: identidad de Google o, si no la hay, ticket de la pantalla de acceso con código
+  let userEmail = Session.getActiveUser().getEmail();
+  let tokenSesion = '';
+  if (!userEmail && e.parameter.ticket) {
+    const sesion = consumirTicket_(e.parameter.ticket);
+    if (sesion) {
+      userEmail = sesion.email;
+      tokenSesion = sesion.token;
+      TOKEN_PETICION_ = tokenSesion;
+    }
+  }
 
   Logger.log("--- DEBUG LOGIN ---");
   Logger.log("Email detectado: " + userEmail);
@@ -731,12 +740,13 @@ function doGetInterno_(e) {
   const authResult = checkUserAuthorization(userEmail);
   Logger.log("¿Está autorizado?: " + authResult.isAuthorized);
 
-  // 🛑 Google no nos da el email del usuario -> registrarse no serviría de nada
-  // (ocurre si la app se implementó con una cuenta de otro dominio, p.ej. @gmail.com,
-  //  o si el usuario entra con una cuenta distinta a la del centro)
+  // 🔐 Google no nos da el email (otro dominio, cuentas @gmail.com...) -> acceso con código por email
   if (!userEmail) {
-    return HtmlService.createHtmlOutput(buildHtmlEmailNoDisponible_())
-      .setTitle("No se pudo identificar tu cuenta")
+    const acceso = HtmlService.createTemplateFromFile('acceso');
+    acceso.appName = getAppConfig().appName || "Sistema de Reservas";
+    acceso.salir = e.parameter.salir ? 'true' : 'false';
+    return acceso.evaluate()
+      .setTitle("Acceso - " + acceso.appName)
       .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
@@ -747,6 +757,8 @@ function doGetInterno_(e) {
 
     const template = HtmlService.createTemplateFromFile('registro');
     template.email = userEmail;
+    template.sessionToken = tokenSesion; // vacío si entra con Google
+    template.appUrl = ScriptApp.getService().getUrl();
 
     return template.evaluate()
       .setTitle("Solicitud de Registro")
@@ -771,6 +783,8 @@ function doGetInterno_(e) {
   template.userNameForJs = JSON.stringify(authResult.userName || userEmail);
   template.userEmailForJs = JSON.stringify(userEmail);
   template.isAdminForJs = authResult.isAdmin ? 'true' : 'false';
+  template.sessionToken = tokenSesion; // solo con acceso por código (vacío si entra con Google)
+  template.appUrl = ScriptApp.getService().getUrl();
 
   return template.evaluate()
     .setTitle(appConfig.appName || "Sistema de Reservas")
@@ -1005,7 +1019,7 @@ function crearReservas_(reservaData, tramoIds) {
   }
 
   try {
-    const email = Session.getActiveUser().getEmail();
+    const email = emailActual_();
     const authResult = checkUserAuthorization(email);
     if (!authResult.isAuthorized) {
       throw new Error("Tu sesión ha caducado o ya no tienes permisos.");
@@ -1244,7 +1258,7 @@ function cancelarReservaCliente(reservaId) {
   }
 
   try {
-    const userEmail = Session.getActiveUser().getEmail().toLowerCase();
+    const userEmail = emailActual_().toLowerCase();
     const sheetReservas = getDB().getSheetByName(SHEETS.RESERVAS);
     if (!sheetReservas) throw new Error("No se encuentra la hoja de Reservas.");
 
@@ -1415,7 +1429,7 @@ function handleEmailCancelation(reservaId, firma) {
   // 🛡️ Autorización: enlace firmado (emails nuevos) o bien el propio dueño / un admin (emails antiguos)
   const firmaValida = firma && firma === firmarIdReserva_(reservaId);
   if (!firmaValida) {
-    const emailActual = String(Session.getActiveUser().getEmail() || '').toLowerCase().trim();
+    const emailActual = String(emailActual_() || '').toLowerCase().trim();
     const emailDueno = String(rowData[COL_EMAIL_INDEX] || '').toLowerCase().trim();
     const esDueno = emailActual && emailActual === emailDueno;
     if (!esDueno && !(emailActual && checkUserAuthorization(emailActual).isAdmin)) {
@@ -1487,7 +1501,7 @@ function handleEmailCancelation(reservaId, firma) {
 
   // Tope de cancelación (horas_cancelacion); exentos solo si quien pulsa es admin identificado
   if (COL_FECHA_INDEX !== -1 && COL_TRAMO_ID_INDEX !== -1) {
-    const emailClic = String(Session.getActiveUser().getEmail() || '').trim();
+    const emailClic = String(emailActual_() || '').trim();
     if (!(emailClic && checkUserAuthorization(emailClic).isAdmin)) {
       const bloqueo = motivoBloqueoCancelacion_(rowData[COL_FECHA_INDEX], rowData[COL_TRAMO_ID_INDEX]);
       if (bloqueo) {
@@ -1679,8 +1693,10 @@ function buildHtmlCancelPage(titulo, mensaje, details) {
 /* ============================================
    APROBACIÓN DE SOLICITUD RECURRENTE DESDE EMAIL
    ============================================ */
-function handleAprobarRecurrenteDesdeEmail(idSolicitud) {
+function handleAprobarRecurrenteDesdeEmail(idSolicitud, firma) {
   try {
+    // Enlace firmado enviado al admin: vale aunque entre con código (sin identidad de Google)
+    if (firma && firma === firmarTexto_('rec|' + idSolicitud)) ADMIN_POR_ENLACE_FIRMADO_ = true;
     if (!isUserAdmin()) {
       return HtmlService.createHtmlOutput(buildHtmlCancelPage(
         "Acceso denegado",
@@ -1760,38 +1776,16 @@ function handleAprobarRecurrenteDesdeEmail(idSolicitud) {
    NUEVAS FUNCIONES DE ALTA DE USUARIO 🚀
    ============================================ */
 
-// Página mostrada cuando Session.getActiveUser() devuelve vacío
-function buildHtmlEmailNoDisponible_() {
-  let dominioDespliegue = '';
-  try { dominioDespliegue = (Session.getEffectiveUser().getEmail() || '').split('@')[1] || ''; } catch (e) { }
-  return `
-    <!DOCTYPE html>
-    <html>
-      <body style="font-family: sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background-color: #fef2f2; padding: 16px; box-sizing: border-box;">
-        <div style="max-width: 520px; text-align: center; padding: 32px; background: white; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);">
-          <div style="font-size: 50px; margin-bottom: 10px;">🔒</div>
-          <h1 style="color: #991b1b; margin: 0; font-size: 22px;">No se pudo identificar tu cuenta</h1>
-          <p style="color: #4b5563; margin-top: 14px; line-height: 1.5;">
-            Google no ha facilitado tu correo a la aplicación, por lo que no es posible comprobar tu acceso.
-          </p>
-          <ul style="text-align: left; color: #4b5563; line-height: 1.6; font-size: 14px;">
-            <li>Entra con tu cuenta del centro${dominioDespliegue ? ' (<b>@' + dominioDespliegue + '</b>)' : ''}. Si tienes varias cuentas abiertas, prueba en una ventana de incógnito.</li>
-            <li><b>Administrador/a:</b> la aplicación debe implementarse desde una cuenta del <b>mismo dominio</b> que el profesorado (p.ej. @g.educaand.es). Si se implementó desde una cuenta @gmail.com u otro dominio, Google oculta el correo de los usuarios y la aplicación les pedirá registrarse siempre.</li>
-          </ul>
-        </div>
-      </body>
-    </html>`;
-}
 
 // 1. EL USUARIO ENVÍA LA SOLICITUD (CORREGIDO)
 function procesarSolicitudRegistro(nombreSolicitante, emailManual) {
   // Intentamos obtenerlo de la sesión, si falla, usamos el que escribió el usuario
   // Solo se admite el email de la sesión: un email tecleado no se puede verificar
   // y, tras aprobarlo, el usuario seguiría sin poder entrar (bucle de registro).
-  const emailFinal = Session.getActiveUser().getEmail();
+  const emailFinal = emailActual_();
 
   if (!emailFinal) {
-    throw new Error("Google no ha facilitado tu correo a la aplicación. Entra con tu cuenta del centro o avisa al administrador (la app debe implementarse desde una cuenta del mismo dominio).");
+    throw new Error("Tu sesión ha caducado. Vuelve a entrar en la aplicación.");
   }
 
   const scriptUrl = ScriptApp.getService().getUrl();
@@ -1802,7 +1796,8 @@ function procesarSolicitudRegistro(nombreSolicitante, emailManual) {
   const emailAdmin = admins[0];
 
   // Enlace con los datos correctos
-  const enlaceAprobar = `${scriptUrl}?action=approve&email=${encodeURIComponent(emailFinal)}&nombre=${encodeURIComponent(nombreSolicitante)}`;
+  // Enlace firmado: funciona aunque el admin entre con código (sin identidad de Google)
+  const enlaceAprobar = `${scriptUrl}?action=approve&email=${encodeURIComponent(emailFinal)}&nombre=${encodeURIComponent(nombreSolicitante)}&f=${firmarTexto_('aprobar|' + String(emailFinal).toLowerCase() + '|' + nombreSolicitante)}`;
 
   const asunto = `🔔 Nueva Solicitud: ${nombreSolicitante}`;
   const cuerpo = `
@@ -1837,12 +1832,12 @@ function procesarSolicitudRegistro(nombreSolicitante, emailManual) {
 }
 
 // 2. EL ADMIN APRUEBA (CON LIMPIEZA DE CACHÉ Y EMAIL 📧✨)
-function handleAdminApproval(emailNuevo, nombreNuevo) {
-  // 1. SEGURIDAD: Verificar que quien hace clic es Admin
-  const emailAdmin = Session.getActiveUser().getEmail();
-  const auth = checkUserAuthorization(emailAdmin);
+function handleAdminApproval(emailNuevo, nombreNuevo, firma) {
+  // 1. SEGURIDAD: enlace firmado por el servidor (email al admin) o bien quien hace clic es Admin
+  const firmaValida = firma && firma === firmarTexto_('aprobar|' + String(emailNuevo).toLowerCase() + '|' + nombreNuevo);
+  const auth = checkUserAuthorization(emailActual_());
 
-  if (!auth.isAdmin) {
+  if (!firmaValida && !auth.isAdmin) {
     return HtmlService.createHtmlOutput("<h1>⛔ Acceso Denegado</h1><p>Solo un administrador puede aprobar solicitudes.</p>");
   }
 

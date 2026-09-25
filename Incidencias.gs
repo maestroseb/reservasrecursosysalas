@@ -7,7 +7,7 @@
  */
 function reportarIncidencia(datos) {
   try {
-    const userEmail = Session.getActiveUser().getEmail();
+    const userEmail = emailActual_();
     if (!userEmail) throw new Error("Usuario no identificado");
     if (!checkUserAuthorization(userEmail).isAuthorized) throw new Error("No tienes acceso al sistema.");
 
@@ -85,7 +85,7 @@ function reportarIncidencia(datos) {
 
 function getIncidencias() {
   try {
-    if (!checkUserAuthorization(Session.getActiveUser().getEmail()).isAuthorized) {
+    if (!checkUserAuthorization(emailActual_()).isAuthorized) {
       return { success: false, error: "No tienes acceso al sistema." };
     }
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -287,7 +287,7 @@ function enviarEmailNuevaIncidencia_(datos) {
     // Fallback: enviar al primer admin activo
     if (!emailAdmin) {
       const admins = getAdminsEmails_();
-      emailAdmin = admins[0] || Session.getActiveUser().getEmail();
+      emailAdmin = admins[0] || emailActual_();
     }
 
     const prioridadIcon = datos.prioridad === 'Crítica' ? '🔴' :

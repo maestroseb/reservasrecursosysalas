@@ -135,6 +135,7 @@ function crearDatosEjemploInterno(ss, currentUrl, adminEmail) {
     ['max_tramos_simultaneos', 1, 'Cuántos tramos seguidos se pueden coger de golpe'],
     ['nombre_centro', 'Sistema de Reservas', 'Nombre del centro'],
     ['url_logo', '', 'URL del logo del centro'],
+    ['dominios_acceso', '', 'Acceso con código: solo estos dominios (ej: g.educaand.es, gmail.com). Vacío = cualquiera'],
     ['url_webapp', currentUrl, 'URL automática de la aplicación']
   ];
   sheetConfig.getRange(2, 1, configData.length, 3).setValues(configData);
@@ -247,7 +248,7 @@ function repararInstalacionYGuardarURL() {
  * Útil tras copiar/pegar archivos a mano: detecta archivos cortados o con errores de sintaxis.
  */
 function diagnosticarArchivos() {
-  const archivos = ['index', 'scripts', 'admin-scripts', 'admin-panel', 'styles', 'tailwind-css', 'registro', 'Sidebar', 'ActivacionSistema'];
+  const archivos = ['index', 'scripts', 'admin-scripts', 'admin-panel', 'styles', 'tailwind-css', 'registro', 'acceso', 'sesion-cliente', 'Sidebar', 'ActivacionSistema'];
   archivos.forEach(nombre => {
     let contenido;
     try {

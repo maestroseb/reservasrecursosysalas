@@ -53,6 +53,10 @@
                 <p class="text-xs text-gray-500">
                   Hola, <span class="font-semibold text-gray-700"><?= userNameForHtml ?></span>
                 </p>
+                <? if (sessionToken) { ?>
+                <button onclick="cerrarSesion()" title="Cerrar sesión en este navegador"
+                  class="text-xs text-gray-400 hover:text-red-600 underline decoration-dotted">Salir</button>
+                <? } ?>
               </div>
             </div>
           </div>
@@ -1055,6 +1059,16 @@
 
 
   <!-- JavaScript -->
+  <!-- Sesión por código (solo si el usuario no entra con Google) -->
+  <script>
+    window.SESSION_TOKEN = (function (v) {
+      try { if (typeof v === 'string' && v.charAt(0) === '"') return JSON.parse(v); } catch (e) {}
+      return v;
+    })(<?= sessionToken ?>);
+    window.APP_URL = <?= appUrl ?>;
+  </script>
+  <?!= include('sesion-cliente'); ?>
+
   <script>
     /* ==========================================
      SCRIPT PRINCIPAL UNIFICADO (INDEX)

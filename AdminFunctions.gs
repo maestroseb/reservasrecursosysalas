@@ -28,7 +28,8 @@ function conLockScript_(fn) {
 }
 
 function isUserAdmin() {
-  const email = Session.getActiveUser().getEmail();
+  if (ADMIN_POR_ENLACE_FIRMADO_) return true; // solo durante una aprobación desde enlace firmado
+  const email = emailActual_();
   const authResult = checkUserAuthorization(email);
   return authResult.isAdmin || false;
 }
@@ -41,7 +42,7 @@ function isUserAdmin() {
 
 function getAdminData() {
   try {
-    const email = Session.getActiveUser().getEmail();
+    const email = emailActual_();
     const authResult = checkUserAuthorization(email);
 
     if (!authResult || !authResult.isAdmin) {
@@ -1093,7 +1094,7 @@ function migrarIdSolicitudRecurrente_() {
  */
 function getDatosMatrizUnificada(idRecurso) {
   try {
-    const email = Session.getActiveUser().getEmail();
+    const email = emailActual_();
     const authResult = checkUserAuthorization(email);
 
     if (!authResult || !authResult.isAdmin) {
