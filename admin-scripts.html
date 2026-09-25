@@ -3792,7 +3792,7 @@ function validarConfiguracion() {
   
   const urlLogo = getCfgVal('cfg_url_logo');
   if (urlLogo && !/^https?:\/\/.+/.test(urlLogo)) {
-    errores.push('URL del logo debe empezar con http:// o https://');
+    errores.push('URL del logo debe empezar con http:\/\/ o https:\/\/'); // "\/\/" = "//" (evita que herramientas que quitan comentarios corten el texto)
   }
   // Validar que si es URL de Drive, tenga un formato reconocible
   if (urlLogo && urlLogo.includes('drive.google.com')) {
@@ -4224,7 +4224,8 @@ function filtrarIconosGrid() {
 
 function buscarEnIconifyAPI(query) {
   // Buscamos solo en MDI (Material Design) para mantener coherencia
-  const url = `https://api.iconify.design/search?query=${query}&limit=100`;
+  // "\/\/" equivale a "//": así ninguna herramienta que elimine comentarios corta la URL
+  const url = `https:\/\/api.iconify.design/search?query=${encodeURIComponent(query)}&limit=100`;
   
   fetch(url)
     .then(res => res.json())

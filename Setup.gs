@@ -282,7 +282,13 @@ function diagnosticarArchivos() {
         let pista = '';
         for (let k = 1; k <= ls.length; k++) {
           try { new Function(ls.slice(0, k).join('\n') + '\n}}}}}}}}}}'); } catch (e2) {
-            if (e2.message === e.message) { pista = ` (hacia la línea ${lineaInicio + k - 1}: «${ls[k - 1].trim().slice(0, 80)}»)`; break; }
+            if (e2.message === e.message) {
+              pista = ` (hacia la línea ${lineaInicio + k - 1}: «${ls[k - 1].trim().slice(0, 80)}»)`;
+              // Contexto: las 25 líneas anteriores, para ver qué ha cambiado
+              pista += '\n   --- contexto ---\n' + ls.slice(Math.max(0, k - 26), k)
+                .map((l, j) => `   ${lineaInicio + Math.max(0, k - 26) + j - 1}| ${l.slice(0, 140)}`).join('\n');
+              break;
+            }
           }
         }
         informe += `\n   ❌ Script ${n}: ${e.message}${pista}`;
