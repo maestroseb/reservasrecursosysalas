@@ -2760,7 +2760,7 @@ function abrirImportarUsuarios() {
         <button onclick="cerrarImportarUsuarios()" class="text-gray-400 hover:text-gray-600 p-1"><iconify-icon icon="mdi:close" width="22"></iconify-icon></button>
       </div>
       <div class="p-6 space-y-4">
-        <p class="text-sm text-gray-600">Pega una fila por usuario (copiada de Excel, Sheets o Séneca) o sube un <b>CSV</b>. Se detecta sola la columna del email; la otra será el nombre. Si una columna dice <i>admin</i> o <i>sí</i>, será administrador.</p>
+        <p class="text-sm text-gray-600">Pega una fila por usuario (copiada de Excel, Sheets o Séneca) o sube un <b>CSV</b>. Se detecta sola la columna del email; el resto de columnas (nombre, apellidos) forman el nombre. Si una columna dice <i>admin</i> o <i>sí</i>, será administrador.</p>
         <textarea id="importUsuariosTexto" rows="7" oninput="previsualizarImportacion()"
           class="w-full border border-gray-300 rounded-xl p-3 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
           placeholder="Ana López Pérez&#9;alopez@g.educaand.es&#10;Juan Ruiz;jruiz@g.educaand.es;admin"></textarea>
@@ -2835,7 +2835,8 @@ function analizarTextoUsuarios(texto) {
 
     const otras = celdas.filter(c => !c.includes('@'));
     const admin = otras.some(esAdmin);
-    let nombre = otras.find(c => !esAdmin(c) && !/^(activo|no|false|0)$/i.test(c)) || '';
+    // Nombre = todas las columnas de texto unidas (p. ej. "Nombre" + "Apellidos" de Séneca)
+    let nombre = otras.filter(c => !esAdmin(c) && !/^(activo|inactivo|no|false|0)$/i.test(c)).join(' ').replace(/\s+/g, ' ').trim();
     if (nombre.length < 2) nombre = email.split('@')[0];
     res.nuevos.push({ Nombre: nombre, Email: email, Activo: true, Admin: admin });
   });
