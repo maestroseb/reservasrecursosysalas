@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Tailwind CSS precompilado -->
+  <?!= include('tailwind-css'); ?>
+  <title>Acceso</title>
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center p-4 font-sans">
+
+  <div class="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden">
+    <div class="bg-gradient-to-br from-indigo-600 to-blue-600 p-6 text-center">
+      <div class="mx-auto bg-white/20 w-16 h-16 rounded-2xl flex items-center justify-center mb-3">
+        <svg viewBox="0 0 24 24" width="36" height="36" fill="#fff" aria-hidden="true"><path d="M19 19H5V8h14m0-5h-1V1h-2v2H8V1H6v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2m-2.47 8.06L15.47 10l-4.88 4.88l-2.12-2.12l-1.06 1.06L10.59 17z"/></svg>
+      </div>
+      <h1 class="text-2xl font-bold text-white"><?= appName ?></h1>
+      <p class="text-blue-100 text-sm mt-1">Acceso con tu correo</p>
+    </div>
+
+    <div class="p-8">
+      <!-- Cargando / entrando -->
+      <div id="pasoCargando" class="text-center py-6">
+        <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto mb-4"></div>
+        <p id="textoCargando" class="text-gray-500 text-sm">Comprobando tu sesión...</p>
+        <a id="enlaceEntrar" href="#" target="_top"
+          class="hidden mt-5 inline-block bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg shadow">Entrar</a>
+      </div>
+
+      <!-- Paso 1: correo -->
+      <div id="pasoEmail" class="hidden space-y-4">
+        <p class="text-gray-600 text-sm text-center">Escribe tu correo y te enviaremos un <b>código de 6 cifras</b> para entrar.</p>
+        <input type="email" id="emailInput" autocomplete="email" placeholder="nombre@centro.es"
+          class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none">
+        <button id="btnPedirCodigo" onclick="pedirCodigo()"
+          class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow disabled:opacity-50">Enviarme el código</button>
+      </div>
+
+      <!-- Paso 2: código -->
+      <div id="pasoCodigo" class="hidden space-y-4">
+        <p class="text-gray-600 text-sm text-center">Hemos enviado un código a <b id="emailDestino"></b>.<br>Revisa también la carpeta de spam.</p>
+        <input type="text" id="codigoInput" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000"
+          class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none text-center text-2xl tracking-[0.5em] font-bold">
+        <button id="btnVerificar" onclick="verificarCodigo()"
+          class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow disabled:opacity-50">Entrar</button>
+        <button onclick="mostrarPaso('pasoEmail')" class="w-full text-sm text-gray-500 hover:text-gray-700">← Usar otro correo o pedir otro código</button>
+      </div>
+
+      <p id="mensajeError" class="hidden mt-4 text-sm text-red-600 bg-red-50 p-3 rounded-lg text-center"></p>
+      <p class="mt-6 text-xs text-gray-400 text-center">Este navegador recordará tu acceso durante 30 días. En ordenadores compartidos, usa "Salir" al terminar.</p>
+    </div>
+  </div>
+
+  <script>
+    var CLAVE = 'reservas_sesion';
+    var SALIR = <?= salir ?> === 'true';
+
+    function $(id) { return document.getElementById(id); }
+    function mostrarPaso(id) {
+      ['pasoCargando', 'pasoEmail', 'pasoCodigo'].forEach(function (p) { $(p).classList.toggle('hidden', p !== id); });
+      $('mensajeError').classList.add('hidden');
+      if (id === 'pasoEmail') setTimeout(function () { $('emailInput').focus(); }, 50);
+      if (id === 'pasoCodigo') setTimeout(function () { $('codigoInput').focus(); }, 50);
+    }
+    function error(msg) { $('mensajeError').textContent = msg; $('mensajeError').classList.remove('hidden'); }
+    function leerToken() { try { return localStorage.getItem(CLAVE); } catch (e) { return null; } }
+    function guardarToken(t) { try { localStorage.setItem(CLAVE, t); } catch (e) { } }
+    function borrarToken() { try { localStorage.removeItem(CLAVE); } catch (e) { } }
+
+    // Entra en la app con un ticket de un solo uso. Si el navegador bloquea la
+    // redirección automática, queda el botón "Entrar" (un clic).
+    function irApp(url, ticket) {
+      var destino = url + '?ticket=' + encodeURIComponent(ticket);
+      mostrarPaso('pasoCargando');
+      $('textoCargando').textContent = 'Entrando...';
+      $('enlaceEntrar').href = destino;
+      try { window.top.location.href = destino; } catch (e) { }
+      setTimeout(function () {
+        $('textoCargando').textContent = 'Pulsa para entrar:';
+        $('enlaceEntrar').classList.remove('hidden');
+      }, 2500);
+    }
+
+    function pedirCodigo() {
+      var email = $('emailInput').value.trim();
+      if (!email) { error('Escribe tu correo.'); return; }
+      $('btnPedirCodigo').disabled = true;
+      google.script.run
+        .withSuccessHandler(function (r) {
+          $('btnPedirCodigo').disabled = false;
+          if (!r || !r.success) { error((r && r.error) || 'No se pudo enviar el código.'); return; }
+          $('emailDestino').textContent = email;
+          $('codigoInput').value = '';
+          mostrarPaso('pasoCodigo');
+        })
+        .withFailureHandler(function (e) { $('btnPedirCodigo').disabled = false; error(e.message || String(e)); })
+        .solicitarCodigoAcceso(email);
+    }
+
+    function verificarCodigo() {
+      var codigo = $('codigoInput').value.replace(/\D/g, '');
+      if (codigo.length !== 6) { error('El código tiene 6 cifras.'); return; }
+      $('btnVerificar').disabled = true;
+      google.script.run
+        .withSuccessHandler(function (r) {
+          $('btnVerificar').disabled = false;
+          if (!r || !r.success) { error((r && r.error) || 'Código no válido.'); return; }
+          guardarToken(r.token);
+          irApp(r.url, r.ticket);
+        })
+        .withFailureHandler(function (e) { $('btnVerificar').disabled = false; error(e.message || String(e)); })
+        .verificarCodigoAcceso($('emailInput').value.trim(), codigo);
+    }
+
+    $('emailInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') pedirCodigo(); });
+    $('codigoInput').addEventListener('input', function () {
+      this.value = this.value.replace(/\D/g, '').slice(0, 6);
+      if (this.value.length === 6) verificarCodigo();
+    });
+
+    // Al abrir: si viene de "Salir", olvidar la sesión; si hay sesión guardada, entrar directamente
+    (function () {
+      if (SALIR) borrarToken();
+      var token = leerToken();
+      if (!token) { mostrarPaso('pasoEmail'); return; }
+      google.script.run
+        .withSuccessHandler(function (r) {
+          if (r && r.success) irApp(r.url, r.ticket);
+          else { borrarToken(); mostrarPaso('pasoEmail'); }
+        })
+        .withFailureHandler(function () { mostrarPaso('pasoEmail'); })
+        .canjearTokenPorTicket(token);
+    })();
+  </script>
+</body>
+</html>

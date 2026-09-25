@@ -1,5 +1,19 @@
 # Historial de versiones
 
+## v1.6.0 — Acceso con código de verificación
+
+### Nuevo
+- **Acceso para cualquier cuenta**: si Google no facilita el email del usuario (otro dominio, cuentas @gmail.com…), aparece una pantalla de acceso que envía un **código de 6 cifras** por email. El navegador recuerda la sesión **30 días**; botón **Salir** para cerrarla (ordenadores compartidos).
+- Quien entra con su cuenta de Google del mismo dominio no nota ningún cambio.
+- Registro de nuevos usuarios también por esta vía (el correo queda verificado con el código).
+- Config opcional `dominios_acceso` para limitar a qué dominios se envían códigos.
+- Herramienta `diagnosticarArchivos` (ejecutar desde el editor) para comprobar que los HTML se han copiado completos y sin errores.
+
+### Seguridad
+- Códigos válidos 10 minutos, bloqueo tras 5 intentos, máximo 3 envíos por correo cada 15 minutos y 60 por hora en total.
+- Sesión firmada (HMAC); desactivar a un usuario en *Usuarios* le corta el acceso al instante.
+- Los enlaces de aprobación de los emails al administrador (altas y recurrentes) van firmados y funcionan aunque el admin entre con código.
+
 ## v1.5.0 — Auditoría completa (septiembre 2026)
 
 ### Nuevo

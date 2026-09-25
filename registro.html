@@ -53,6 +53,15 @@
   </div>
 
   <script>
+    window.SESSION_TOKEN = (function (v) {
+      try { if (typeof v === 'string' && v.charAt(0) === '"') return JSON.parse(v); } catch (e) {}
+      return v;
+    })(<?= sessionToken ?>);
+    window.APP_URL = <?= appUrl ?>;
+  </script>
+  <?!= include('sesion-cliente'); ?>
+
+  <script>
     function enviarSolicitud() {
       const nombre = document.getElementById('nombreInput').value.trim();
       const email = document.getElementById('emailInput').value.trim(); // Leemos el email del input

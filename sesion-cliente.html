@@ -1,0 +1,46 @@
+<script>
+  /* ==========================================================================
+     SESIÓN POR CÓDIGO (v1.6.0) — solo actúa si el usuario NO entra con Google.
+     Guarda la sesión en el navegador y hace que TODAS las llamadas
+     google.script.run.X(...) pasen por ejecutarConSesion('X', token, [...]),
+     sin tener que modificar cada llamada de la app.
+     ========================================================================== */
+  (function () {
+    var token = window.SESSION_TOKEN;
+    if (!token) return;
+
+    try { localStorage.setItem('reservas_sesion', token); } catch (e) { }
+
+    window.cerrarSesion = function () {
+      try { localStorage.removeItem('reservas_sesion'); } catch (e) { }
+      window.top.location.href = (window.APP_URL || '') + '?salir=1';
+    };
+
+    if (!window.google || !google.script || !google.script.run) return;
+
+    var ENCADENABLES = { withSuccessHandler: 1, withFailureHandler: 1, withUserObject: 1 };
+    function envolver(runner) {
+      return new Proxy(runner, {
+        get: function (t, prop) {
+          var v = t[prop];
+          if (ENCADENABLES[prop]) {
+            return function () { return envolver(v.apply(t, arguments)); };
+          }
+          if (typeof v === 'function') {
+            return function () {
+              return t.ejecutarConSesion(prop, token, Array.prototype.slice.call(arguments));
+            };
+          }
+          return v;
+        }
+      });
+    }
+
+    var envuelto = envolver(google.script.run);
+    try {
+      Object.defineProperty(google.script, 'run', { configurable: true, get: function () { return envuelto; } });
+    } catch (e) {
+      try { google.script.run = envuelto; } catch (e2) { console.error('No se pudo activar la sesión por código', e2); }
+    }
+  })();
+</script>

@@ -128,7 +128,7 @@ function crearSolicitudRecurrente(datos) {
       throw new Error('Selecciona al menos un tramo');
     }
 
-    const userEmail = Session.getActiveUser().getEmail();
+    const userEmail = emailActual_();
     if (!userEmail) throw new Error('No se pudo obtener el email del usuario');
 
     // Obtener datos adicionales
@@ -315,7 +315,7 @@ function aprobarSolicitudRecurrente(idSolicitud, notasAdmin) {
       return { success: false, error: 'No tienes permisos de administrador' };
     }
 
-    const adminEmail = Session.getActiveUser().getEmail();
+    const adminEmail = emailActual_();
     const sheet = getOrCreateSheetSolicitudesRecurrentes();
     const data = sheet.getDataRange().getValues();
 
@@ -421,7 +421,7 @@ function rechazarSolicitudRecurrente(idSolicitud, motivoRechazo) {
       throw new Error('Indica un motivo para el rechazo');
     }
 
-    const adminEmail = Session.getActiveUser().getEmail();
+    const adminEmail = emailActual_();
     const sheet = getOrCreateSheetSolicitudesRecurrentes();
     const data = sheet.getDataRange().getValues();
 
@@ -478,7 +478,7 @@ function rechazarSolicitudRecurrente(idSolicitud, motivoRechazo) {
  */
 function actualizarMotivoRecurrencia(idSolicitud, motivo) {
   try {
-    const adminEmail = Session.getActiveUser().getEmail();
+    const adminEmail = emailActual_();
     if (!checkIfAdmin(adminEmail)) {
       return { success: false, error: 'No tienes permisos para esta acción' };
     }
@@ -511,7 +511,7 @@ function cancelarRecurrenciaAprobada(idSolicitud) {
   try {
     Logger.log('🚫 Cancelando recurrencia aprobada: ' + idSolicitud);
 
-    const adminEmail = Session.getActiveUser().getEmail();
+    const adminEmail = emailActual_();
     if (!checkIfAdmin(adminEmail)) {
       throw new Error('No tienes permisos para esta acción');
     }
@@ -887,7 +887,7 @@ function cancelarGrupoRecurrenteSinLock_(idSolicitud) {
   try {
     Logger.log('🗑️ Eliminando reservas del grupo recurrente: ' + idSolicitud);
 
-    const userEmail = Session.getActiveUser().getEmail();
+    const userEmail = emailActual_();
     let esAdmin = null;
     const ss = getDB();
     const sheetReservas = ss.getSheetByName(SHEETS.RESERVAS);
@@ -972,7 +972,7 @@ function eliminarTramoDeRecurrenciaSinLock_(idSolicitud, diaLetra, idTramo) {
   try {
     Logger.log(`🔧 Eliminando tramo ${diaLetra}:${idTramo} de recurrencia ${idSolicitud}`);
 
-    const adminEmail = Session.getActiveUser().getEmail();
+    const adminEmail = emailActual_();
     if (!checkIfAdmin(adminEmail)) {
       throw new Error('No tienes permisos para esta acción');
     }
@@ -1102,7 +1102,7 @@ function eliminarTramoDeRecurrenciaSinLock_(idSolicitud, diaLetra, idTramo) {
  */
 function crearRecurrenteDirecta(datos) {
   try {
-    const adminEmail = Session.getActiveUser().getEmail();
+    const adminEmail = emailActual_();
 
     // Verificar que es admin
     if (!checkIfAdmin(adminEmail)) {
@@ -1368,7 +1368,7 @@ function enviarEmailNuevaSolicitudRecurrente_(datos) {
 
     // URL para aprobar directamente desde el email
     const urlApp = ScriptApp.getService().getUrl();
-    const urlAprobar = `${urlApp}?action=aprobar_recurrente&id=${datos.id}`;
+    const urlAprobar = `${urlApp}?action=aprobar_recurrente&id=${datos.id}&f=${firmarTexto_('rec|' + datos.id)}`;
 
     const asunto = `🔄 Nueva solicitud de reserva recurrente - ${datos.recurso}`;
     const cuerpo = `
