@@ -2074,9 +2074,12 @@ function purgarCache() {
   try {
     const sheetRec = getDB().getSheetByName(SHEETS.RECURSOS);
     if (sheetRec && sheetRec.getLastRow() > 1) {
-      const claves = sheetRec.getRange(2, 1, sheetRec.getLastRow() - 1, 1).getValues()
-        .map(r => String(r[0]).trim()).filter(Boolean)
-        .map(id => CACHE_KEYS.DISPONIBILIDAD + id);
+      const claves = [];
+      sheetRec.getRange(2, 1, sheetRec.getLastRow() - 1, 1).getValues().forEach(r => {
+        const raw = String(r[0]);
+        if (!raw.trim()) return;
+        claves.push(CACHE_KEYS.DISPONIBILIDAD + raw, CACHE_KEYS.DISPONIBILIDAD + raw.trim());
+      });
       if (claves.length) cache.removeAll(claves);
     }
   } catch (e) {
