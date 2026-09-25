@@ -413,7 +413,7 @@ function saveBatchDisponibilidad(cambios) {
     }
     
     if (nuevasFilas.length > 0) {
-      sheet.getRange(sheet.getLastRow() + 1, 1, nuevasFilas.length, 6).setValues(nuevasFilas);
+      anadirFilas_(sheet, nuevasFilas);
     }
     
     purgarCache();

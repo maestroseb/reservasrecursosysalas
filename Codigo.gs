@@ -569,6 +569,17 @@ function getStaticData() {
    GESTIÓN DE RESERVAS
    ============================================ */
 
+// Añade filas al final de la hoja en una sola escritura.
+// A diferencia de getRange(getLastRow()+1, ...), amplía la hoja si ya no quedan filas libres
+// (appendRow lo hacía solo; getRange fuera de rango lanza error).
+function anadirFilas_(sheet, filas) {
+  if (!filas || filas.length === 0) return;
+  const inicio = sheet.getLastRow() + 1;
+  const faltan = inicio + filas.length - 1 - sheet.getMaxRows();
+  if (faltan > 0) sheet.insertRowsAfter(sheet.getMaxRows(), faltan);
+  sheet.getRange(inicio, 1, filas.length, filas[0].length).setValues(filas);
+}
+
 // Lee la hoja Reservas como objetos (una sola lectura reutilizable dentro de la misma petición)
 function leerReservasObjetos_() {
   const sheetReservas = getDB().getSheetByName(SHEETS.RESERVAS);
@@ -1083,7 +1094,7 @@ function crearReservas_(reservaData, tramoIds) {
     });
 
     // Una sola escritura para todas las filas
-    sheetReservas.getRange(sheetReservas.getLastRow() + 1, 1, filas.length, numCols).setValues(filas);
+    anadirFilas_(sheetReservas, filas);
     Logger.log(`[crearReservas_] ${filas.length} reserva(s) creada(s): ${nuevasReservas.map(r => r.id_reserva).join(', ')}`);
 
     const fechaFormateada = fechaReserva.toLocaleDateString('es-ES', {
@@ -1147,19 +1158,23 @@ function sendConfirmationEmail_(email, userName, details) {
     } catch (urlError) {
       Logger.log(`⚠️ No se pudo obtener URL de la app: ${urlError.message}`);
     }
-    const urlCancelar = id => `${urlApp}?action=cancel&id=${id}&t=${firmarIdReserva_(id)}`;
+    const urlCancelar = id => {
+      try { return `${urlApp}?action=cancel&id=${id}&t=${firmarIdReserva_(id)}`; }
+      catch (e) { Logger.log('⚠️ No se pudo firmar el enlace: ' + e.message); return ''; }
+    };
     const estiloBoton = 'padding: 10px 15px; background-color: #d9534f; color: white; text-decoration: none; border-radius: 5px; display: inline-block; margin: 4px 0;';
 
     const asunto = `Reserva Confirmada: ${details.recursoNombre} - ${details.fechaFormateada}`;
 
     // Bloque de cancelación: solo si tenemos URL
     let bloqueCancelacion = '';
-    if (urlApp && reservasEmail.length === 1) {
+    if (urlApp && reservasEmail.length === 1 && urlCancelar(reservasEmail[0].idReserva)) {
       bloqueCancelacion = `<p>Si necesitas cancelar la reserva, puedes hacerlo desde este enlace:</p>
          <p><a href="${urlCancelar(reservasEmail[0].idReserva)}" style="${estiloBoton}">Cancelar esta Reserva</a></p>`;
     } else if (urlApp) {
       bloqueCancelacion = `<p>Si necesitas cancelar algún tramo, puedes hacerlo desde estos enlaces:</p>` +
-        reservasEmail.map(r => `<p><a href="${urlCancelar(r.idReserva)}" style="${estiloBoton}">Cancelar ${escHtml_(r.tramo)}</a></p>`).join('');
+        reservasEmail.filter(r => urlCancelar(r.idReserva))
+          .map(r => `<p><a href="${urlCancelar(r.idReserva)}" style="${estiloBoton}">Cancelar ${escHtml_(r.tramo)}</a></p>`).join('');
     }
 
     const cuerpoHtml = `

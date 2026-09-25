@@ -852,12 +852,7 @@ function generarReservasDesdeRecurrenteSinLock_(solicitud) {
 
     // Insertar todas las reservas de una vez
     if (nuevasReservas.length > 0) {
-      sheetReservas.getRange(
-        sheetReservas.getLastRow() + 1,
-        1,
-        nuevasReservas.length,
-        nuevasReservas[0].length
-      ).setValues(nuevasReservas);
+      anadirFilas_(sheetReservas, nuevasReservas);
     }
 
     Logger.log(`✅ Generadas ${reservasCreadas} reservas. Saltadas: ${fechasSaltadas.length}`);
