@@ -2592,14 +2592,14 @@ function renderTablaUsuarios() {
     tr.setAttribute('data-usuario-index', index);
 
     tr.innerHTML = `
-      <td class="pl-6 pr-2 py-4 whitespace-nowrap">
-        <div class="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold border border-blue-200 shadow-sm select-none">
+      <td class="pl-4 pr-1 py-1.5 whitespace-nowrap">
+        <div class="h-7 w-7 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-xs font-bold border border-blue-200 select-none">
           ${inicial}
         </div>
       </td>
 
-      <td class="px-2 py-3">
-        <div class="flex flex-col gap-1 w-full">
+      <td class="px-2 py-1.5">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-0.5 w-full">
           <input type="text" 
                  value="${escaparHTML(usuario.Nombre)}" 
                  oninput="editarUsuario(${index}, 'Nombre', this.value)"
@@ -2614,7 +2614,7 @@ function renderTablaUsuarios() {
         </div>
       </td>
 
-      <td class="px-2 py-3 whitespace-nowrap text-center">
+      <td class="px-2 py-1.5 whitespace-nowrap text-center">
         <div class="flex flex-col items-center justify-center cursor-pointer group/toggle" onclick="toggleUsuarioPropiedad(${index}, 'Admin')">
             <div class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${usuario.Admin ? 'bg-purple-600' : 'bg-gray-200 group-hover/toggle:bg-gray-300'}">
                 <span class="translate-x-1 inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${usuario.Admin ? 'translate-x-5' : 'translate-x-1'}"></span>
@@ -2625,7 +2625,7 @@ function renderTablaUsuarios() {
         </div>
       </td>
 
-      <td class="px-2 py-3 whitespace-nowrap text-center">
+      <td class="px-2 py-1.5 whitespace-nowrap text-center">
         <div class="flex flex-col items-center justify-center cursor-pointer group/toggle" onclick="toggleUsuarioPropiedad(${index}, 'Activo')">
             <div class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${usuario.Activo ? 'bg-green-500' : 'bg-gray-200 group-hover/toggle:bg-gray-300'}">
                 <span class="translate-x-1 inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${usuario.Activo ? 'translate-x-5' : 'translate-x-1'}"></span>
@@ -2636,9 +2636,9 @@ function renderTablaUsuarios() {
         </div>
       </td>
       
-      <td class="px-4 py-3 whitespace-nowrap text-right">
+      <td class="px-2 py-1.5 whitespace-nowrap text-right">
          <button onclick="eliminarUsuario(${index})" 
-                class="text-gray-300 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
+                class="text-gray-300 hover:text-red-600 p-1.5 rounded-full hover:bg-red-50 transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
           <iconify-icon icon="mdi:trash-can-outline" width="20"></iconify-icon>
         </button>
       </td>
@@ -2735,6 +2735,162 @@ function eliminarUsuario(index) {
     () => {
       AdminState.usuarios.splice(index, 1);
       renderTablaUsuarios(); // Aquí repintamos porque borramos una fila entera
+      checkUsuariosChanges();
+    }
+  );
+}
+
+// 5b. IMPORTAR EN BLOQUE (pegar desde Excel/Sheets o subir CSV)
+// Formato libre por línea: la celda con "@" es el email; la primera otra celda de texto, el nombre;
+// una celda "admin"/"sí"/"true" marca administrador. Separadores: tabulador, ";" o ",".
+function abrirImportarUsuarios() {
+  let modal = document.getElementById('modalImportarUsuarios');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modalImportarUsuarios';
+    document.body.appendChild(modal);
+  }
+  modal.className = 'fixed inset-0 z-[10000] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4';
+  modal.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
+      <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+          <iconify-icon icon="mdi:account-multiple-plus-outline" class="text-blue-600"></iconify-icon> Importar usuarios
+        </h3>
+        <button onclick="cerrarImportarUsuarios()" class="text-gray-400 hover:text-gray-600 p-1"><iconify-icon icon="mdi:close" width="22"></iconify-icon></button>
+      </div>
+      <div class="p-6 space-y-4">
+        <p class="text-sm text-gray-600">Pega una fila por usuario (copiada de Excel, Sheets o Séneca) o sube un <b>CSV</b>. Se detecta sola la columna del email; la otra será el nombre. Si una columna dice <i>admin</i> o <i>sí</i>, será administrador.</p>
+        <textarea id="importUsuariosTexto" rows="7" oninput="previsualizarImportacion()"
+          class="w-full border border-gray-300 rounded-xl p-3 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+          placeholder="Ana López Pérez&#9;alopez@g.educaand.es&#10;Juan Ruiz;jruiz@g.educaand.es;admin"></textarea>
+        <label class="inline-flex items-center gap-2 text-sm text-blue-700 font-medium cursor-pointer hover:underline">
+          <iconify-icon icon="mdi:file-upload-outline" width="18"></iconify-icon> Subir archivo CSV
+          <input type="file" accept=".csv,.txt,text/csv,text/plain" class="hidden" onchange="cargarCsvUsuarios(this)">
+        </label>
+        <div id="importUsuariosResumen" class="text-sm"></div>
+      </div>
+      <div class="bg-gray-50 px-6 py-4 flex gap-3 border-t border-gray-100 rounded-b-2xl">
+        <button onclick="cerrarImportarUsuarios()" class="flex-1 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50">Cancelar</button>
+        <button id="btnConfirmarImportacion" onclick="confirmarImportacionUsuarios()" disabled
+          class="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed">Añadir</button>
+      </div>
+    </div>`;
+  modal.classList.remove('hidden');
+  previsualizarImportacion();
+}
+
+function cerrarImportarUsuarios() {
+  const modal = document.getElementById('modalImportarUsuarios');
+  if (modal) modal.classList.add('hidden');
+}
+
+function cargarCsvUsuarios(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    document.getElementById('importUsuariosTexto').value = String(reader.result || '');
+    previsualizarImportacion();
+  };
+  reader.readAsText(file, 'UTF-8');
+  input.value = '';
+}
+
+// Parte una línea CSV respetando comillas ("García, Pepa" es una sola celda)
+function partirLineaCsv(linea, sep) {
+  const celdas = []; let actual = ''; let entreComillas = false;
+  for (let k = 0; k < linea.length; k++) {
+    const c = linea[k];
+    if (c === '"') {
+      if (entreComillas && linea[k + 1] === '"') { actual += '"'; k++; }
+      else entreComillas = !entreComillas;
+    } else if (c === sep && !entreComillas) { celdas.push(actual); actual = ''; }
+    else actual += c;
+  }
+  celdas.push(actual);
+  return celdas;
+}
+
+function analizarTextoUsuarios(texto) {
+  const existentes = new Set(AdminState.usuarios.map(u => String(u.Email).toLowerCase().trim()));
+  const vistos = new Set();
+  const res = { nuevos: [], yaExisten: 0, duplicados: 0, invalidos: [] };
+  const esAdmin = v => /^(admin|administrador|s[ií]|true|yes|1)$/i.test(v);
+
+  String(texto || '').split(/\r?\n/).forEach((linea, i) => {
+    if (!linea.trim()) return;
+    const sep = linea.includes('\t') ? '\t' : (linea.includes(';') ? ';' : ',');
+    const celdas = partirLineaCsv(linea, sep).map(c => c.trim()).filter(Boolean);
+    const email = (celdas.find(c => c.includes('@')) || '').toLowerCase();
+    if (!email) {
+      // Una cabecera tipo "Nombre;Email" en la primera línea se ignora sin avisar
+      if (!(i === 0 && /e-?mail|correo/i.test(linea))) res.invalidos.push(`Línea ${i + 1}: sin email`);
+      return;
+    }
+    if (!esEmailValido(email)) { res.invalidos.push(`Línea ${i + 1}: email no válido (${email})`); return; }
+    if (existentes.has(email)) { res.yaExisten++; return; }
+    if (vistos.has(email)) { res.duplicados++; return; }
+    vistos.add(email);
+
+    const otras = celdas.filter(c => !c.includes('@'));
+    const admin = otras.some(esAdmin);
+    let nombre = otras.find(c => !esAdmin(c) && !/^(activo|no|false|0)$/i.test(c)) || '';
+    if (nombre.length < 2) nombre = email.split('@')[0];
+    res.nuevos.push({ Nombre: nombre, Email: email, Activo: true, Admin: admin });
+  });
+  return res;
+}
+
+function previsualizarImportacion() {
+  const texto = document.getElementById('importUsuariosTexto')?.value || '';
+  const r = analizarTextoUsuarios(texto);
+  const cont = document.getElementById('importUsuariosResumen');
+  const btn = document.getElementById('btnConfirmarImportacion');
+  if (!cont || !btn) return;
+
+  const partes = [];
+  if (r.nuevos.length) partes.push(`<span class="text-green-700 font-semibold">${r.nuevos.length} nuevos</span>` +
+    (r.nuevos.some(u => u.Admin) ? ` (${r.nuevos.filter(u => u.Admin).length} admin)` : ''));
+  if (r.yaExisten) partes.push(`<span class="text-gray-500">${r.yaExisten} ya existían (no se modifican)</span>`);
+  if (r.duplicados) partes.push(`<span class="text-gray-500">${r.duplicados} repetidos</span>`);
+  if (r.invalidos.length) partes.push(`<span class="text-red-600">${r.invalidos.length} con errores</span>`);
+
+  cont.innerHTML = !texto.trim() ? '' :
+    `<div class="bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-1">
+       <div>${partes.join(' · ') || 'No se ha detectado ningún usuario'}</div>
+       ${r.invalidos.length ? `<ul class="text-xs text-red-600 list-disc pl-5">${r.invalidos.slice(0, 5).map(e => `<li>${escaparHTML(e)}</li>`).join('')}${r.invalidos.length > 5 ? '<li>…</li>' : ''}</ul>` : ''}
+       ${r.nuevos.length ? `<div class="text-xs text-gray-500 truncate">Ej.: ${r.nuevos.slice(0, 3).map(u => escaparHTML(u.Nombre + ' <' + u.Email + '>')).join(', ')}</div>` : ''}
+     </div>`;
+  btn.disabled = r.nuevos.length === 0;
+  btn.textContent = r.nuevos.length ? `Añadir ${r.nuevos.length} usuario${r.nuevos.length === 1 ? '' : 's'}` : 'Añadir';
+}
+
+function confirmarImportacionUsuarios() {
+  const r = analizarTextoUsuarios(document.getElementById('importUsuariosTexto')?.value || '');
+  if (!r.nuevos.length) return;
+  const buscador = document.getElementById('buscadorUsuarios');
+  if (buscador) buscador.value = '';
+  AdminState.usuarios.push(...r.nuevos);
+  cerrarImportarUsuarios();
+  renderTablaUsuarios();
+  checkUsuariosChanges();
+  showToast('info', `${r.nuevos.length} usuarios añadidos. Pulsa "Guardar" para confirmar.`);
+}
+
+// 5c. VACIAR: quita a todos los que no son administradores (nunca te deja sin acceso)
+function vaciarUsuarios() {
+  const miEmail = String(window.USER_EMAIL || '').toLowerCase().trim();
+  const seQuedan = u => u.Admin || String(u.Email).toLowerCase().trim() === miEmail;
+  const aQuitar = AdminState.usuarios.filter(u => !seQuedan(u)).length;
+  if (!aQuitar) { showToast('info', 'No hay usuarios que quitar (los administradores se conservan).'); return; }
+
+  mostrarConfirmacion(
+    '¿Vaciar la lista de usuarios?',
+    `Se quitarán <b>${aQuitar}</b> usuarios. Los administradores se conservan.<br>No se aplica hasta que pulses <b>Guardar</b>.`,
+    () => {
+      AdminState.usuarios = AdminState.usuarios.filter(seQuedan);
+      renderTablaUsuarios();
       checkUsuariosChanges();
     }
   );

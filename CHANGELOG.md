@@ -6,6 +6,9 @@
 - **Multitramo**: con `permitir_multitramo` activado en *Config*, al reservar se puede elegir cuántos tramos seguidos coger (hasta `max_tramos_simultaneos`). Solo se ofrecen tramos libres consecutivos; en recursos agrupados la cantidad máxima es la menor disponible entre ellos. La reserva es "todo o nada", cada tramo cuenta como una reserva para el límite, y el email incluye un enlace de cancelación por tramo.
 - **Motivo obligatorio** (`exigir_motivo`): si se activa, las notas de la reserva pasan a ser obligatorias (se valida también en el servidor).
 - **Tope de cancelación** (`horas_cancelacion`): un usuario no puede cancelar con menos de X horas de antelación al inicio del tramo, ni desde la app ni desde el enlace del email. Los administradores quedan exentos. No afecta a cancelar una recurrencia completa.
+- **Usuarios en bloque**: botón *Importar* para pegar la lista desde Excel/Sheets/Séneca o subir un CSV (detecta sola la columna del email; "admin"/"sí" marca administrador; ignora cabecera, repetidos y los que ya existen). Botón para **vaciar la lista** de una vez (conserva siempre a los administradores). Nada se aplica hasta pulsar *Guardar*.
+- Tabla de usuarios más compacta (una línea por usuario).
+- Si el logo del centro no carga, se oculta en vez de mostrar una imagen rota.
 
 ### Corregido
 - El panel de Configuración mostraba 2 h de tope de cancelación y 30 min de antelación cuando el valor guardado era 0 (al guardar se habría cambiado sin querer).

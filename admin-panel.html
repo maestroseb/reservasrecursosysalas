@@ -404,6 +404,17 @@
       <span>Nuevo</span>
     </button>
 
+          <button onclick="abrirImportarUsuarios()" title="Importar usuarios en bloque (pegar o CSV)"
+            class="flex-1 sm:flex-none bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-xl hover:bg-gray-50 flex items-center justify-center gap-2 transition-all whitespace-nowrap font-medium">
+            <iconify-icon icon="mdi:account-multiple-plus-outline" width="20"></iconify-icon>
+            <span>Importar</span>
+          </button>
+
+          <button onclick="vaciarUsuarios()" title="Quitar todos los usuarios que no son administradores"
+            class="shrink-0 bg-white border border-red-200 text-red-600 p-2 rounded-xl hover:bg-red-50 flex items-center justify-center transition-all">
+            <iconify-icon icon="mdi:account-multiple-remove-outline" width="20"></iconify-icon>
+          </button>
+
         </div>
 
       </div>
