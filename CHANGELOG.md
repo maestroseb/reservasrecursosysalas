@@ -8,6 +8,7 @@
 - **Tope de cancelación** (`horas_cancelacion`): un usuario no puede cancelar con menos de X horas de antelación al inicio del tramo, ni desde la app ni desde el enlace del email. Los administradores quedan exentos. No afecta a cancelar una recurrencia completa.
 - **Usuarios en bloque**: botón *Importar* para pegar la lista desde Excel/Sheets/Séneca o subir un CSV (detecta sola la columna del email; "admin"/"sí" marca administrador; ignora cabecera, repetidos y los que ya existen). Botón para **vaciar la lista** de una vez (conserva siempre a los administradores). Nada se aplica hasta pulsar *Guardar*.
 - Tabla de usuarios más compacta (una línea por usuario).
+- **Guardado en segundo plano** en el panel admin (recursos, horarios, usuarios, cursos, tramos y configuración): ya no bloquea la pantalla; aparece "Guardando…" y un aviso al terminar. Si falla, los cambios quedan pendientes y la barra de Guardar vuelve a aparecer.
 - Si el logo del centro no carga, se oculta en vez de mostrar una imagen rota.
 
 ### Corregido

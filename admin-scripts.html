@@ -52,6 +52,40 @@ window.escaparHTML = (str) => {
     return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 };
 
+/* GUARDADO EN SEGUNDO PLANO ("optimista")
+   - La barra de Guardar se oculta al instante y se puede seguir trabajando.
+   - "originales" pasa a ser lo enviado: si se sigue editando, la barra reaparece solo para lo nuevo.
+   - Si el servidor falla, se restauran los originales anteriores: los cambios vuelven a quedar pendientes. */
+const guardadosEnCurso = {};
+function guardarEnSegundoPlano({ clave, etiqueta, llamar, alExito, alFallo }) {
+  if (guardadosEnCurso[clave]) {
+    showToast('info', `Aún se están guardando ${etiqueta}...`);
+    return false;
+  }
+  guardadosEnCurso[clave] = true;
+  SaveBarManager.hide();
+  showToast('loading', `Guardando ${etiqueta}...`);
+
+  const terminarMal = (msg) => {
+    guardadosEnCurso[clave] = false;
+    showToast('error', `No se han guardado ${etiqueta}: ${msg || 'error desconocido'}`);
+    if (alFallo) alFallo();
+  };
+  llamar(
+    res => {
+      if (res && res.success) {
+        guardadosEnCurso[clave] = false;
+        showToast('success', `${etiqueta.charAt(0).toUpperCase() + etiqueta.slice(1)} guardados`);
+        if (alExito) alExito(res);
+      } else {
+        terminarMal(res && res.error);
+      }
+    },
+    err => terminarMal(err && err.message ? err.message : String(err))
+  );
+  return true;
+}
+
 /* LÓGICA DE CONFIRMACIÓN (MODAL INTELIGENTE) */
 let accionConfirmadaCallback = null;
 
@@ -1042,32 +1076,21 @@ function guardarCambiosRecursos() {
       return;
   }
 
-  showLoading();
-  google.script.run
-    .withSuccessHandler(res => {
-      hideLoading();
-      if (res.success) {
-        showToast('success', 'Recursos guardados');
-        AdminState.recursosOriginales = JSON.parse(JSON.stringify(AdminState.recursos));
-        AdminState.cambiosPendientes = false;
-        SaveBarManager.hide();
-        renderTablaRecursos();
-
-        // ✅ SINCRONIZAR con globalState (para la vista de usuario)
-        if (typeof globalState !== 'undefined') {
-          globalState.recursos = JSON.parse(JSON.stringify(AdminState.recursos));
-        }
-
-        adminHaCambiadoDatos = true;
-        if (typeof window.recargarDatosApp === 'function') {
-          window.recargarDatosApp();
-        }
-      } else {
-        showToast('error', res.error);
-      }
-    })
-    .withFailureHandler(err => { hideLoading(); showToast('error', err); })
-    .saveBatchRecursos(AdminState.recursos);
+  const enviado = JSON.parse(JSON.stringify(AdminState.recursos));
+  const previos = AdminState.recursosOriginales;
+  guardarEnSegundoPlano({
+    clave: 'recursos', etiqueta: 'recursos',
+    llamar: (ok, ko) => google.script.run.withSuccessHandler(ok).withFailureHandler(ko).saveBatchRecursos(enviado),
+    alExito: () => {
+      // ✅ SINCRONIZAR con globalState (para la vista de usuario)
+      if (typeof globalState !== 'undefined') globalState.recursos = JSON.parse(JSON.stringify(enviado));
+      adminHaCambiadoDatos = true;
+      if (typeof window.recargarDatosApp === 'function') window.recargarDatosApp();
+    },
+    alFallo: () => { AdminState.recursosOriginales = previos; checkRecursosChanges(); }
+  });
+  AdminState.recursosOriginales = JSON.parse(JSON.stringify(enviado));
+  AdminState.cambiosPendientes = false;
 }
 
 function descartarCambiosRecursos() {
@@ -2166,7 +2189,12 @@ function guardarCambiosDisp(forzar = false) {
       return;
   }
 
-  showLoading();
+  if (guardadosEnCurso.disp) { showToast('info', 'Aún se están guardando los horarios...'); return; }
+  guardadosEnCurso.disp = true;
+  SaveBarManager.hide();
+  showToast('loading', 'Guardando horarios...');
+  const recursoGuardado = DispState.recursoId;
+  const enviadoDisp = JSON.parse(JSON.stringify(DispState.datosActuales));
 
   const payload = DispState.datosActuales.map(d => ({
     id_recurso: DispState.recursoId,
@@ -2178,27 +2206,38 @@ function guardarCambiosDisp(forzar = false) {
 
   google.script.run
     .withSuccessHandler(res => {
-      hideLoading();
+      guardadosEnCurso.disp = false;
+      const mismoRecurso = String(DispState.recursoId) === String(recursoGuardado);
 
       if (res.requiereConfirmacion && !forzar) {
         // Hay conflictos con recurrencias: mostrar modal de confirmación
+        if (typeof hideToast === 'function') hideToast();
         payloadDisponibilidadPendiente = payload;
         mostrarModalConflictosDisponibilidad(res.afectados);
+        if (mismoRecurso) checkDispChanges();
         return;
       }
 
       if(res.success) {
         showToast('success', 'Disponibilidad guardada');
-        DispState.datosOriginales = JSON.parse(JSON.stringify(DispState.datosActuales));
-        AdminState.disponibilidad = AdminState.disponibilidad.filter(d => String(d.id_recurso) !== String(DispState.recursoId));
+        AdminState.disponibilidad = AdminState.disponibilidad.filter(d => String(d.id_recurso) !== String(recursoGuardado));
         payload.forEach(p => AdminState.disponibilidad.push(p));
-        checkDispChanges();
+        // Solo si seguimos en el mismo recurso: lo enviado pasa a ser el estado guardado
+        if (mismoRecurso) {
+          DispState.datosOriginales = enviadoDisp;
+          checkDispChanges();
+        }
         payloadDisponibilidadPendiente = null;
       } else {
         showToast('error', res.error || 'Error al guardar');
+        if (mismoRecurso) checkDispChanges();
       }
     })
-    .withFailureHandler(err => { hideLoading(); showToast('error', err); })
+    .withFailureHandler(err => {
+      guardadosEnCurso.disp = false;
+      showToast('error', 'No se han guardado los horarios: ' + (err && err.message ? err.message : err));
+      if (String(DispState.recursoId) === String(recursoGuardado)) checkDispChanges();
+    })
     .saveBatchDisponibilidadConValidacion(payload, forzar);
 }
 
@@ -2296,43 +2335,10 @@ function cerrarModalConflictosDisponibilidad() {
 }
 
 function confirmarGuardarConConflictos() {
-  // Cerrar modal pero NO resetear el payload todavía
   const modal = document.getElementById('modalConflictosDisponibilidad');
   if (modal) modal.remove();
-
-  // Mostrar loading
-  showLoading();
-
-  // Reconstruir payload desde el estado actual
-  const payload = DispState.datosActuales.map(d => ({
-    id_recurso: DispState.recursoId,
-    id_tramo: d.id_tramo,
-    dia_semana: d.dia_semana,
-    permitido: d.permitido,
-    razon_bloqueo: d.razon_bloqueo
-  }));
-
-  google.script.run
-    .withSuccessHandler(res => {
-      hideLoading();
-      payloadDisponibilidadPendiente = null;
-
-      if (res.success) {
-        showToast('success', 'Disponibilidad guardada y usuarios notificados');
-        DispState.datosOriginales = JSON.parse(JSON.stringify(DispState.datosActuales));
-        AdminState.disponibilidad = AdminState.disponibilidad.filter(d => String(d.id_recurso) !== String(DispState.recursoId));
-        payload.forEach(p => AdminState.disponibilidad.push(p));
-        checkDispChanges();
-      } else {
-        showToast('error', res.error || 'Error al guardar');
-      }
-    })
-    .withFailureHandler(err => {
-      hideLoading();
-      payloadDisponibilidadPendiente = null;
-      showToast('error', 'Error: ' + err);
-    })
-    .saveBatchDisponibilidadConValidacion(payload, true);
+  // Mismo guardado en segundo plano, forzando (cancela las recurrencias afectadas y avisa a los usuarios)
+  guardarCambiosDisp(true);
 }
 
 function descartarCambiosDisp() {
@@ -2932,28 +2938,24 @@ function guardarCambiosUsuarios() {
       return;
   }
 
-  showLoading();
-  
   const payload = AdminState.usuarios.map(u => ({
       Nombre: u.Nombre.trim(),
       Email: u.Email.trim().toLowerCase(),
       Admin: u.Admin,
       Activo: u.Activo
   }));
+  const enviado = JSON.parse(JSON.stringify(AdminState.usuarios));
+  const previos = AdminState.usuariosOriginales;
 
-  google.script.run
-    .withSuccessHandler(res => {
-      hideLoading();
-      if(res.success) {
-        showToast('success', 'Usuarios actualizados');
-        AdminState.usuariosOriginales = JSON.parse(JSON.stringify(AdminState.usuarios));
-        checkUsuariosChanges();
-      } else {
-        showToast('error', res.error);
-      }
-    })
-    .withFailureHandler(err => { hideLoading(); showToast('error', err); })
-    .saveBatchUsuarios(payload);
+  const lanzado = guardarEnSegundoPlano({
+    clave: 'usuarios', etiqueta: 'usuarios',
+    llamar: (ok, ko) => google.script.run.withSuccessHandler(ok).withFailureHandler(ko).saveBatchUsuarios(payload),
+    alFallo: () => { AdminState.usuariosOriginales = previos; checkUsuariosChanges(); }
+  });
+  if (lanzado) {
+    AdminState.usuariosOriginales = enviado;
+    AdminState.cambiosPendientes = false;
+  }
 }
 
 // 8. Descartar
@@ -3208,42 +3210,35 @@ function guardarCambiosCursos() {
       return;
   }
 
-  showLoading();
-  
   const payload = {
-    cursos: CursosState.cursosEnMemoria,
+    cursos: JSON.parse(JSON.stringify(CursosState.cursosEnMemoria)),
     modoVisualizacion: CursosState.modoVisualizacion
   };
+  const previos = { cursos: CursosState.cursosOriginales, modo: CursosState.modoOriginal };
 
-  google.script.run
-    .withSuccessHandler(res => {
-  hideLoading();
-  if (res.success) {
-    showToast('success', 'Cursos actualizados correctamente');
-    
-    CursosState.cursosOriginales = JSON.parse(JSON.stringify(CursosState.cursosEnMemoria));
-    CursosState.modoOriginal = CursosState.modoVisualizacion;
-    
-    if(AdminState) {
-      AdminState.modoVisualizacion = CursosState.modoVisualizacion;
-      AdminState.cursos = JSON.parse(JSON.stringify(CursosState.cursosEnMemoria)); // evita que al cambiar de pestaña vuelva la lista antigua
+  const lanzado = guardarEnSegundoPlano({
+    clave: 'cursos', etiqueta: 'cursos',
+    llamar: (ok, ko) => google.script.run.withSuccessHandler(ok).withFailureHandler(ko).saveAllCursos(payload),
+    alExito: () => {
+      if (AdminState) {
+        AdminState.modoVisualizacion = payload.modoVisualizacion;
+        AdminState.cursos = JSON.parse(JSON.stringify(payload.cursos)); // evita que al cambiar de pestaña vuelva la lista antigua
+      }
+      if (typeof globalState !== "undefined") globalState.modoVisualizacionCursos = payload.modoVisualizacion;
+      adminHaCambiadoDatos = true;
+      if (typeof window.recargarDatosApp === 'function') window.recargarDatosApp();
+    },
+    alFallo: () => {
+      CursosState.cursosOriginales = previos.cursos;
+      CursosState.modoOriginal = previos.modo;
+      checkCursosChanges();
     }
-    if(typeof globalState !== "undefined") globalState.modoVisualizacionCursos = CursosState.modoVisualizacion;
-    
-    CursosState.cambiosPendientes = false; 
-    SaveBarManager.hide();
-    
-    // ✅ MODIFICADO: Activar flag y recargar
-    adminHaCambiadoDatos = true;
-    if (typeof window.recargarDatosApp === 'function') {
-      window.recargarDatosApp();
-    }
-  } else {
-    showToast('error', res.error);
+  });
+  if (lanzado) {
+    CursosState.cursosOriginales = JSON.parse(JSON.stringify(payload.cursos));
+    CursosState.modoOriginal = payload.modoVisualizacion;
+    CursosState.cambiosPendientes = false;
   }
-})
-    .withFailureHandler(err => { hideLoading(); showToast('error', err); })
-    .saveAllCursos(payload);
 }
 
 function descartarCambiosCursos() {
@@ -3563,8 +3558,6 @@ function guardarCambiosTramos() {
     return;
   }
 
-  showLoading();
-  
   const datosAEnviar = AdminState.tramos.map(t => ({
       id_tramo: t.id_tramo,
       Nombre_Tramo: t.Nombre_Tramo || t.nombre,
@@ -3574,29 +3567,24 @@ function guardarCambiosTramos() {
       _originalId: t._originalId 
   }));
 
-  google.script.run
-    .withSuccessHandler(function(response) {
-  hideLoading();
-  if (response.success) {
-    showToast('success', 'Tramos guardados correctamente');
-    AdminState.tramosOriginales = JSON.parse(JSON.stringify(AdminState.tramos));
-    AdminState.tramos.forEach(t => delete t._originalId);
-    checkTramosChanges();
-    
-    // ✅ MODIFICADO: Activar flag y recargar
-    adminHaCambiadoDatos = true;
-    if (typeof window.recargarDatosApp === 'function') {
-      window.recargarDatosApp();
-    }
-  } else {
-    showToast('error', response.error);
-  }
-})
-    .withFailureHandler(err => {
-        hideLoading();
-        showToast('error', err);
-    })
-    .saveBatchTramos(datosAEnviar);
+  const previos = AdminState.tramosOriginales;
+  const enviado = JSON.parse(JSON.stringify(AdminState.tramos));
+
+  const lanzado = guardarEnSegundoPlano({
+    clave: 'tramos', etiqueta: 'tramos',
+    llamar: (ok, ko) => google.script.run.withSuccessHandler(ok).withFailureHandler(ko).saveBatchTramos(datosAEnviar),
+    alExito: () => {
+      // El renombrado de IDs ya se aplicó: los tramos enviados dejan de tener "_originalId"
+      const enviados = new Set(datosAEnviar.map(t => t.id_tramo));
+      AdminState.tramos.forEach(t => { if (enviados.has(t.id_tramo)) delete t._originalId; });
+      if (AdminState.tramosOriginales) AdminState.tramosOriginales.forEach(t => delete t._originalId);
+      checkTramosChanges();
+      adminHaCambiadoDatos = true;
+      if (typeof window.recargarDatosApp === 'function') window.recargarDatosApp();
+    },
+    alFallo: () => { AdminState.tramosOriginales = previos; checkTramosChanges(); }
+  });
+  if (lanzado) AdminState.tramosOriginales = enviado;
 }
 
 function descartarCambiosTramos() {
@@ -3819,8 +3807,16 @@ function guardarConfiguracion() {
     return;
   }
 
-  showLoading();
+  if (guardadosEnCurso.config) { showToast('info', 'Aún se está guardando la configuración...'); return; }
   const newConfig = construirConfigDesdeInputs();
+  const previos = ConfigState.configOriginal;
+  guardadosEnCurso.config = true;
+  SaveBarManager.hide();
+  showToast('loading', 'Guardando configuración...');
+  // Optimista: lo enviado pasa a ser el estado guardado (si falla, se restaura)
+  ConfigState.configOriginal = JSON.parse(JSON.stringify(newConfig));
+  ConfigState.cambiosPendientes = false;
+  ConfigState.previosAlGuardar = previos;
 
   // Verificar si hay URL de logo de Drive para procesar permisos
   const urlLogoConfig = newConfig.find(c => c.clave === 'url_logo');
@@ -3852,25 +3848,23 @@ function guardarConfiguracion() {
 }
 
 function finalizarGuardadoConfiguracion(newConfig) {
+  const fallo = (msg) => {
+    guardadosEnCurso.config = false;
+    showToast('error', 'No se ha guardado la configuración: ' + (msg || 'error desconocido'));
+    ConfigState.configOriginal = ConfigState.previosAlGuardar;
+    checkConfigChanges();
+  };
   google.script.run
     .withSuccessHandler(res => {
-      hideLoading();
       if(res.success) {
+        guardadosEnCurso.config = false;
         showToast('success', 'Configuración guardada');
-
         AdminState.config = newConfig;
-        ConfigState.configOriginal = JSON.parse(JSON.stringify(newConfig));
-        ConfigState.cambiosPendientes = false;
-
-        SaveBarManager.hide();
       } else {
-        showToast('error', res.error);
+        fallo(res.error);
       }
     })
-    .withFailureHandler(err => {
-      hideLoading();
-      showToast('error', err);
-    })
+    .withFailureHandler(err => fallo(err && err.message ? err.message : String(err)))
     .saveBatchConfig(newConfig);
 }
 
