@@ -438,7 +438,7 @@
 
       <div>
         <label for="notasInput" class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
-              Notas adicionales (Opcional)
+              <span id="notasLabelTexto">Notas adicionales (Opcional)</span>
             </label>
         <div class="relative">
           <div class="absolute top-3 left-3 text-gray-400">
@@ -448,6 +448,10 @@
                           class="block w-full pl-10 pr-3 py-2.5 rounded-xl border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-gray-50 focus:bg-white transition-colors resize-none"
                           placeholder="Ej: Necesito un proyector..."></textarea>
         </div>
+        <p id="notasError"
+          class="hidden flex items-center gap-1 text-xs text-red-500 mt-2 font-medium bg-red-50 p-2 rounded-lg">
+          <iconify-icon icon="mdi:alert-circle"></iconify-icon> Indica para qué es la reserva
+        </p>
       </div>
     </div>
 

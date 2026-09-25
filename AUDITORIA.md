@@ -81,8 +81,8 @@ Con *Ejecutar como: Usuario que implementa*, Google **solo** facilita el email d
 
 ### Resuelto después
 - **Multitramo** implementado (`permitir_multitramo`, `max_tramos_simultaneos`).
+- **`exigir_motivo`** y **`horas_cancelacion`** implementados (admins exentos del tope; no aplica a recurrencias completas).
 - **Editar tramos de recurrencia**: eliminado por redundante (el modal de detalle ya permite quitar tramos).
 - Reglas CSS duplicadas unificadas sin cambio visual; foco visible con teclado (`:focus-visible`).
 
 ### Pendiente / a decidir
-- Config sin efecto: `horas_cancelacion`, `exigir_motivo` se guardan pero ningún código las aplica.

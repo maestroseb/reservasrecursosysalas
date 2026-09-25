@@ -3525,9 +3525,11 @@ function renderConfiguracion() {
 
   // Renderizar TODOS los campos con defaults
   setCfgVal('cfg_dias_vista_maximo',   configMap['dias_vista_maximo'] || '30');
-  setCfgVal('cfg_minutos_antelacion',  configMap['minutos_antelacion'] || '30');
+  // ?? en vez de ||: un 0 guardado es un valor válido, no "vacío"
+  const cfgNum = (clave, def) => (configMap[clave] === undefined || configMap[clave] === null || configMap[clave] === '') ? def : configMap[clave];
+  setCfgVal('cfg_minutos_antelacion',  cfgNum('minutos_antelacion', '30'));
   setCfgVal('cfg_limite_reservas',     configMap['limite_reservas'] || '5');
-  setCfgVal('cfg_horas_cancelacion',   configMap['horas_cancelacion'] || '2');
+  setCfgVal('cfg_horas_cancelacion',   cfgNum('horas_cancelacion', '0'));
   setCfgVal('cfg_email_admin',         configMap['email_admin'] || '');
   setCfgVal('cfg_nombre_centro',       configMap['nombre_centro'] || 'Sistema de Reservas');
   setCfgVal('cfg_url_logo',            configMap['url_logo'] || '');

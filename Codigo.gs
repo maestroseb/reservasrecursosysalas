@@ -1014,6 +1014,11 @@ function crearReservas_(reservaData, tramoIds) {
       throw new Error("Debes seleccionar un curso para realizar la reserva.");
     }
 
+    // exigir_motivo (Config): las notas pasan a ser obligatorias
+    if (getConfigValue('exigir_motivo', false) === true && !String(notas || '').trim()) {
+      throw new Error("Indica en las notas para qué es la reserva.");
+    }
+
     // ✅ VALIDACIONES DE CONFIGURACIÓN (una sola lectura de Reservas para todas)
     const reservasActivas = getActiveReservations_();
     validarModoMantenimiento();
@@ -1267,6 +1272,12 @@ function cancelarReservaCliente(reservaId) {
       return { success: true, message: "Esta reserva ya había sido cancelada.", canceledId: reservaId };
     }
 
+    // Tope de cancelación (horas_cancelacion); los admin quedan exentos
+    if (COL_FECHA_INDEX !== -1 && COL_TRAMO_ID_INDEX !== -1 && !checkUserAuthorization(userEmail).isAdmin) {
+      const bloqueo = motivoBloqueoCancelacion_(rowData[COL_FECHA_INDEX], rowData[COL_TRAMO_ID_INDEX]);
+      if (bloqueo) throw new Error(bloqueo);
+    }
+
     sheetReservas.getRange(filaEncontrada, COL_ESTADO_INDEX + 1).setValue("Cancelada");
 
     const authResult = checkUserAuthorization(userEmail);
@@ -1461,6 +1472,17 @@ function handleEmailCancelation(reservaId, firma) {
     return HtmlService.createHtmlOutput(
       buildHtmlCancelPage("Aviso", "Esta reserva ya había sido cancelada.", details)
     );
+  }
+
+  // Tope de cancelación (horas_cancelacion); exentos solo si quien pulsa es admin identificado
+  if (COL_FECHA_INDEX !== -1 && COL_TRAMO_ID_INDEX !== -1) {
+    const emailClic = String(Session.getActiveUser().getEmail() || '').trim();
+    if (!(emailClic && checkUserAuthorization(emailClic).isAdmin)) {
+      const bloqueo = motivoBloqueoCancelacion_(rowData[COL_FECHA_INDEX], rowData[COL_TRAMO_ID_INDEX]);
+      if (bloqueo) {
+        return HtmlService.createHtmlOutput(buildHtmlCancelPage("No se puede cancelar", bloqueo, details));
+      }
+    }
   }
 
   // ✅ CANCELAR LA RESERVA
@@ -2067,6 +2089,33 @@ function validarAntelacionMinima(fechaISO, tramoId) {
   
   Logger.log(`✅ Antelación válida: ${diferenciaMinutos} minutos (mín: ${minutosMinimos})`);
   return true;
+}
+
+/**
+ * horas_cancelacion (Config): antelación mínima para que un usuario cancele.
+ * Devuelve el mensaje de error si NO se puede cancelar, o null si sí.
+ * Los administradores quedan exentos (se comprueba fuera).
+ */
+function motivoBloqueoCancelacion_(fechaValor, tramoId) {
+  const horas = parseFloat(getConfigValue('horas_cancelacion', 0)) || 0;
+  if (horas <= 0) return null;
+
+  const tramo = getDatosEstaticos_().tramos.find(t => String(t.id_tramo).trim() === String(tramoId).trim());
+  if (!tramo || !tramo.hora_inicio) return null;
+
+  const tz = Session.getScriptTimeZone();
+  const fechaISO = fechaValor instanceof Date
+    ? Utilities.formatDate(fechaValor, tz, 'yyyy-MM-dd')
+    : String(fechaValor).substring(0, 10);
+  const [h, m] = String(tramo.hora_inicio).split(':').map(Number);
+  if (isNaN(h)) return null;
+  const hhmm = ('0' + h).slice(-2) + ':' + ('0' + (m || 0)).slice(-2);
+  const inicio = Utilities.parseDate(fechaISO + ' ' + hhmm, tz, 'yyyy-MM-dd HH:mm');
+
+  if (inicio.getTime() - Date.now() < horas * 3600 * 1000) {
+    return `Solo se puede cancelar con al menos ${horas} ${horas === 1 ? 'hora' : 'horas'} de antelación. Si necesitas anularla, contacta con un administrador.`;
+  }
+  return null;
 }
 
 /**

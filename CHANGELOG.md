@@ -4,8 +4,11 @@
 
 ### Nuevo
 - **Multitramo**: con `permitir_multitramo` activado en *Config*, al reservar se puede elegir cuántos tramos seguidos coger (hasta `max_tramos_simultaneos`). Solo se ofrecen tramos libres consecutivos; en recursos agrupados la cantidad máxima es la menor disponible entre ellos. La reserva es "todo o nada", cada tramo cuenta como una reserva para el límite, y el email incluye un enlace de cancelación por tramo.
+- **Motivo obligatorio** (`exigir_motivo`): si se activa, las notas de la reserva pasan a ser obligatorias (se valida también en el servidor).
+- **Tope de cancelación** (`horas_cancelacion`): un usuario no puede cancelar con menos de X horas de antelación al inicio del tramo, ni desde la app ni desde el enlace del email. Los administradores quedan exentos. No afecta a cancelar una recurrencia completa.
 
 ### Corregido
+- El panel de Configuración mostraba 2 h de tope de cancelación y 30 min de antelación cuando el valor guardado era 0 (al guardar se habría cambiado sin querer).
 - **Bucle de registro**: cuando Google no facilita el email del usuario (app implementada desde otro dominio o cuenta @gmail.com) se muestra una pantalla que explica la causa en lugar de pedir el registro una y otra vez.
 - **Modo mantenimiento** y **copia de reservas al admin** no funcionaban nunca (los valores de Config se leían mal). ⚠️ Revisa sus valores en la hoja *Config* al actualizar.
 - La antelación mínima se calculaba en UTC (1-2 h de desfase): se podía reservar un tramo ya empezado.

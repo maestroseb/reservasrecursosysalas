@@ -827,6 +827,12 @@ function loadTramos() {
    MULTITRAMO: reservar varios tramos seguidos 🔗
    Se activa en Config (permitir_multitramo + max_tramos_simultaneos)
    ============================================ */
+// exigir_motivo (Config): notas obligatorias
+function motivoObligatorio() {
+  const v = (globalState.configuracion || {}).exigir_motivo;
+  return v === true || String(v).toLowerCase() === 'true';
+}
+
 function multitramoActivo() {
   const cfg = globalState.configuracion || {};
   const permitir = cfg.permitir_multitramo === true || String(cfg.permitir_multitramo).toLowerCase() === 'true';
@@ -985,6 +991,12 @@ function handleTramoClick(tramoBtn) {
   // 5. LIMPIEZA FINAL Y ABRIR
   
   if(notas) notas.value = '';
+  const notasLabel = $('notasLabelTexto');
+  if (notasLabel) notasLabel.innerHTML = motivoObligatorio()
+    ? 'Motivo de la reserva <span class="text-red-500">*</span>'
+    : 'Notas adicionales (Opcional)';
+  const notasErr = $('notasError');
+  if (notasErr) notasErr.classList.add('hidden');
   if(btnConfirm) {
       btnConfirm.disabled = false;
       // Restauramos contenido original del botón (con icono)
@@ -1279,6 +1291,13 @@ function renderCursoSelector() {
 function handleConfirmReservation() {
   if (!globalState.cursoSeleccionado) {
     cursoError.classList.remove('hidden');
+    return;
+  }
+
+  if (motivoObligatorio() && !notasInput.value.trim()) {
+    const notasErr = $('notasError');
+    if (notasErr) notasErr.classList.remove('hidden');
+    notasInput.focus();
     return;
   }
   
