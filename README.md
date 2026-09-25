@@ -116,6 +116,22 @@ El sistema funciona íntegramente sobre infraestructura de Google: no requiere s
 | `admin-scripts.html` | JavaScript del panel de administración                         |
 | `styles.html`        | Estilos CSS compartidos                                        |
 | `ActivacionSistema.html` | Asistente de primer uso                                    |
+| `tailwind-css.html`  | CSS de Tailwind precompilado (no editar a mano, ver abajo)     |
+| `registro.html`      | Pantalla de solicitud de acceso                                |
+| `Sidebar.html`       | Guía de instalación (barra lateral de la hoja)                 |
+
+### Regenerar el CSS de Tailwind
+
+Desde la v1.5.0 el CSS de Tailwind ya no se compila en el navegador: está precompilado en `tailwind-css.html` (carga mucho más rápida y sin depender de CDNs que las redes educativas pueden bloquear).
+
+Si añades o cambias clases de Tailwind en cualquier `.html`, regenera el fichero (requiere Node.js):
+
+```bash
+npx tailwindcss@3.4.19 -c tailwind.config.js -i <(printf '@tailwind base;@tailwind components;@tailwind utilities;') -o out.css --minify
+{ echo '<style>'; cat out.css; echo '</style>'; } > tailwind-css.html
+```
+
+> Las clases deben aparecer escritas completas en el código (p. ej. `'bg-red-100'`), no construidas por partes (`'bg-' + color`), o no se incluirán.
 
 ---
 
@@ -137,6 +153,7 @@ El sistema funciona íntegramente sobre infraestructura de Google: no requiere s
    - Tipo: **Aplicación web**.
    - Ejecutar como: **Usuario que implementa**.
    - Acceso: **Cualquier usuario del dominio** (o según las necesidades del centro).
+   - ⚠️ **Implementa desde una cuenta del mismo dominio que el profesorado** (p. ej. @g.educaand.es o el dominio Workspace del centro). Google solo facilita a la aplicación el email de los usuarios de ese dominio; con cuentas de otro dominio o @gmail.com la app no puede identificarlos y les pedirá registrarse una y otra vez.
 
 3. **Inicializar el sistema**
    - Abre la URL generada del despliegue.

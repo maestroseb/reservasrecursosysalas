@@ -1,4 +1,7 @@
 <script>
+/* === UTILIDAD: escapar texto para insertarlo en HTML (anti-XSS) === */
+function escHTML(v){ if(v===null||v===undefined) return ''; return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
   /* ============================================ 
    SISTEMA DE RESERVAS - JAVASCRIPT PRINCIPAL
    ============================================ */
@@ -78,7 +81,7 @@ function showToast(type, message) {
   // D. CONTENIDO
   toast.innerHTML = `
     <iconify-icon icon="${config.icon}" class="text-2xl ${config.color} ${iconAnimation} shrink-0"></iconify-icon>
-    <span class="text-sm font-medium text-gray-700 text-center sm:text-left leading-tight">${message}</span>
+    <span class="text-sm font-medium text-gray-700 text-center sm:text-left leading-tight">${escHTML(message)}</span>
   `;
 
   // E. ANIMACIÓN DE ENTRADA
@@ -119,18 +122,6 @@ function hideMessages() {
 /* ============================================
    UTILIDADES GENERALES
    ============================================ */
-
-function debounce(func, wait) {
-  let timeout;
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
-}
 
 // Selector rápido de elementos
 const $ = (id) => document.getElementById(id);
@@ -238,6 +229,7 @@ function onInitialDataSuccess(data) {
   globalState.usuariosMap = data.usuariosMap || {};
   globalState.misReservasActivas = data.misReservasActivas || [];
   globalState.misRecurrencias = data.misRecurrencias || {};
+  globalState.configuracion = data.configuracion || {};
 
   
   console.log(`📊 Datos cargados: ${globalState.recursos.length} recursos, ${globalState.tramos.length} tramos, ${globalState.reservas.length} reservas activas, ${globalState.cursos.length} cursos.`);
@@ -302,10 +294,10 @@ function renderRecursos() {
     // MARCA DE AGUA
     let iconWatermark = '';
     if (recurso.icono && recurso.icono.includes(':')) {
-      iconWatermark = `<iconify-icon icon="${recurso.icono}" class="text-[8rem] sm:text-[9rem]"></iconify-icon>`;
+      iconWatermark = `<iconify-icon icon="${escHTML(recurso.icono)}" class="text-[8rem] sm:text-[9rem]"></iconify-icon>`;
     } else {
       const emoji = recurso.icono || (isSala ? '🚪' : '💻');
-      iconWatermark = `<span class="text-[7rem] sm:text-[8rem] leading-none grayscale opacity-60">${emoji}</span>`;
+      iconWatermark = `<span class="text-[7rem] sm:text-[8rem] leading-none grayscale opacity-60">${escHTML(emoji)}</span>`;
     }
     
     // HTML TARJETA
@@ -322,13 +314,13 @@ function renderRecursos() {
       <div class="relative z-10 p-3 sm:p-5 pl-5 sm:pl-8 flex flex-col justify-between h-full">
          
          <div class="flex-1">
-            <h3 class="font-bold text-[1.15rem] sm:text-xl ${theme.textTitle} leading-tight mb-0.5 pr-4 line-clamp-2">${recurso.nombre}</h3>
+            <h3 class="font-bold text-[1.15rem] sm:text-xl ${theme.textTitle} leading-tight mb-0.5 pr-4 line-clamp-2">${escHTML(recurso.nombre)}</h3>
             
             <div class="hidden sm:flex items-center gap-2 text-gray-500 text-sm font-medium mt-1">
                <div class="bg-gray-100 p-0.5 rounded-md leading-none">
                    <iconify-icon icon="mdi:map-marker-radius-outline" class="text-sm"></iconify-icon>
                </div>
-               <span class="truncate">${recurso.ubicacion}</span>
+               <span class="truncate">${escHTML(recurso.ubicacion)}</span>
             </div>
          </div>
 
@@ -458,13 +450,13 @@ function updateStep2Header(recurso) {
     if (recurso.icono && recurso.icono.includes(':')) {
         // --- ES ICONIFY ---
         const colorClass = tipo === 'sala' ? 'text-blue-600' : 'text-emerald-600';
-        iconHtmlSmall = `<iconify-icon icon="${recurso.icono}" class="${colorClass}"></iconify-icon>`;
-        iconHtmlBig = `<iconify-icon icon="${recurso.icono}"></iconify-icon>`;
+        iconHtmlSmall = `<iconify-icon icon="${escHTML(recurso.icono)}" class="${colorClass}"></iconify-icon>`;
+        iconHtmlBig = `<iconify-icon icon="${escHTML(recurso.icono)}"></iconify-icon>`;
     } else {
         // --- ES EMOJI ---
         const emoji = recurso.icono || (tipo === 'sala' ? '🚪' : '💻');
-        iconHtmlSmall = `<span>${emoji}</span>`;
-        iconHtmlBig = `<span class="grayscale opacity-50 font-emoji">${emoji}</span>`;
+        iconHtmlSmall = `<span>${escHTML(emoji)}</span>`;
+        iconHtmlBig = `<span class="grayscale opacity-50 font-emoji">${escHTML(emoji)}</span>`;
     }
 
     // 3. Inyectar Icono Pequeño
@@ -813,10 +805,10 @@ function loadTramos() {
         data-disponibles="${disponibles}" 
         ${isDisabled ? 'disabled' : ''}>
       <div>
-        <span class="font-bold text-lg">${tramo.nombre_tramo}</span>
-        <span class="text-sm text-gray-500 ml-2">(${tramo.hora_inicio || ''} - ${tramo.hora_fin || ''})</span>
+        <span class="font-bold text-lg">${escHTML(tramo.nombre_tramo)}</span>
+        <span class="text-sm text-gray-500 ml-2">(${escHTML(tramo.hora_inicio)} - ${escHTML(tramo.hora_fin)})</span>
       </div>
-      <span class="block text-xs mt-1 truncate">${mensaje}</span>
+      <span class="block text-xs mt-1 truncate">${escHTML(mensaje)}</span>
     </button>`;
   });
   
@@ -828,6 +820,95 @@ function loadTramos() {
   } else {
     tramosContainer.style.maxHeight = '400px';
     tramosContainer.style.overflowY = 'auto';
+  }
+}
+
+/* ============================================
+   MULTITRAMO: reservar varios tramos seguidos 🔗
+   Se activa en Config (permitir_multitramo + max_tramos_simultaneos)
+   ============================================ */
+// exigir_motivo (Config): notas obligatorias
+function motivoObligatorio() {
+  const v = (globalState.configuracion || {}).exigir_motivo;
+  return v === true || String(v).toLowerCase() === 'true';
+}
+
+function multitramoActivo() {
+  const cfg = globalState.configuracion || {};
+  const permitir = cfg.permitir_multitramo === true || String(cfg.permitir_multitramo).toLowerCase() === 'true';
+  const maxTramos = Math.max(1, parseInt(cfg.max_tramos_simultaneos, 10) || 1);
+  return permitir && maxTramos > 1 ? maxTramos : 0;
+}
+
+function prepararMultitramo(tramoBtn, esAgrupado) {
+  const cont = $('multitramoContainer');
+  const opciones = $('multitramoOpciones');
+  globalState.tramosSeguidos = [{ id: tramoBtn.dataset.tramoId, disponibles: parseInt(tramoBtn.dataset.disponibles, 10) || 1 }];
+  globalState.numTramosSeleccionados = 1;
+  if (!cont || !opciones) return;
+
+  const maxTramos = multitramoActivo();
+  if (maxTramos) {
+    // Tramos libres inmediatamente posteriores (mismo orden que en pantalla)
+    const botones = Array.from(tramosContainer.querySelectorAll('.tramo-btn'));
+    for (let k = botones.indexOf(tramoBtn) + 1; k < botones.length && globalState.tramosSeguidos.length < maxTramos; k++) {
+      if (botones[k].disabled) break;
+      globalState.tramosSeguidos.push({ id: botones[k].dataset.tramoId, disponibles: parseInt(botones[k].dataset.disponibles, 10) || 1 });
+    }
+  }
+
+  if (globalState.tramosSeguidos.length < 2) {
+    cont.classList.add('hidden');
+    opciones.innerHTML = '';
+    return;
+  }
+
+  opciones.innerHTML = globalState.tramosSeguidos.map((t, i) => {
+    const tramo = globalState.tramos.find(x => String(x.id_tramo) === String(t.id)) || {};
+    return `<button type="button" data-num="${i + 1}" onclick="seleccionarNumTramos(${i + 1}, ${esAgrupado})"
+      class="multitramo-opcion px-3 py-2 rounded-lg border text-sm font-semibold transition-colors">
+      ${i + 1} ${i === 0 ? 'tramo' : 'tramos'}<span class="block text-xs font-normal opacity-75">hasta ${escHTML(tramo.hora_fin || '')}</span>
+    </button>`;
+  }).join('');
+  cont.classList.remove('hidden');
+  seleccionarNumTramos(1, esAgrupado);
+}
+
+function seleccionarNumTramos(n, esAgrupado) {
+  const seguidos = (globalState.tramosSeguidos || []).slice(0, n);
+  if (!seguidos.length) return;
+  globalState.numTramosSeleccionados = seguidos.length;
+
+  document.querySelectorAll('#multitramoOpciones .multitramo-opcion').forEach(b => {
+    const activo = parseInt(b.dataset.num, 10) === seguidos.length;
+    b.classList.toggle('bg-blue-600', activo);
+    b.classList.toggle('text-white', activo);
+    b.classList.toggle('border-blue-600', activo);
+    b.classList.toggle('bg-white', !activo);
+    b.classList.toggle('text-gray-700', !activo);
+    b.classList.toggle('border-gray-300', !activo);
+  });
+
+  // Texto de horario: "T1 – T3 (09:00 - 12:00)"
+  const primero = globalState.tramos.find(x => String(x.id_tramo) === String(seguidos[0].id)) || {};
+  const ultimo = globalState.tramos.find(x => String(x.id_tramo) === String(seguidos[seguidos.length - 1].id)) || {};
+  const modalTime = $('modalTimeString');
+  if (modalTime) {
+    modalTime.textContent = seguidos.length === 1
+      ? `${primero.nombre_tramo} (${primero.hora_inicio} - ${primero.hora_fin})`
+      : `${primero.nombre_tramo} – ${ultimo.nombre_tramo} (${primero.hora_inicio} - ${ultimo.hora_fin})`;
+  }
+
+  // Recursos agrupados: la cantidad máxima es la menor disponible entre los tramos elegidos
+  if (esAgrupado) {
+    const maxDisp = Math.min(...seguidos.map(t => t.disponibles));
+    const maxSpan = $('maxCantidad');
+    const inputCant = $('cantidadInput');
+    if (maxSpan) maxSpan.textContent = maxDisp;
+    if (inputCant) {
+      inputCant.max = maxDisp;
+      if ((parseInt(inputCant.value, 10) || 1) > maxDisp) inputCant.value = maxDisp;
+    }
   }
 }
 
@@ -861,7 +942,7 @@ function handleTramoClick(tramoBtn) {
   // B. Icono
   if(modalIcon) {
      if (recurso.icono && recurso.icono.includes(':')) {
-        modalIcon.innerHTML = `<iconify-icon icon="${recurso.icono}"></iconify-icon>`;
+        modalIcon.innerHTML = `<iconify-icon icon="${escHTML(recurso.icono)}"></iconify-icon>`;
      } else {
         modalIcon.textContent = recurso.icono || '📅';
      }
@@ -904,9 +985,18 @@ function handleTramoClick(tramoBtn) {
     inputCant.max = 1;
   }
   
+  // 4b. MULTITRAMO (tramos seguidos) 🔗
+  prepararMultitramo(tramoBtn, esAgrupado);
+
   // 5. LIMPIEZA FINAL Y ABRIR
   
   if(notas) notas.value = '';
+  const notasLabel = $('notasLabelTexto');
+  if (notasLabel) notasLabel.innerHTML = motivoObligatorio()
+    ? 'Motivo de la reserva <span class="text-red-500">*</span>'
+    : 'Notas adicionales (Opcional)';
+  const notasErr = $('notasError');
+  if (notasErr) notasErr.classList.add('hidden');
   if(btnConfirm) {
       btnConfirm.disabled = false;
       // Restauramos contenido original del botón (con icono)
@@ -985,7 +1075,7 @@ function renderCursoSelector() {
   globalState.cursoSeleccionado = null;
   if(errorMsg) errorMsg.classList.add('hidden');
   
-  const modo = AdminState.modoVisualizacion || 'botones';
+  const modo = globalState.modoVisualizacionCursos || 'botones';
   console.log('[Selector Cursos] Modo:', modo);
   
   // Crear mapa de etapas
@@ -1009,7 +1099,7 @@ function renderCursoSelector() {
     html += '<p class="text-xs font-bold text-gray-600 mb-1.5">Selecciona la etapa:</p>';
     html += '<div id="etapasSelector" class="flex flex-wrap gap-1.5">';
     etapasMap.forEach((_, etapa) => {
-      html += `<button type="button" class="etapa-btn px-3 py-1.5 bg-gray-50 border border-gray-200 text-gray-600 rounded-lg sm:hover:bg-gray-100 sm:hover:text-gray-800 transition-colors text-xs font-semibold shadow-sm focus:outline-none select-none active:scale-95" data-etapa="${etapa}">${etapa}</button>`;
+      html += `<button type="button" class="etapa-btn px-3 py-1.5 bg-gray-50 border border-gray-200 text-gray-600 rounded-lg sm:hover:bg-gray-100 sm:hover:text-gray-800 transition-colors text-xs font-semibold shadow-sm focus:outline-none select-none active:scale-95" data-etapa="${escHTML(etapa)}">${escHTML(etapa)}</button>`;
     });
     html += '</div>';
     html += '</div>';
@@ -1069,7 +1159,7 @@ function renderCursoSelector() {
           let optionsHtml = '<option value="">-- Elige un curso --</option>';
           cursosDeEtapa.forEach(curso => {
             const fullCurso = `${etapa} - ${curso}`;
-            optionsHtml += `<option value="${fullCurso}">${curso}</option>`;
+            optionsHtml += `<option value="${escHTML(fullCurso)}">${escHTML(curso)}</option>`;
           });
           
           cursoSelect.innerHTML = optionsHtml;
@@ -1107,7 +1197,7 @@ function renderCursoSelector() {
     // 1. Botones de Etapas
     let html = '<div id="etapasSelector" class="flex flex-wrap gap-1.5 mb-2">';
     etapasMap.forEach((_, etapa) => {
-      html += `<button type="button" class="etapa-btn px-2.5 py-1 bg-gray-50 border border-gray-200 text-gray-600 rounded-md sm:hover:bg-gray-100 sm:hover:text-gray-800 transition-colors text-xs font-semibold shadow-sm focus:outline-none select-none active:scale-95" data-etapa="${etapa}">${etapa}</button>`;
+      html += `<button type="button" class="etapa-btn px-2.5 py-1 bg-gray-50 border border-gray-200 text-gray-600 rounded-md sm:hover:bg-gray-100 sm:hover:text-gray-800 transition-colors text-xs font-semibold shadow-sm focus:outline-none select-none active:scale-95" data-etapa="${escHTML(etapa)}">${escHTML(etapa)}</button>`;
     });
     html += '</div>';
     
@@ -1154,7 +1244,7 @@ function renderCursoSelector() {
           
           cursosDeEtapa.forEach(curso => {
             const fullCurso = `${etapa} - ${curso}`;
-            cursosHtml += `<button type="button" class="curso-btn py-1.5 px-0.5 bg-white border border-gray-200 text-gray-600 rounded sm:hover:border-blue-400 sm:hover:text-blue-600 sm:hover:bg-blue-50 transition-colors text-[11px] font-bold shadow-sm focus:outline-none select-none active:scale-95 truncate" title="${curso}" data-curso="${fullCurso}">${curso}</button>`;
+            cursosHtml += `<button type="button" class="curso-btn py-1.5 px-0.5 bg-white border border-gray-200 text-gray-600 rounded sm:hover:border-blue-400 sm:hover:text-blue-600 sm:hover:bg-blue-50 transition-colors text-[11px] font-bold shadow-sm focus:outline-none select-none active:scale-95 truncate" title="${escHTML(curso)}" data-curso="${escHTML(fullCurso)}">${escHTML(curso)}</button>`;
           });
           
           cursosButtons.innerHTML = cursosHtml;
@@ -1203,6 +1293,13 @@ function handleConfirmReservation() {
     cursoError.classList.remove('hidden');
     return;
   }
+
+  if (motivoObligatorio() && !notasInput.value.trim()) {
+    const notasErr = $('notasError');
+    if (notasErr) notasErr.classList.remove('hidden');
+    notasInput.focus();
+    return;
+  }
   
   confirmModalButton.disabled = true;
   confirmModalButton.textContent = "Reservando...";
@@ -1231,6 +1328,17 @@ function handleConfirmReservation() {
     curso: globalState.cursoSeleccionado
   };
   
+  // Multitramo: varios tramos seguidos en una sola operación (todo o nada)
+  const numTramos = globalState.numTramosSeleccionados || 1;
+  if (numTramos > 1 && globalState.tramosSeguidos) {
+    const tramoIds = globalState.tramosSeguidos.slice(0, numTramos).map(t => t.id);
+    google.script.run
+      .withSuccessHandler(onReservaSuccess)
+      .withFailureHandler(onFailure)
+      .crearReservasMultitramo(reservaData, tramoIds);
+    return;
+  }
+
   google.script.run
     .withSuccessHandler(onReservaSuccess)
     .withFailureHandler(onFailure)
@@ -1244,11 +1352,12 @@ function onReservaSuccess(response) {
   if (response.success) {
     showSuccess(response.message);
     
-    // Agregar a reservas globales (para disponibilidad)
-    globalState.reservas.push(response.nuevaReserva);
-    
-    // Agregar también a mis reservas activas
-    globalState.misReservasActivas.push(response.nuevaReserva);
+    // Agregar a reservas globales (para disponibilidad) y a mis reservas activas
+    const nuevas = response.nuevasReservas || [response.nuevaReserva];
+    nuevas.forEach(r => {
+      globalState.reservas.push(r);
+      globalState.misReservasActivas.push(r);
+    });
     
     // Ordenar mis reservas por fecha
     globalState.misReservasActivas.sort((a, b) => {
@@ -1429,9 +1538,9 @@ function onMyReservationsSuccess(response) {
               <iconify-icon icon="mdi:calendar-sync" class="text-lg text-purple-600"></iconify-icon>
             </div>
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-bold text-purple-800 truncate">${recurso.nombre}</p>
-              <p class="text-xs text-purple-600 font-medium truncate">${motivoDisplay}</p>
-              <p class="text-[10px] text-purple-400 mt-0.5">${grupo.length} reservas · ${tramosTexto}</p>
+              <p class="text-sm font-bold text-purple-800 truncate">${escHTML(recurso.nombre)}</p>
+              <p class="text-xs text-purple-600 font-medium truncate">${escHTML(motivoDisplay)}</p>
+              <p class="text-[10px] text-purple-400 mt-0.5">${grupo.length} reservas · ${escHTML(tramosTexto)}</p>
             </div>
             <iconify-icon id="icon_${acordeonId}" icon="mdi:chevron-down" class="text-xl text-purple-400 shrink-0 transition-transform duration-200"></iconify-icon>
           </button>
@@ -1453,7 +1562,7 @@ function onMyReservationsSuccess(response) {
                 <div class="flex items-center gap-2">
                   <span class="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded">${fechaFinal}</span>
                   ${tramoInfo ? `<span class="text-[10px] text-purple-500 bg-purple-50 px-1.5 py-0.5 rounded">${tramoInfo}</span>` : ''}
-                  ${res.curso ? `<span class="text-[10px] text-indigo-600">${res.curso}</span>` : ''}
+                  ${res.curso ? `<span class="text-[10px] text-indigo-600">${escHTML(res.curso)}</span>` : ''}
                 </div>
                 <button onclick="handleCancelReservation(this)" data-id="${res.id_reserva}"
                   class="w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-all"
@@ -1502,9 +1611,9 @@ function renderReservaIndividual(res) {
 
   let iconHtml = '';
   if (recurso.icono && recurso.icono.includes(':')) {
-     iconHtml = `<iconify-icon icon="${recurso.icono}" class="text-2xl text-gray-600"></iconify-icon>`;
+     iconHtml = `<iconify-icon icon="${escHTML(recurso.icono)}" class="text-2xl text-gray-600"></iconify-icon>`;
   } else {
-     iconHtml = `<span class="text-xl grayscale opacity-70">${recurso.icono || '📅'}</span>`;
+     iconHtml = `<span class="text-xl grayscale opacity-70">${escHTML(recurso.icono || '📅')}</span>`;
   }
 
   const tramo = globalState.tramos.find(t => t.id_tramo === res.id_tramo) || { nombre_tramo: 'Hora desconocida', hora_inicio: '??', hora_fin: '??' };
@@ -1515,16 +1624,16 @@ function renderReservaIndividual(res) {
 
   let badgesHtml = '';
   if (res.curso) {
-    badgesHtml += `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 uppercase tracking-wide mr-2">${res.curso}</span>`;
+    badgesHtml += `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 uppercase tracking-wide mr-2">${escHTML(res.curso)}</span>`;
   }
   if (res.cantidad > 1) {
-    badgesHtml += `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-100 uppercase tracking-wide"># ${res.cantidad} Uds.</span>`;
+    badgesHtml += `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-100 uppercase tracking-wide"># ${escHTML(res.cantidad)} Uds.</span>`;
   }
 
   const notasHtml = res.notas ?
     `<div class="mt-2 text-xs text-gray-500 bg-gray-50 p-2 rounded border border-gray-100 flex gap-1 items-start">
         <iconify-icon icon="mdi:comment-text-outline" class="mt-0.5 text-gray-400"></iconify-icon>
-        <span class="italic line-clamp-2">${res.notas}</span>
+        <span class="italic line-clamp-2">${escHTML(res.notas)}</span>
      </div>` : '';
 
   return `
@@ -1535,7 +1644,7 @@ function renderReservaIndividual(res) {
                   ${iconHtml}
               </div>
               <div class="flex-1 min-w-0">
-                  <h4 class="font-bold text-gray-800 text-sm leading-tight mb-1 truncate">${recurso.nombre}</h4>
+                  <h4 class="font-bold text-gray-800 text-sm leading-tight mb-1 truncate">${escHTML(recurso.nombre)}</h4>
                   <div class="flex flex-wrap items-center gap-3 text-xs text-gray-500 mb-1.5">
                       <div class="flex items-center gap-1 text-blue-600 font-medium bg-blue-50 px-1.5 py-0.5 rounded">
                           <iconify-icon icon="mdi:calendar-month"></iconify-icon>
@@ -1910,8 +2019,8 @@ function generarMatrizRecurrente() {
     // Celda del tramo (fija)
     tr.innerHTML = `
       <td class="px-3 py-2 border-r border-gray-200 bg-gray-50">
-        <div class="text-xs font-bold text-gray-700">${tramo.nombre_tramo}</div>
-        <div class="text-[10px] text-gray-400">${tramo.hora_inicio} - ${tramo.hora_fin}</div>
+        <div class="text-xs font-bold text-gray-700">${escHTML(tramo.nombre_tramo)}</div>
+        <div class="text-[10px] text-gray-400">${escHTML(tramo.hora_inicio)} - ${escHTML(tramo.hora_fin)}</div>
       </td>
     `;
 
@@ -1934,14 +2043,14 @@ function generarMatrizRecurrente() {
       if (ocupadaPor) {
         // Celda ocupada por otra recurrencia (ROJO)
         td.className = 'p-1 border border-red-200 h-12 text-center bg-red-100 cursor-not-allowed';
-        td.innerHTML = `<div class="w-full h-full flex items-center justify-center" title="Ocupado por: ${ocupadaPor.usuario}">
+        td.innerHTML = `<div class="w-full h-full flex items-center justify-center" title="Ocupado por: ${escHTML(ocupadaPor.usuario)}">
           <iconify-icon icon="mdi:account-clock" class="text-red-500 text-sm"></iconify-icon>
         </div>`;
         td.title = `Ocupado por: ${ocupadaPor.usuario}`;
       } else if (noDisponible) {
         // Celda no disponible (GRIS)
         td.className = 'p-1 border border-gray-200 h-12 text-center bg-gray-200 cursor-not-allowed';
-        td.innerHTML = `<div class="w-full h-full flex items-center justify-center" title="${noDisponible.razon || 'No disponible'}">
+        td.innerHTML = `<div class="w-full h-full flex items-center justify-center" title="${escHTML(noDisponible.razon || 'No disponible')}">
           <iconify-icon icon="mdi:block-helper" class="text-gray-400 text-sm"></iconify-icon>
         </div>`;
         td.title = noDisponible.razon || 'No disponible';
@@ -2186,7 +2295,7 @@ function abrirModalReportarIncidencia(idRecurso, nombreRecurso, iconoRecurso) {
 
     // Actualizar UI del modal
     if (modalIcono) {
-      modalIcono.innerHTML = `<iconify-icon icon="${incidenciaRecursoActual.icono}" class="text-2xl"></iconify-icon>`;
+      modalIcono.innerHTML = `<iconify-icon icon="${escHTML(incidenciaRecursoActual.icono)}" class="text-2xl"></iconify-icon>`;
     }
     if (modalNombre) {
       modalNombre.textContent = nombreRecurso;
@@ -2311,7 +2420,7 @@ function actualizarHeaderModalIncidencia(selectElement) {
   try {
     const recursoData = JSON.parse(selectElement.value);
     if (modalIcono && recursoData.icono) {
-      modalIcono.innerHTML = `<iconify-icon icon="${recursoData.icono}" class="text-2xl"></iconify-icon>`;
+      modalIcono.innerHTML = `<iconify-icon icon="${escHTML(recursoData.icono)}" class="text-2xl"></iconify-icon>`;
     }
     if (modalNombre && recursoData.nombre) {
       modalNombre.textContent = recursoData.nombre;
@@ -2551,7 +2660,8 @@ function mostrarSeccionIncidencias() {
   // El botón de incidencias permanece visible (ya no se oculta)
   
   // ✅ ESPERAR A ADMINSTATE SI NO ESTÁ LISTO
-  if (typeof AdminState === 'undefined' || !AdminState.recursos || AdminState.recursos.length === 0) {
+  // Solo los admin cargan AdminState; el resto usa globalState (antes: spinner infinito para no-admin)
+  if (window.IS_ADMIN && (typeof AdminState === 'undefined' || !AdminState.recursos || AdminState.recursos.length === 0)) {
     console.log('⏳ Esperando a que AdminState cargue...');
     
     const lista = document.getElementById('listaIncidencias');
@@ -2643,7 +2753,7 @@ function cargarIncidencias() {
           <div class="text-center py-12 text-gray-400">
             <iconify-icon icon="mdi:information-outline" class="text-4xl mb-2"></iconify-icon>
             <p>No se pudieron cargar las incidencias</p>
-            <p class="text-xs mt-2">${response ? response.error : 'Respuesta inválida del servidor'}</p>
+            <p class="text-xs mt-2">${escHTML(response ? response.error : 'Respuesta inválida del servidor')}</p>
           </div>
         `;
       }
@@ -2652,7 +2762,7 @@ function cargarIncidencias() {
       lista.innerHTML = `
         <div class="text-center py-12 text-red-500">
           <iconify-icon icon="mdi:alert-circle" class="text-4xl mb-2"></iconify-icon>
-          <p>Error de conexión: ${error.message}</p>
+          <p>Error de conexión: ${escHTML(error.message)}</p>
         </div>
       `;
     })
@@ -2911,9 +3021,9 @@ function crearTarjetaIncidencia(inc) {
           
           <div class="col-span-3">
             <div class="font-bold text-gray-800 text-sm truncate flex items-center gap-2">
-              ${inc.Nombre_Recurso}
+              ${escHTML(inc.Nombre_Recurso)}
             </div>
-            <div class="text-xs text-gray-500 flex items-center gap-1"><iconify-icon icon="mdi:tag-outline"></iconify-icon> ${inc.Categoria}
+            <div class="text-xs text-gray-500 flex items-center gap-1"><iconify-icon icon="mdi:tag-outline"></iconify-icon> ${escHTML(inc.Categoria)}
             ${recursoEnMantenimiento ? `<span title="En Mantenimiento" class="text-[10px] bg-yellow-100 text-yellow-800 px-1.5 py-0.5 rounded border border-yellow-200">⚠️ MANT</span>` : ''}
             </div>
           </div>
@@ -2921,7 +3031,7 @@ function crearTarjetaIncidencia(inc) {
           <div class="col-span-2">${selectorEstado}</div>
           <div class="col-span-2">${selectorPrioridad}</div>
           
-          <div class="col-span-2 text-sm text-gray-600 truncate flex items-center gap-1"><iconify-icon icon="mdi:account" class="text-gray-300"></iconify-icon> ${nombreUsuario}</div>
+          <div class="col-span-2 text-sm text-gray-600 truncate flex items-center gap-1"><iconify-icon icon="mdi:account" class="text-gray-300"></iconify-icon> ${escHTML(nombreUsuario)}</div>
           
           <div class="col-span-2 flex items-center justify-end gap-3">
             <span class="text-xs text-gray-400">${tiempoTexto}</span>
@@ -2933,7 +3043,7 @@ function crearTarjetaIncidencia(inc) {
            <div class="flex justify-between items-start mb-2">
               <div>
                   <div class="text-sm font-bold text-gray-800 flex items-center gap-2">
-                      ${inc.Nombre_Recurso}
+                      ${escHTML(inc.Nombre_Recurso)}
                       ${recursoEnMantenimiento ? `⚠️` : ''}
                   </div>
                   <div class="text-xs text-gray-500">#${inc.ID_Incidencia}</div>
@@ -2955,7 +3065,7 @@ function crearTarjetaIncidencia(inc) {
             <div class="w-full md:w-[70%] space-y-3">
                <div>
                   <p class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">Descripción</p>
-                  <p class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">${inc.Descripcion || 'Sin descripción detallada.'}</p>
+                  <p class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">${escHTML(inc.Descripcion || 'Sin descripción detallada.')}</p>
                </div>
                
                ${inc.Notas_Admin ? `
@@ -2963,7 +3073,7 @@ function crearTarjetaIncidencia(inc) {
                    <iconify-icon icon="mdi:shield-account-outline" class="text-blue-500 mt-0.5 text-base"></iconify-icon>
                    <div class="text-sm text-blue-800 flex-1">
                       <span class="font-bold block text-xs uppercase opacity-75 mb-0.5">Nota Admin:</span> 
-                      ${inc.Notas_Admin}
+                      ${escHTML(inc.Notas_Admin)}
                    </div>
                    ${esAdmin ? `
                    <button onclick="editarIncidencia('${inc.ID_Incidencia}')" class="absolute top-2 right-2 text-blue-300 hover:text-blue-600 opacity-0 group-hover/nota:opacity-100 transition-opacity">
@@ -3346,39 +3456,6 @@ function actualizarContadorIncidencias() {
  * CAMBIAR ESTADO (Botón Verde)
  */
 
-function cambiarEstadoIncidencia(idIncidencia, nuevoEstado) {
-  // Solo permitimos resolver por ahora con este botón
-  if (nuevoEstado !== 'Resuelta') return;
-
-  if (!confirm(`¿Confirmas que la incidencia ${idIncidencia} está resuelta?\n\nSe enviará un correo al usuario.`)) {
-    return;
-  }
-
-  document.body.style.cursor = 'wait';
-
-  // Llamada al nuevo backend
-  google.script.run
-    .withSuccessHandler(function(res) {
-      document.body.style.cursor = 'default';
-      if (res.exito) {
-        // Actualizar UI Localmente
-        const index = incidenciasActuales.findIndex(i => i.ID_Incidencia === idIncidencia);
-        if (index !== -1) {
-          incidenciasActuales[index].Estado = 'Resuelta';
-        }
-        renderIncidencias(); // Redibujar
-        // alert(res.mensaje); // Opcional: mostrar mensaje
-      } else {
-        alert('❌ Error: ' + res.error);
-      }
-    })
-    .withFailureHandler(function(err) {
-      document.body.style.cursor = 'default';
-      alert('Error de conexión');
-    })
-    .backend_actualizarIncidencia(idIncidencia, 'RESOLVER', null);
-}
-
 
 // ========== MODAL EDITAR NOTA INCIDENCIA ==========
 
@@ -3459,131 +3536,6 @@ function guardarNotaIncidenciaModal() {
       showToast('error', 'Error de conexión');
     })
     .backend_actualizarIncidencia(incidenciaIdActual, 'EDITAR_NOTA', nuevaNota);
-}
-
-/**
- * Ajusta el tamaño del header según incidencias y rol de usuario
- */
-function ajustarHeaderSegunIncidencias() {
-  const numIncidencias = todasLasIncidencias.filter(i =>
-    i.Estado === 'Pendiente' || i.Estado === 'En proceso'
-  ).length;
-
-  const esAdmin = globalState && globalState.isAdmin === true;
-
-  const btnIncidencias = document.getElementById('btnIncidenciasGlobal');
-  const headerLogo = document.getElementById('headerLogo') || document.getElementById('headerLogoPlaceholder');
-  const headerTitle = document.getElementById('headerTitle');
-  const headerBranding = document.getElementById('headerBranding');
-  const myReservationsBtn = document.getElementById('myReservationsButton');
-
-  // ========== LÓGICA PRINCIPAL ==========
-
-  // Si hay incidencias pendientes y es admin, ajustar layout
-  if (numIncidencias > 0 && esAdmin && btnIncidencias) {
-    
-    // SOLO compactar si ES ADMIN
-    if (esAdmin) {
-      // --- MODO COMPACTO (Admin con incidencias) ---
-      
-      // Logo/placeholder
-      if (headerLogo) {
-        headerLogo.classList.remove('h-10', 'w-10');
-        headerLogo.classList.add('h-9', 'w-9', 'md:h-10', 'md:w-10');
-      }
-      
-      // Título
-      if (headerTitle) {
-        headerTitle.classList.remove('text-lg');
-        headerTitle.classList.add('text-base', 'md:text-lg', 'truncate', 'max-w-[160px]', 'sm:max-w-none');
-      }
-      
-      // Branding container
-      if (headerBranding) {
-        headerBranding.classList.remove('gap-4');
-        headerBranding.classList.add('gap-3', 'md:gap-4');
-      }
-      
-      // Botón incidencias
-      btnIncidencias.classList.remove('h-10', 'px-4');
-      btnIncidencias.classList.add('h-9', 'w-9', 'md:w-auto', 'md:h-10', 'md:px-4', 'justify-center', 'md:justify-start');
-      
-      const spanIncidencias = btnIncidencias.querySelector('span:not([id])');
-      if (spanIncidencias) {
-        spanIncidencias.classList.remove('hidden', 'sm:inline');
-        spanIncidencias.classList.add('hidden', 'md:inline');
-      }
-      
-      // Botón Mis Reservas
-      if (myReservationsBtn) {
-        myReservationsBtn.classList.remove('h-10', 'px-3', 'min-[480px]:px-4');
-        myReservationsBtn.classList.add('h-9', 'w-9', 'md:w-auto', 'md:h-10', 'md:px-4', 'justify-center', 'md:justify-start');
-        
-        const spanReservas = myReservationsBtn.querySelector('span');
-        if (spanReservas) {
-          spanReservas.classList.remove('hidden', 'min-[480px]:inline');
-          spanReservas.classList.add('hidden', 'md:inline');
-        }
-        
-        // Ajustar icono
-        const iconReservas = myReservationsBtn.querySelector('iconify-icon');
-        if (iconReservas) {
-          iconReservas.classList.remove('text-xl', 'min-[480px]:text-lg');
-          iconReservas.classList.add('text-xl', 'md:text-lg');
-        }
-      }
-      
-      // Botones Admin
-      const btnAdmin = document.getElementById('btnIrAdmin');
-      const btnVolver = document.getElementById('btnVolverApp');
-      
-      if (btnAdmin) {
-        btnAdmin.classList.remove('h-10', 'px-3', 'min-[480px]:px-4');
-        btnAdmin.classList.add('h-9', 'w-9', 'md:w-auto', 'md:h-10', 'md:px-4', 'justify-center', 'md:justify-start');
-        
-        const spanAdmin = btnAdmin.querySelector('span');
-        if (spanAdmin) {
-          spanAdmin.classList.remove('hidden', 'min-[480px]:inline');
-          spanAdmin.classList.add('hidden', 'md:inline');
-        }
-        
-        const iconAdmin = btnAdmin.querySelector('iconify-icon');
-        if (iconAdmin) {
-          iconAdmin.classList.remove('text-xl', 'min-[480px]:text-lg');
-          iconAdmin.classList.add('text-xl', 'md:text-lg');
-        }
-      }
-      
-      if (btnVolver) {
-        btnVolver.classList.remove('h-10', 'px-3', 'min-[480px]:px-4');
-        btnVolver.classList.add('h-9', 'w-9', 'md:w-auto', 'md:h-10', 'md:px-4', 'justify-center', 'md:justify-start');
-        
-        const spanVolver = btnVolver.querySelector('span');
-        if (spanVolver) {
-          spanVolver.classList.remove('hidden', 'min-[480px]:inline');
-          spanVolver.classList.add('hidden', 'md:inline');
-        }
-        
-        const iconVolver = btnVolver.querySelector('iconify-icon');
-        if (iconVolver) {
-          iconVolver.classList.remove('text-xl', 'min-[480px]:text-lg');
-          iconVolver.classList.add('text-xl', 'md:text-lg');
-        }
-      }
-    }
-    // Si NO es admin, mantener header GRANDE aunque haya incidencias
-  }
-
-  console.log(`📐 Header ajustado: ${numIncidencias} incidencias, Admin: ${esAdmin}`);
-}
-
-/**
- * Helper: ¿Hay incidencias pendientes?
- */
-function hayIncidenciasPendientes() {
-  return todasLasIncidencias.some(i => 
-    i.Estado === 'Pendiente' || i.Estado === 'En proceso'
-  );
 }
 
 

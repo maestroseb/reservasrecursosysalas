@@ -3,8 +3,9 @@
   <head>
     <base target="_top">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
-    <script src="https://maestroseb.github.io/recursos/tailwind.js"></script>
+    <script defer src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+    <!-- Tailwind CSS precompilado (antes se compilaba en el navegador con tailwind.js) -->
+    <?!= include('tailwind-css'); ?>
     <style>
       /* Reset básico para evitar bordes blancos feos */
       body { 

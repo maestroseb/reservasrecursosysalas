@@ -8,10 +8,10 @@
   <title>Sistema de Reservas</title>
 
   <!-- Iconify CDN -->
-  <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+  <script defer src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
 
-  <!-- Tailwind CSS (el original es https://cdn.tailwindcss.com pero ahora mismo Andared lo bloquea y lo he desviado a una copia que he hecho en Github Pages-->
-  <script src="https://maestroseb.github.io/recursos/tailwind.js"></script>
+  <!-- Tailwind CSS precompilado (antes se compilaba en el navegador con tailwind.js) -->
+  <?!= include('tailwind-css'); ?>
 
   <!-- Estilos Modulares y del Panel Admin -->
   <?!= include('styles'); ?>
@@ -36,7 +36,7 @@
           <!-- Logo + Nombre (usa clases adaptativas) -->
           <div id="headerBranding" class="flex items-center gap-4">
             <? if (logoUrl) { ?>
-            <img id="headerLogo" src="<?= logoUrl ?>" alt="Logo" class="h-10 w-auto object-contain transition-all">
+            <img id="headerLogo" src="<?= logoUrl ?>" alt="" onerror="this.style.display='none'" class="h-10 w-auto object-contain transition-all">
             <? } else { ?>
             <div id="headerLogoPlaceholder"
               class="h-10 w-10 bg-gradient-to-br from-indigo-600 to-blue-600 rounded-xl flex items-center justify-center text-white shadow-md shrink-0 transition-all">
@@ -339,8 +339,10 @@
       </div>
     </div>
 
-    <!-- Tab: Panel Admin (MODULAR) -->
+    <!-- Tab: Panel Admin (MODULAR) - solo se envía a administradores (~80 KB menos para el resto) -->
+    <? if (isAdminForJs === 'true') { ?>
     <?!= include('admin-panel'); ?>
+    <? } ?>
 
   </div>
 
@@ -377,6 +379,14 @@
     </div>
 
     <div class="p-6 space-y-6">
+
+      <!-- Multitramo: solo visible si está activado en Config y hay tramos libres seguidos -->
+      <div id="multitramoContainer" class="hidden">
+        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+          ¿Cuántos tramos seguidos?
+        </label>
+        <div id="multitramoOpciones" class="flex flex-wrap gap-2"></div>
+      </div>
 
       <div>
         <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
@@ -428,7 +438,7 @@
 
       <div>
         <label for="notasInput" class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
-              Notas adicionales (Opcional)
+              <span id="notasLabelTexto">Notas adicionales (Opcional)</span>
             </label>
         <div class="relative">
           <div class="absolute top-3 left-3 text-gray-400">
@@ -438,6 +448,10 @@
                           class="block w-full pl-10 pr-3 py-2.5 rounded-xl border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-gray-50 focus:bg-white transition-colors resize-none"
                           placeholder="Ej: Necesito un proyector..."></textarea>
         </div>
+        <p id="notasError"
+          class="hidden flex items-center gap-1 text-xs text-red-500 mt-2 font-medium bg-red-50 p-2 rounded-lg">
+          <iconify-icon icon="mdi:alert-circle"></iconify-icon> Indica para qué es la reserva
+        </p>
       </div>
     </div>
 
@@ -1047,8 +1061,14 @@
      ========================================== */
 
   // 1. VARIABLES GLOBALES (Inyectadas por Google Apps Script)
-  window.USER_EMAIL = <?= userEmailForJs ?>;
-  window.USER_NAME = <?= userNameForJs ?>;
+  // Los scriptlets de impresión ya emiten un literal JS; como el servidor además hace JSON.stringify,
+  // el valor podía llegar con comillas dobles ("\"x@y\""). Lo normalizamos en ambos casos.
+  function desenvolverValorServidor(v) {
+    try { if (typeof v === 'string' && v.charAt(0) === '"') return JSON.parse(v); } catch (e) {}
+    return v;
+  }
+  window.USER_EMAIL = desenvolverValorServidor(<?= userEmailForJs ?>);
+  window.USER_NAME = desenvolverValorServidor(<?= userNameForJs ?>);
   window.IS_ADMIN = <?= isAdminForJs ?> === 'true';
 
   // 2. FUNCIÓN PARA ABRIR LA INTERFAZ ADMIN (La hacemos global para poder llamarla desde fuera si hace falta)
@@ -1196,12 +1216,6 @@
         btnVolver.classList.add('hidden');
         btnIrAdmin.classList.remove('hidden');
         
-        // ✅ AÑADIDO: Restaurar botón incidencias si hay pendientes
-        const btnVerInc = document.getElementById('btnVerIncidencias');
-        if (btnVerInc && typeof hayIncidenciasPendientes === 'function' && hayIncidenciasPendientes()) {
-          btnVerInc.classList.remove('hidden');
-        }
-        
         // 6. Ocultar mensajes de error/éxito
         if (typeof hideMessages === 'function') {
           hideMessages();
@@ -1240,9 +1254,13 @@
 
   </script>
 
+  <p class="text-center text-xs text-gray-400 mt-4">v<?= appVersion ?></p>
+
   <?!= include('scripts'); ?>
 
+  <? if (isAdminForJs === 'true') { ?>
   <?!= include('admin-scripts'); ?>
+  <? } ?>
 
 </body>
 

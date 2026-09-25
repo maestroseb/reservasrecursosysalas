@@ -48,8 +48,43 @@ window.escaparHTML = (str) => {
     if (!str) return '';
     const div = document.createElement('div');
     div.textContent = str;
-    return div.innerHTML;
+    // textContent no escapa comillas: necesario para valores dentro de atributos value="..."
+    return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 };
+
+/* GUARDADO EN SEGUNDO PLANO ("optimista")
+   - La barra de Guardar se oculta al instante y se puede seguir trabajando.
+   - "originales" pasa a ser lo enviado: si se sigue editando, la barra reaparece solo para lo nuevo.
+   - Si el servidor falla, se restauran los originales anteriores: los cambios vuelven a quedar pendientes. */
+const guardadosEnCurso = {};
+function guardarEnSegundoPlano({ clave, etiqueta, llamar, alExito, alFallo }) {
+  if (guardadosEnCurso[clave]) {
+    showToast('info', `Aún se están guardando ${etiqueta}...`);
+    return false;
+  }
+  guardadosEnCurso[clave] = true;
+  SaveBarManager.hide();
+  showToast('loading', `Guardando ${etiqueta}...`);
+
+  const terminarMal = (msg) => {
+    guardadosEnCurso[clave] = false;
+    showToast('error', `No se han guardado ${etiqueta}: ${msg || 'error desconocido'}`);
+    if (alFallo) alFallo();
+  };
+  llamar(
+    res => {
+      if (res && res.success) {
+        guardadosEnCurso[clave] = false;
+        showToast('success', `${etiqueta.charAt(0).toUpperCase() + etiqueta.slice(1)} guardados`);
+        if (alExito) alExito(res);
+      } else {
+        terminarMal(res && res.error);
+      }
+    },
+    err => terminarMal(err && err.message ? err.message : String(err))
+  );
+  return true;
+}
 
 /* LÓGICA DE CONFIRMACIÓN (MODAL INTELIGENTE) */
 let accionConfirmadaCallback = null;
@@ -153,130 +188,6 @@ window.showToast = showToast;
 window.hideToast = hideToast;
 window.SaveBarManager = SaveBarManager;
 
-
-// ========================================
-// 4️⃣ DATOS ESTÁTICOS: BASE DE DATOS DE ICONOS ICONIFY
-// ========================================
-
-const ICONIFY_ICONS = {
-  tecnologia: [
-    { icon: 'mdi:laptop', name: 'Portátil' },
-    { icon: 'mdi:desktop-tower', name: 'Ordenador' },
-    { icon: 'mdi:keyboard', name: 'Teclado' },
-    { icon: 'mdi:mouse', name: 'Ratón' },
-    { icon: 'mdi:printer', name: 'Impresora' },
-    { icon: 'mdi:printer-3d', name: 'Impresora 3D' },
-    { icon: 'mdi:cellphone', name: 'Móvil' },
-    { icon: 'mdi:tablet', name: 'Tablet' },
-    { icon: 'simple-icons:arduino', name: 'Arduino' },
-    { icon: 'simple-icons:raspberrypi', name: 'Raspberry Pi' },
-    { icon: 'simple-icons:microbit', name: 'Micro:bit' },
-    { icon: 'mdi:robot', name: 'Robot' },
-    { icon: 'carbon:3d-print-mesh', name: 'Impresión 3D' },
-    { icon: 'mdi:router-wireless', name: 'Router' },
-    { icon: 'mdi:projector', name: 'Proyector' }
-  ],
-  
-  ciencias: [
-    { icon: 'mdi:microscope', name: 'Microscopio' },
-    { icon: 'mdi:telescope', name: 'Telescopio' },
-    { icon: 'carbon:chemistry', name: 'Química' },
-    { icon: 'mdi:flask', name: 'Matraz' },
-    { icon: 'mdi:test-tube', name: 'Tubo ensayo' },
-    { icon: 'mdi:dna', name: 'ADN' },
-    { icon: 'carbon:chemistry-reference', name: 'Lab. Química' },
-    { icon: 'mdi:atom', name: 'Átomo' },
-    { icon: 'carbon:earth', name: 'Tierra' },
-    { icon: 'mdi:molecule', name: 'Molécula' },
-    { icon: 'carbon:microscope', name: 'Lab. Biología' },
-    { icon: 'mdi:bacteria', name: 'Bacteria' }
-  ],
-  
-  deportes: [
-    { icon: 'mdi:soccer', name: 'Fútbol' },
-    { icon: 'mdi:basketball', name: 'Baloncesto' },
-    { icon: 'mdi:volleyball', name: 'Voleibol' },
-    { icon: 'mdi:tennis', name: 'Tenis' },
-    { icon: 'mdi:table-tennis', name: 'Ping pong' },
-    { icon: 'mdi:badminton', name: 'Bádminton' },
-    { icon: 'mdi:dumbbell', name: 'Gimnasio' },
-    { icon: 'mdi:weight-lifter', name: 'Pesas' },
-    { icon: 'mdi:run', name: 'Atletismo' },
-    { icon: 'mdi:swim', name: 'Natación' },
-    { icon: 'mdi:yoga', name: 'Yoga' },
-    { icon: 'carbon:basketball', name: 'Cancha' }
-  ],
-  
-  arte: [
-    { icon: 'mdi:palette', name: 'Paleta' },
-    { icon: 'mdi:brush', name: 'Pincel' },
-    { icon: 'mdi:draw', name: 'Dibujo' },
-    { icon: 'mdi:music', name: 'Música' },
-    { icon: 'mdi:piano', name: 'Piano' },
-    { icon: 'mdi:guitar-acoustic', name: 'Guitarra' },
-    { icon: 'mdi:microphone', name: 'Micrófono' },
-    { icon: 'mdi:violin', name: 'Violín' },
-    { icon: 'mdi:drama-masks', name: 'Teatro' },
-    { icon: 'mdi:camera', name: 'Fotografía' },
-    { icon: 'mdi:video', name: 'Vídeo' },
-    { icon: 'carbon:music', name: 'Sala música' }
-  ],
-  
-  biblioteca: [
-    { icon: 'mdi:book-open-page-variant', name: 'Libro abierto' },
-    { icon: 'mdi:book-multiple', name: 'Libros' },
-    { icon: 'mdi:bookshelf', name: 'Estantería' },
-    { icon: 'mdi:library', name: 'Biblioteca' },
-    { icon: 'mdi:book-education', name: 'Educación' },
-    { icon: 'mdi:notebook', name: 'Cuaderno' },
-    { icon: 'carbon:book', name: 'Libro' },
-    { icon: 'mdi:magazine', name: 'Revista' }
-  ],
-  
-  idiomas: [
-    { icon: 'mdi:translate', name: 'Traducción' },
-    { icon: 'mdi:earth', name: 'Mundo' },
-    { icon: 'carbon:globe', name: 'Global' },
-    { icon: 'mdi:comment-text', name: 'Conversación' },
-    { icon: 'mdi:alphabet-latin', name: 'Alfabeto' },
-    { icon: 'carbon:language', name: 'Idiomas' }
-  ],
-  
-  naturaleza: [
-    { icon: 'mdi:flower', name: 'Flor' },
-    { icon: 'mdi:tree', name: 'Árbol' },
-    { icon: 'mdi:leaf', name: 'Hoja' },
-    { icon: 'carbon:tree', name: 'Bosque' },
-    { icon: 'mdi:recycle', name: 'Reciclaje' },
-    { icon: 'mdi:sprout', name: 'Brote' },
-    { icon: 'carbon:plant', name: 'Planta' },
-    { icon: 'mdi:water', name: 'Agua' }
-  ],
-  
-  espacios: [
-    { icon: 'mdi:school', name: 'Escuela' },
-    { icon: 'mdi:office-building', name: 'Edificio' },
-    { icon: 'mdi:door', name: 'Sala' },
-    { icon: 'mdi:sofa', name: 'Sala estar' },
-    { icon: 'carbon:cafe', name: 'Cafetería' },
-    { icon: 'mdi:table-chair', name: 'Comedor' },
-    { icon: 'carbon:building', name: 'Instalación' },
-    { icon: 'mdi:home', name: 'Casa' },
-    { icon: 'mdi:map-marker', name: 'Ubicación' },
-    { icon: 'carbon:education', name: 'Aula' }
-  ],
-  
-  ocio: [
-    { icon: 'mdi:gamepad-variant', name: 'Videojuegos' },
-    { icon: 'mdi:chess-king', name: 'Ajedrez' },
-    { icon: 'mdi:puzzle', name: 'Puzzle' },
-    { icon: 'mdi:cards', name: 'Cartas' },
-    { icon: 'mdi:dice-multiple', name: 'Juegos mesa' },
-    { icon: 'carbon:game-console', name: 'Consola' },
-    { icon: 'mdi:toy-brick', name: 'Construcción' },
-    { icon: 'mdi:cog', name: 'Taller' }
-  ]
-};
 
 
 /* ==========================================
@@ -1165,32 +1076,21 @@ function guardarCambiosRecursos() {
       return;
   }
 
-  showLoading();
-  google.script.run
-    .withSuccessHandler(res => {
-      hideLoading();
-      if (res.success) {
-        showToast('success', 'Recursos guardados');
-        AdminState.recursosOriginales = JSON.parse(JSON.stringify(AdminState.recursos));
-        AdminState.cambiosPendientes = false;
-        SaveBarManager.hide();
-        renderTablaRecursos();
-
-        // ✅ SINCRONIZAR con globalState (para la vista de usuario)
-        if (typeof globalState !== 'undefined') {
-          globalState.recursos = JSON.parse(JSON.stringify(AdminState.recursos));
-        }
-
-        adminHaCambiadoDatos = true;
-        if (typeof window.recargarDatosApp === 'function') {
-          window.recargarDatosApp();
-        }
-      } else {
-        showToast('error', res.error);
-      }
-    })
-    .withFailureHandler(err => { hideLoading(); showToast('error', err); })
-    .saveBatchRecursos(AdminState.recursos);
+  const enviado = JSON.parse(JSON.stringify(AdminState.recursos));
+  const previos = AdminState.recursosOriginales;
+  guardarEnSegundoPlano({
+    clave: 'recursos', etiqueta: 'recursos',
+    llamar: (ok, ko) => google.script.run.withSuccessHandler(ok).withFailureHandler(ko).saveBatchRecursos(enviado),
+    alExito: () => {
+      // ✅ SINCRONIZAR con globalState (para la vista de usuario)
+      if (typeof globalState !== 'undefined') globalState.recursos = JSON.parse(JSON.stringify(enviado));
+      adminHaCambiadoDatos = true;
+      if (typeof window.recargarDatosApp === 'function') window.recargarDatosApp();
+    },
+    alFallo: () => { AdminState.recursosOriginales = previos; checkRecursosChanges(); }
+  });
+  AdminState.recursosOriginales = JSON.parse(JSON.stringify(enviado));
+  AdminState.cambiosPendientes = false;
 }
 
 function descartarCambiosRecursos() {
@@ -1477,7 +1377,7 @@ function actualizarPanelPendientesRecurso() {
       <div id="pendiente-row-${sol.id_solicitud}" class="px-3 py-2.5 flex items-center justify-between gap-2 border-b border-amber-100 last:border-b-0 hover:bg-amber-100/30 transition-colors">
         <div class="flex-1 min-w-0">
           <div class="text-sm font-medium text-gray-800 truncate">${escaparHTML(sol.nombre_usuario)}</div>
-          <div class="text-xs text-gray-500">${diasDisplay} | ${escaparHTML(tramosDisplay)}</div>
+          <div class="text-xs text-gray-500">${escaparHTML(diasDisplay)} | ${escaparHTML(tramosDisplay)}</div>
         </div>
         <div class="flex gap-1 shrink-0">
           <button id="btn-aprobar-${sol.id_solicitud}" onclick="aprobarSolicitudRapidaConSpinner('${sol.id_solicitud}', this)"
@@ -2223,56 +2123,6 @@ async function revocarRecurrencia(idSolicitud) {
 }
 
 /**
- * Aprueba una solicitud rápidamente desde el panel de pendientes
- */
-async function aprobarSolicitudRapida(idSolicitud) {
-  if (!idSolicitud) return;
-
-  try {
-    const result = await new Promise((resolve, reject) => {
-      google.script.run
-        .withSuccessHandler(resolve)
-        .withFailureHandler(reject)
-        .aprobarSolicitudRecurrente(idSolicitud, '');
-    });
-
-    if (result && result.success) {
-      showToast('success', 'Solicitud aprobada correctamente');
-      // Recargar la matriz
-      if (DispState.recursoId) {
-        cargarMatrizDisponibilidad(DispState.recursoId);
-      }
-      // También actualizar la lista global de recurrentes
-      cargarSolicitudesRecurrentes();
-      // Inyectar reservas nuevas en AdminState y globalState
-      if (result.reservas && result.reservas.length > 0) {
-        AdminState.reservas = AdminState.reservas.concat(result.reservas);
-        if (typeof renderTablaReservas === 'function') renderTablaReservas();
-        if (typeof globalState !== 'undefined') {
-          const nuevasParaGlobal = result.reservas.map(r => ({
-            id_reserva: r.ID_Reserva,
-            id_recurso: r.ID_Recurso,
-            email_usuario: r.Email_Usuario,
-            fecha: r.Fecha,
-            id_tramo: r.ID_Tramo,
-            cantidad: r.Cantidad,
-            estado: r.Estado,
-            notas: r.Notas,
-            id_solicitud_recurrente: r.ID_Solicitud_Recurrente
-          }));
-          globalState.reservas = globalState.reservas.concat(nuevasParaGlobal);
-        }
-      }
-    } else {
-      showToast('error', result?.error || 'Error al aprobar');
-    }
-  } catch (error) {
-    console.error('Error aprobando solicitud:', error);
-    showToast('error', 'Error: ' + (error.message || String(error)));
-  }
-}
-
-/**
  * Rechaza una solicitud rápidamente (abre modal para motivo)
  */
 function rechazarSolicitudRapida(idSolicitud) {
@@ -2339,7 +2189,12 @@ function guardarCambiosDisp(forzar = false) {
       return;
   }
 
-  showLoading();
+  if (guardadosEnCurso.disp) { showToast('info', 'Aún se están guardando los horarios...'); return; }
+  guardadosEnCurso.disp = true;
+  SaveBarManager.hide();
+  showToast('loading', 'Guardando horarios...');
+  const recursoGuardado = DispState.recursoId;
+  const enviadoDisp = JSON.parse(JSON.stringify(DispState.datosActuales));
 
   const payload = DispState.datosActuales.map(d => ({
     id_recurso: DispState.recursoId,
@@ -2351,27 +2206,38 @@ function guardarCambiosDisp(forzar = false) {
 
   google.script.run
     .withSuccessHandler(res => {
-      hideLoading();
+      guardadosEnCurso.disp = false;
+      const mismoRecurso = String(DispState.recursoId) === String(recursoGuardado);
 
       if (res.requiereConfirmacion && !forzar) {
         // Hay conflictos con recurrencias: mostrar modal de confirmación
+        if (typeof hideToast === 'function') hideToast();
         payloadDisponibilidadPendiente = payload;
         mostrarModalConflictosDisponibilidad(res.afectados);
+        if (mismoRecurso) checkDispChanges();
         return;
       }
 
       if(res.success) {
         showToast('success', 'Disponibilidad guardada');
-        DispState.datosOriginales = JSON.parse(JSON.stringify(DispState.datosActuales));
-        AdminState.disponibilidad = AdminState.disponibilidad.filter(d => String(d.id_recurso) !== String(DispState.recursoId));
+        AdminState.disponibilidad = AdminState.disponibilidad.filter(d => String(d.id_recurso) !== String(recursoGuardado));
         payload.forEach(p => AdminState.disponibilidad.push(p));
-        checkDispChanges();
+        // Solo si seguimos en el mismo recurso: lo enviado pasa a ser el estado guardado
+        if (mismoRecurso) {
+          DispState.datosOriginales = enviadoDisp;
+          checkDispChanges();
+        }
         payloadDisponibilidadPendiente = null;
       } else {
         showToast('error', res.error || 'Error al guardar');
+        if (mismoRecurso) checkDispChanges();
       }
     })
-    .withFailureHandler(err => { hideLoading(); showToast('error', err); })
+    .withFailureHandler(err => {
+      guardadosEnCurso.disp = false;
+      showToast('error', 'No se han guardado los horarios: ' + (err && err.message ? err.message : err));
+      if (String(DispState.recursoId) === String(recursoGuardado)) checkDispChanges();
+    })
     .saveBatchDisponibilidadConValidacion(payload, forzar);
 }
 
@@ -2469,43 +2335,10 @@ function cerrarModalConflictosDisponibilidad() {
 }
 
 function confirmarGuardarConConflictos() {
-  // Cerrar modal pero NO resetear el payload todavía
   const modal = document.getElementById('modalConflictosDisponibilidad');
   if (modal) modal.remove();
-
-  // Mostrar loading
-  showLoading();
-
-  // Reconstruir payload desde el estado actual
-  const payload = DispState.datosActuales.map(d => ({
-    id_recurso: DispState.recursoId,
-    id_tramo: d.id_tramo,
-    dia_semana: d.dia_semana,
-    permitido: d.permitido,
-    razon_bloqueo: d.razon_bloqueo
-  }));
-
-  google.script.run
-    .withSuccessHandler(res => {
-      hideLoading();
-      payloadDisponibilidadPendiente = null;
-
-      if (res.success) {
-        showToast('success', 'Disponibilidad guardada y usuarios notificados');
-        DispState.datosOriginales = JSON.parse(JSON.stringify(DispState.datosActuales));
-        AdminState.disponibilidad = AdminState.disponibilidad.filter(d => String(d.id_recurso) !== String(DispState.recursoId));
-        payload.forEach(p => AdminState.disponibilidad.push(p));
-        checkDispChanges();
-      } else {
-        showToast('error', res.error || 'Error al guardar');
-      }
-    })
-    .withFailureHandler(err => {
-      hideLoading();
-      payloadDisponibilidadPendiente = null;
-      showToast('error', 'Error: ' + err);
-    })
-    .saveBatchDisponibilidadConValidacion(payload, true);
+  // Mismo guardado en segundo plano, forzando (cancela las recurrencias afectadas y avisa a los usuarios)
+  guardarCambiosDisp(true);
 }
 
 function descartarCambiosDisp() {
@@ -2765,14 +2598,14 @@ function renderTablaUsuarios() {
     tr.setAttribute('data-usuario-index', index);
 
     tr.innerHTML = `
-      <td class="pl-6 pr-2 py-4 whitespace-nowrap">
-        <div class="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold border border-blue-200 shadow-sm select-none">
+      <td class="pl-4 pr-1 py-1.5 whitespace-nowrap">
+        <div class="h-7 w-7 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-xs font-bold border border-blue-200 select-none">
           ${inicial}
         </div>
       </td>
 
-      <td class="px-2 py-3">
-        <div class="flex flex-col gap-1 w-full">
+      <td class="px-2 py-1.5">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-0.5 w-full">
           <input type="text" 
                  value="${escaparHTML(usuario.Nombre)}" 
                  oninput="editarUsuario(${index}, 'Nombre', this.value)"
@@ -2787,7 +2620,7 @@ function renderTablaUsuarios() {
         </div>
       </td>
 
-      <td class="px-2 py-3 whitespace-nowrap text-center">
+      <td class="px-2 py-1.5 whitespace-nowrap text-center">
         <div class="flex flex-col items-center justify-center cursor-pointer group/toggle" onclick="toggleUsuarioPropiedad(${index}, 'Admin')">
             <div class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${usuario.Admin ? 'bg-purple-600' : 'bg-gray-200 group-hover/toggle:bg-gray-300'}">
                 <span class="translate-x-1 inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${usuario.Admin ? 'translate-x-5' : 'translate-x-1'}"></span>
@@ -2798,7 +2631,7 @@ function renderTablaUsuarios() {
         </div>
       </td>
 
-      <td class="px-2 py-3 whitespace-nowrap text-center">
+      <td class="px-2 py-1.5 whitespace-nowrap text-center">
         <div class="flex flex-col items-center justify-center cursor-pointer group/toggle" onclick="toggleUsuarioPropiedad(${index}, 'Activo')">
             <div class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${usuario.Activo ? 'bg-green-500' : 'bg-gray-200 group-hover/toggle:bg-gray-300'}">
                 <span class="translate-x-1 inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${usuario.Activo ? 'translate-x-5' : 'translate-x-1'}"></span>
@@ -2809,9 +2642,9 @@ function renderTablaUsuarios() {
         </div>
       </td>
       
-      <td class="px-4 py-3 whitespace-nowrap text-right">
+      <td class="px-2 py-1.5 whitespace-nowrap text-right">
          <button onclick="eliminarUsuario(${index})" 
-                class="text-gray-300 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
+                class="text-gray-300 hover:text-red-600 p-1.5 rounded-full hover:bg-red-50 transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
           <iconify-icon icon="mdi:trash-can-outline" width="20"></iconify-icon>
         </button>
       </td>
@@ -2913,6 +2746,163 @@ function eliminarUsuario(index) {
   );
 }
 
+// 5b. IMPORTAR EN BLOQUE (pegar desde Excel/Sheets o subir CSV)
+// Formato libre por línea: la celda con "@" es el email; la primera otra celda de texto, el nombre;
+// una celda "admin"/"sí"/"true" marca administrador. Separadores: tabulador, ";" o ",".
+function abrirImportarUsuarios() {
+  let modal = document.getElementById('modalImportarUsuarios');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modalImportarUsuarios';
+    document.body.appendChild(modal);
+  }
+  modal.className = 'fixed inset-0 z-[10000] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4';
+  modal.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
+      <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+          <iconify-icon icon="mdi:account-multiple-plus-outline" class="text-blue-600"></iconify-icon> Importar usuarios
+        </h3>
+        <button onclick="cerrarImportarUsuarios()" class="text-gray-400 hover:text-gray-600 p-1"><iconify-icon icon="mdi:close" width="22"></iconify-icon></button>
+      </div>
+      <div class="p-6 space-y-4">
+        <p class="text-sm text-gray-600">Pega una fila por usuario (copiada de Excel, Sheets o Séneca) o sube un <b>CSV</b>. Se detecta sola la columna del email; el resto de columnas (nombre, apellidos) forman el nombre. Si una columna dice <i>admin</i> o <i>sí</i>, será administrador.</p>
+        <textarea id="importUsuariosTexto" rows="7" oninput="previsualizarImportacion()"
+          class="w-full border border-gray-300 rounded-xl p-3 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+          placeholder="Ana López Pérez&#9;alopez@g.educaand.es&#10;Juan Ruiz;jruiz@g.educaand.es;admin"></textarea>
+        <label class="inline-flex items-center gap-2 text-sm text-blue-700 font-medium cursor-pointer hover:underline">
+          <iconify-icon icon="mdi:file-upload-outline" width="18"></iconify-icon> Subir archivo CSV
+          <input type="file" accept=".csv,.txt,text/csv,text/plain" class="hidden" onchange="cargarCsvUsuarios(this)">
+        </label>
+        <div id="importUsuariosResumen" class="text-sm"></div>
+      </div>
+      <div class="bg-gray-50 px-6 py-4 flex gap-3 border-t border-gray-100 rounded-b-2xl">
+        <button onclick="cerrarImportarUsuarios()" class="flex-1 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50">Cancelar</button>
+        <button id="btnConfirmarImportacion" onclick="confirmarImportacionUsuarios()" disabled
+          class="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed">Añadir</button>
+      </div>
+    </div>`;
+  modal.classList.remove('hidden');
+  previsualizarImportacion();
+}
+
+function cerrarImportarUsuarios() {
+  const modal = document.getElementById('modalImportarUsuarios');
+  if (modal) modal.classList.add('hidden');
+}
+
+function cargarCsvUsuarios(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    document.getElementById('importUsuariosTexto').value = String(reader.result || '');
+    previsualizarImportacion();
+  };
+  reader.readAsText(file, 'UTF-8');
+  input.value = '';
+}
+
+// Parte una línea CSV respetando comillas ("García, Pepa" es una sola celda)
+function partirLineaCsv(linea, sep) {
+  const celdas = []; let actual = ''; let entreComillas = false;
+  for (let k = 0; k < linea.length; k++) {
+    const c = linea[k];
+    if (c === '"') {
+      if (entreComillas && linea[k + 1] === '"') { actual += '"'; k++; }
+      else entreComillas = !entreComillas;
+    } else if (c === sep && !entreComillas) { celdas.push(actual); actual = ''; }
+    else actual += c;
+  }
+  celdas.push(actual);
+  return celdas;
+}
+
+function analizarTextoUsuarios(texto) {
+  const existentes = new Set(AdminState.usuarios.map(u => String(u.Email).toLowerCase().trim()));
+  const vistos = new Set();
+  const res = { nuevos: [], yaExisten: 0, duplicados: 0, invalidos: [] };
+  const esAdmin = v => /^(admin|administrador|s[ií]|true|yes|1)$/i.test(v);
+
+  String(texto || '').split(/\r?\n/).forEach((linea, i) => {
+    if (!linea.trim()) return;
+    const sep = linea.includes('\t') ? '\t' : (linea.includes(';') ? ';' : ',');
+    const celdas = partirLineaCsv(linea, sep).map(c => c.trim()).filter(Boolean);
+    const email = (celdas.find(c => c.includes('@')) || '').toLowerCase();
+    if (!email) {
+      // Una cabecera tipo "Nombre;Email" en la primera línea se ignora sin avisar
+      if (!(i === 0 && /e-?mail|correo/i.test(linea))) res.invalidos.push(`Línea ${i + 1}: sin email`);
+      return;
+    }
+    if (!esEmailValido(email)) { res.invalidos.push(`Línea ${i + 1}: email no válido (${email})`); return; }
+    if (existentes.has(email)) { res.yaExisten++; return; }
+    if (vistos.has(email)) { res.duplicados++; return; }
+    vistos.add(email);
+
+    const otras = celdas.filter(c => !c.includes('@'));
+    const admin = otras.some(esAdmin);
+    // Nombre = todas las columnas de texto unidas (p. ej. "Nombre" + "Apellidos" de Séneca)
+    let nombre = otras.filter(c => !esAdmin(c) && !/^(activo|inactivo|no|false|0)$/i.test(c)).join(' ').replace(/\s+/g, ' ').trim();
+    if (nombre.length < 2) nombre = email.split('@')[0];
+    res.nuevos.push({ Nombre: nombre, Email: email, Activo: true, Admin: admin });
+  });
+  return res;
+}
+
+function previsualizarImportacion() {
+  const texto = document.getElementById('importUsuariosTexto')?.value || '';
+  const r = analizarTextoUsuarios(texto);
+  const cont = document.getElementById('importUsuariosResumen');
+  const btn = document.getElementById('btnConfirmarImportacion');
+  if (!cont || !btn) return;
+
+  const partes = [];
+  if (r.nuevos.length) partes.push(`<span class="text-green-700 font-semibold">${r.nuevos.length} nuevos</span>` +
+    (r.nuevos.some(u => u.Admin) ? ` (${r.nuevos.filter(u => u.Admin).length} admin)` : ''));
+  if (r.yaExisten) partes.push(`<span class="text-gray-500">${r.yaExisten} ya existían (no se modifican)</span>`);
+  if (r.duplicados) partes.push(`<span class="text-gray-500">${r.duplicados} repetidos</span>`);
+  if (r.invalidos.length) partes.push(`<span class="text-red-600">${r.invalidos.length} con errores</span>`);
+
+  cont.innerHTML = !texto.trim() ? '' :
+    `<div class="bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-1">
+       <div>${partes.join(' · ') || 'No se ha detectado ningún usuario'}</div>
+       ${r.invalidos.length ? `<ul class="text-xs text-red-600 list-disc pl-5">${r.invalidos.slice(0, 5).map(e => `<li>${escaparHTML(e)}</li>`).join('')}${r.invalidos.length > 5 ? '<li>…</li>' : ''}</ul>` : ''}
+       ${r.nuevos.length ? `<div class="text-xs text-gray-500 truncate">Ej.: ${r.nuevos.slice(0, 3).map(u => escaparHTML(u.Nombre + ' <' + u.Email + '>')).join(', ')}</div>` : ''}
+     </div>`;
+  btn.disabled = r.nuevos.length === 0;
+  btn.textContent = r.nuevos.length ? `Añadir ${r.nuevos.length} usuario${r.nuevos.length === 1 ? '' : 's'}` : 'Añadir';
+}
+
+function confirmarImportacionUsuarios() {
+  const r = analizarTextoUsuarios(document.getElementById('importUsuariosTexto')?.value || '');
+  if (!r.nuevos.length) return;
+  const buscador = document.getElementById('buscadorUsuarios');
+  if (buscador) buscador.value = '';
+  AdminState.usuarios.push(...r.nuevos);
+  cerrarImportarUsuarios();
+  renderTablaUsuarios();
+  checkUsuariosChanges();
+  showToast('info', `${r.nuevos.length} usuarios añadidos. Pulsa "Guardar" para confirmar.`);
+}
+
+// 5c. VACIAR: quita a todos los que no son administradores (nunca te deja sin acceso)
+function vaciarUsuarios() {
+  const miEmail = String(window.USER_EMAIL || '').toLowerCase().trim();
+  const seQuedan = u => u.Admin || String(u.Email).toLowerCase().trim() === miEmail;
+  const aQuitar = AdminState.usuarios.filter(u => !seQuedan(u)).length;
+  if (!aQuitar) { showToast('info', 'No hay usuarios que quitar (los administradores se conservan).'); return; }
+
+  mostrarConfirmacion(
+    '¿Vaciar la lista de usuarios?',
+    `Se quitarán <b>${aQuitar}</b> usuarios. Los administradores se conservan.<br>No se aplica hasta que pulses <b>Guardar</b>.`,
+    () => {
+      AdminState.usuarios = AdminState.usuarios.filter(seQuedan);
+      renderTablaUsuarios();
+      checkUsuariosChanges();
+    }
+  );
+}
+
 // 6. Check changes
 function checkUsuariosChanges() {
   const actual = JSON.stringify(AdminState.usuarios);
@@ -2948,28 +2938,24 @@ function guardarCambiosUsuarios() {
       return;
   }
 
-  showLoading();
-  
   const payload = AdminState.usuarios.map(u => ({
       Nombre: u.Nombre.trim(),
       Email: u.Email.trim().toLowerCase(),
       Admin: u.Admin,
       Activo: u.Activo
   }));
+  const enviado = JSON.parse(JSON.stringify(AdminState.usuarios));
+  const previos = AdminState.usuariosOriginales;
 
-  google.script.run
-    .withSuccessHandler(res => {
-      hideLoading();
-      if(res.success) {
-        showToast('success', 'Usuarios actualizados');
-        AdminState.usuariosOriginales = JSON.parse(JSON.stringify(AdminState.usuarios));
-        checkUsuariosChanges();
-      } else {
-        showToast('error', res.error);
-      }
-    })
-    .withFailureHandler(err => { hideLoading(); showToast('error', err); })
-    .saveBatchUsuarios(payload);
+  const lanzado = guardarEnSegundoPlano({
+    clave: 'usuarios', etiqueta: 'usuarios',
+    llamar: (ok, ko) => google.script.run.withSuccessHandler(ok).withFailureHandler(ko).saveBatchUsuarios(payload),
+    alFallo: () => { AdminState.usuariosOriginales = previos; checkUsuariosChanges(); }
+  });
+  if (lanzado) {
+    AdminState.usuariosOriginales = enviado;
+    AdminState.cambiosPendientes = false;
+  }
 }
 
 // 8. Descartar
@@ -3141,7 +3127,7 @@ function editarCurso(index, campo, valor) {
 }
 
 function agregarNuevoCurso() {
-  const searchInput = document.getElementById('searchCursos');
+  const searchInput = document.getElementById('buscadorCursos');
   if(searchInput) { searchInput.value = ''; }
   
   CursosState.cursosEnMemoria.push({ etapa: '', curso: '' });
@@ -3176,7 +3162,8 @@ function eliminarCurso(index) {
 }
 
 function filtrarCursos() {
-  const term = document.getElementById('searchCursos').value.toLowerCase();
+  const input = document.getElementById('buscadorCursos');
+  const term = (input ? input.value : '').toLowerCase();
   const filtrados = CursosState.cursosEnMemoria.filter(c => 
     (c.etapa || '').toLowerCase().includes(term) || 
     (c.curso || '').toLowerCase().includes(term)
@@ -3223,38 +3210,35 @@ function guardarCambiosCursos() {
       return;
   }
 
-  showLoading();
-  
   const payload = {
-    cursos: CursosState.cursosEnMemoria,
+    cursos: JSON.parse(JSON.stringify(CursosState.cursosEnMemoria)),
     modoVisualizacion: CursosState.modoVisualizacion
   };
+  const previos = { cursos: CursosState.cursosOriginales, modo: CursosState.modoOriginal };
 
-  google.script.run
-    .withSuccessHandler(res => {
-  hideLoading();
-  if (res.success) {
-    showToast('success', 'Cursos actualizados correctamente');
-    
-    CursosState.cursosOriginales = JSON.parse(JSON.stringify(CursosState.cursosEnMemoria));
-    CursosState.modoOriginal = CursosState.modoVisualizacion;
-    
-    if(AdminState) AdminState.modoVisualizacion = CursosState.modoVisualizacion;
-    
-    CursosState.cambiosPendientes = false; 
-    SaveBarManager.hide();
-    
-    // ✅ MODIFICADO: Activar flag y recargar
-    adminHaCambiadoDatos = true;
-    if (typeof window.recargarDatosApp === 'function') {
-      window.recargarDatosApp();
+  const lanzado = guardarEnSegundoPlano({
+    clave: 'cursos', etiqueta: 'cursos',
+    llamar: (ok, ko) => google.script.run.withSuccessHandler(ok).withFailureHandler(ko).saveAllCursos(payload),
+    alExito: () => {
+      if (AdminState) {
+        AdminState.modoVisualizacion = payload.modoVisualizacion;
+        AdminState.cursos = JSON.parse(JSON.stringify(payload.cursos)); // evita que al cambiar de pestaña vuelva la lista antigua
+      }
+      if (typeof globalState !== "undefined") globalState.modoVisualizacionCursos = payload.modoVisualizacion;
+      adminHaCambiadoDatos = true;
+      if (typeof window.recargarDatosApp === 'function') window.recargarDatosApp();
+    },
+    alFallo: () => {
+      CursosState.cursosOriginales = previos.cursos;
+      CursosState.modoOriginal = previos.modo;
+      checkCursosChanges();
     }
-  } else {
-    showToast('error', res.error);
+  });
+  if (lanzado) {
+    CursosState.cursosOriginales = JSON.parse(JSON.stringify(payload.cursos));
+    CursosState.modoOriginal = payload.modoVisualizacion;
+    CursosState.cambiosPendientes = false;
   }
-})
-    .withFailureHandler(err => { hideLoading(); showToast('error', err); })
-    .saveAllCursos(payload);
 }
 
 function descartarCambiosCursos() {
@@ -3574,8 +3558,6 @@ function guardarCambiosTramos() {
     return;
   }
 
-  showLoading();
-  
   const datosAEnviar = AdminState.tramos.map(t => ({
       id_tramo: t.id_tramo,
       Nombre_Tramo: t.Nombre_Tramo || t.nombre,
@@ -3585,29 +3567,24 @@ function guardarCambiosTramos() {
       _originalId: t._originalId 
   }));
 
-  google.script.run
-    .withSuccessHandler(function(response) {
-  hideLoading();
-  if (response.success) {
-    showToast('success', 'Tramos guardados correctamente');
-    AdminState.tramosOriginales = JSON.parse(JSON.stringify(AdminState.tramos));
-    AdminState.tramos.forEach(t => delete t._originalId);
-    checkTramosChanges();
-    
-    // ✅ MODIFICADO: Activar flag y recargar
-    adminHaCambiadoDatos = true;
-    if (typeof window.recargarDatosApp === 'function') {
-      window.recargarDatosApp();
-    }
-  } else {
-    showToast('error', response.error);
-  }
-})
-    .withFailureHandler(err => {
-        hideLoading();
-        showToast('error', err);
-    })
-    .saveBatchTramos(datosAEnviar);
+  const previos = AdminState.tramosOriginales;
+  const enviado = JSON.parse(JSON.stringify(AdminState.tramos));
+
+  const lanzado = guardarEnSegundoPlano({
+    clave: 'tramos', etiqueta: 'tramos',
+    llamar: (ok, ko) => google.script.run.withSuccessHandler(ok).withFailureHandler(ko).saveBatchTramos(datosAEnviar),
+    alExito: () => {
+      // El renombrado de IDs ya se aplicó: los tramos enviados dejan de tener "_originalId"
+      const enviados = new Set(datosAEnviar.map(t => t.id_tramo));
+      AdminState.tramos.forEach(t => { if (enviados.has(t.id_tramo)) delete t._originalId; });
+      if (AdminState.tramosOriginales) AdminState.tramosOriginales.forEach(t => delete t._originalId);
+      checkTramosChanges();
+      adminHaCambiadoDatos = true;
+      if (typeof window.recargarDatosApp === 'function') window.recargarDatosApp();
+    },
+    alFallo: () => { AdminState.tramosOriginales = previos; checkTramosChanges(); }
+  });
+  if (lanzado) AdminState.tramosOriginales = enviado;
 }
 
 function descartarCambiosTramos() {
@@ -3693,9 +3670,11 @@ function renderConfiguracion() {
 
   // Renderizar TODOS los campos con defaults
   setCfgVal('cfg_dias_vista_maximo',   configMap['dias_vista_maximo'] || '30');
-  setCfgVal('cfg_minutos_antelacion',  configMap['minutos_antelacion'] || '30');
+  // ?? en vez de ||: un 0 guardado es un valor válido, no "vacío"
+  const cfgNum = (clave, def) => (configMap[clave] === undefined || configMap[clave] === null || configMap[clave] === '') ? def : configMap[clave];
+  setCfgVal('cfg_minutos_antelacion',  cfgNum('minutos_antelacion', '30'));
   setCfgVal('cfg_limite_reservas',     configMap['limite_reservas'] || '5');
-  setCfgVal('cfg_horas_cancelacion',   configMap['horas_cancelacion'] || '2');
+  setCfgVal('cfg_horas_cancelacion',   cfgNum('horas_cancelacion', '0'));
   setCfgVal('cfg_email_admin',         configMap['email_admin'] || '');
   setCfgVal('cfg_nombre_centro',       configMap['nombre_centro'] || 'Sistema de Reservas');
   setCfgVal('cfg_url_logo',            configMap['url_logo'] || '');
@@ -3802,7 +3781,7 @@ function validarConfiguracion() {
   
   const urlLogo = getCfgVal('cfg_url_logo');
   if (urlLogo && !/^https?:\/\/.+/.test(urlLogo)) {
-    errores.push('URL del logo debe empezar con http:// o https://');
+    errores.push('URL del logo debe empezar con http:\/\/ o https:\/\/'); // "\/\/" = "//" (evita que herramientas que quitan comentarios corten el texto)
   }
   // Validar que si es URL de Drive, tenga un formato reconocible
   if (urlLogo && urlLogo.includes('drive.google.com')) {
@@ -3828,8 +3807,16 @@ function guardarConfiguracion() {
     return;
   }
 
-  showLoading();
+  if (guardadosEnCurso.config) { showToast('info', 'Aún se está guardando la configuración...'); return; }
   const newConfig = construirConfigDesdeInputs();
+  const previos = ConfigState.configOriginal;
+  guardadosEnCurso.config = true;
+  SaveBarManager.hide();
+  showToast('loading', 'Guardando configuración...');
+  // Optimista: lo enviado pasa a ser el estado guardado (si falla, se restaura)
+  ConfigState.configOriginal = JSON.parse(JSON.stringify(newConfig));
+  ConfigState.cambiosPendientes = false;
+  ConfigState.previosAlGuardar = previos;
 
   // Verificar si hay URL de logo de Drive para procesar permisos
   const urlLogoConfig = newConfig.find(c => c.clave === 'url_logo');
@@ -3861,25 +3848,23 @@ function guardarConfiguracion() {
 }
 
 function finalizarGuardadoConfiguracion(newConfig) {
+  const fallo = (msg) => {
+    guardadosEnCurso.config = false;
+    showToast('error', 'No se ha guardado la configuración: ' + (msg || 'error desconocido'));
+    ConfigState.configOriginal = ConfigState.previosAlGuardar;
+    checkConfigChanges();
+  };
   google.script.run
     .withSuccessHandler(res => {
-      hideLoading();
       if(res.success) {
+        guardadosEnCurso.config = false;
         showToast('success', 'Configuración guardada');
-
         AdminState.config = newConfig;
-        ConfigState.configOriginal = JSON.parse(JSON.stringify(newConfig));
-        ConfigState.cambiosPendientes = false;
-
-        SaveBarManager.hide();
       } else {
-        showToast('error', res.error);
+        fallo(res.error);
       }
     })
-    .withFailureHandler(err => {
-      hideLoading();
-      showToast('error', err);
-    })
+    .withFailureHandler(err => fallo(err && err.message ? err.message : String(err)))
     .saveBatchConfig(newConfig);
 }
 
@@ -4234,7 +4219,8 @@ function filtrarIconosGrid() {
 
 function buscarEnIconifyAPI(query) {
   // Buscamos solo en MDI (Material Design) para mantener coherencia
-  const url = `https://api.iconify.design/search?query=${query}&limit=100`;
+  // "\/\/" equivale a "//": así ninguna herramienta que elimine comentarios corta la URL
+  const url = `https:\/\/api.iconify.design/search?query=${encodeURIComponent(query)}&limit=100`;
   
   fetch(url)
     .then(res => res.json())
@@ -4295,17 +4281,6 @@ window.renderCategoriasLocales = renderCategoriasLocales;
 /* =========================================================
    7.3. HELPERS
    ========================================================= */
-
-function setVal(id, val) { 
-    const el = document.getElementById(id); 
-    if(el) el.value = val !== undefined ? val : ''; 
-}
-function setCheck(id, val) { 
-    const el = document.getElementById(id); 
-    if(el) el.checked = (String(val).toLowerCase() === 'true' || val === true || val === 1); 
-}
-function getVal(id) { return document.getElementById(id).value; }
-function getCheck(id) { return document.getElementById(id).checked; }
 
 // ✅ FUNCIÓN AUXILIAR: Extraer número de tramo
 function extraerNumeroTramo(idTramo) {
@@ -4413,6 +4388,7 @@ function loadAdminData(isSilent = false) {
    ========================================================= */
 // Se ejecuta 3 segundos después de entrar en la web
 function initAdminPrefetch() {
+  if (!window.IS_ADMIN) return; // Los no-admin no tienen permiso: evitamos una llamada inútil al servidor
   setTimeout(() => {
     // Si aún no están listos y no se están cargando...
     if (!adminDataReady && !adminDataLoading) {
@@ -4592,7 +4568,7 @@ function actualizarPanelPendientesGlobal() {
         <div class="flex items-center justify-between gap-2">
           <div class="flex-1 min-w-0">
             <div class="font-medium text-gray-800 text-xs truncate">${escaparHTML(sol.nombre_usuario)}</div>
-            <div class="text-[10px] text-gray-500">${escaparHTML(sol.nombre_recurso)} · ${diasDisplay}</div>
+            <div class="text-[10px] text-gray-500">${escaparHTML(sol.nombre_recurso)} · ${escaparHTML(diasDisplay)}</div>
           </div>
           <div class="flex gap-1 shrink-0">
             <button onclick="event.stopPropagation(); verDetalleSolicitudDirecto('${sol.id_solicitud}')"
@@ -4698,39 +4674,12 @@ async function ejecutarAprobarTodasPendientes(pendientes) {
 }
 
 /**
- * Carga las solicitudes recurrentes desde el servidor
+ * Refresca las solicitudes recurrentes tras aprobar/rechazar/crear.
+ * La antigua lista (#listaSolicitudesRecurrentes) ya no existe en el panel, así que
+ * antes esta función no hacía nada y los paneles de pendientes quedaban desactualizados.
  */
 async function cargarSolicitudesRecurrentes() {
-  const container = document.getElementById('listaSolicitudesRecurrentes');
-  if (!container) return;
-
-  container.innerHTML = `
-    <div class="text-center py-8">
-      <div class="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
-      <p class="text-gray-500 mt-2">Cargando solicitudes...</p>
-    </div>
-  `;
-
-  try {
-    const result = await new Promise((resolve, reject) => {
-      google.script.run
-        .withSuccessHandler((res) => resolve(res || { success: true, solicitudes: [] }))
-        .withFailureHandler(reject)
-        .getSolicitudesRecurrentes();
-    });
-
-    if (result && result.success) {
-      AdminState.solicitudesRecurrentes = result.solicitudes || [];
-      renderizarSolicitudesRecurrentes();
-      actualizarBadgeRecurrentes();
-    } else {
-      const errorMsg = (result && result.error) ? result.error : 'Error desconocido al cargar';
-      container.innerHTML = `<p class="text-red-500 text-center py-4">${escaparHTML(errorMsg)}</p>`;
-    }
-  } catch (error) {
-    console.error('Error cargando solicitudes recurrentes:', error);
-    container.innerHTML = `<p class="text-red-500 text-center py-4">Error al cargar: ${escaparHTML(error.message || String(error))}</p>`;
-  }
+  return cargarSolicitudesRecurrentesGlobal();
 }
 
 /**
@@ -4750,95 +4699,6 @@ function actualizarBadgeRecurrentes() {
   } else {
     badge.classList.add('hidden');
   }
-}
-
-/**
- * Filtra solicitudes por estado
- */
-function filtrarSolicitudesRecurrentes(estado) {
-  filtroEstadoRecurrente = estado;
-
-  // Actualizar botones de filtro
-  document.querySelectorAll('[data-filtro-recurrente]').forEach(btn => {
-    const btnEstado = btn.dataset.filtroRecurrente;
-    if (btnEstado === estado) {
-      btn.classList.add('bg-blue-600', 'text-white');
-      btn.classList.remove('bg-gray-100', 'text-gray-700');
-    } else {
-      btn.classList.remove('bg-blue-600', 'text-white');
-      btn.classList.add('bg-gray-100', 'text-gray-700');
-    }
-  });
-
-  renderizarSolicitudesRecurrentes();
-}
-
-/**
- * Busca solicitudes por texto
- */
-function buscarSolicitudesRecurrentes(texto) {
-  busquedaRecurrente = texto.toLowerCase().trim();
-  renderizarSolicitudesRecurrentes();
-}
-
-/**
- * Aprueba todas las solicitudes pendientes
- */
-async function aprobarTodasPendientes() {
-  const pendientes = AdminState.solicitudesRecurrentes.filter(s =>
-    (s.estado || '').toLowerCase() === 'pendiente'
-  );
-
-  if (pendientes.length === 0) {
-    showToast('info', 'No hay solicitudes pendientes para aprobar');
-    return;
-  }
-
-  if (!confirm(`¿Aprobar ${pendientes.length} solicitud(es) pendiente(s)?\n\nEsto generará todas las reservas correspondientes.`)) {
-    return;
-  }
-
-  const btn = document.getElementById('btnAprobarTodasPendientes');
-  const textoOriginal = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>Procesando...';
-
-  let aprobadas = 0;
-  let errores = 0;
-  let totalReservas = 0;
-
-  for (const sol of pendientes) {
-    try {
-      const result = await new Promise((resolve, reject) => {
-        google.script.run
-          .withSuccessHandler(resolve)
-          .withFailureHandler(reject)
-          .aprobarSolicitudRecurrente(sol.id_solicitud, 'Aprobación masiva');
-      });
-
-      if (result && result.success) {
-        aprobadas++;
-        totalReservas += result.reservasGeneradas || 0;
-      } else {
-        errores++;
-      }
-    } catch (e) {
-      console.error('Error aprobando:', sol.id_solicitud, e);
-      errores++;
-    }
-  }
-
-  btn.disabled = false;
-  btn.innerHTML = textoOriginal;
-
-  if (errores === 0) {
-    showToast('success', `${aprobadas} solicitud(es) aprobada(s). ${totalReservas} reservas generadas.`);
-  } else {
-    showToast('warning', `Aprobadas: ${aprobadas}, Errores: ${errores}. Revisa los detalles.`);
-  }
-
-  await cargarSolicitudesRecurrentes();
-  adminHaCambiadoDatos = true;
 }
 
 /**
@@ -4878,410 +4738,6 @@ function cancelarRecurrenciaAprobada(idSolicitud) {
       }
     }
   );
-}
-
-/**
- * Abre modal para editar tramos de una recurrencia aprobada
- */
-function abrirModalEditarTramosRecurrencia(idSolicitud) {
-  const solicitud = AdminState.solicitudesRecurrentes.find(s => s.id_solicitud === idSolicitud);
-  if (!solicitud) {
-    showToast('error', 'Solicitud no encontrada');
-    return;
-  }
-
-  // Parsear los tramos actuales
-  const diasSemanaStr = solicitud.dias_semana || '';
-  const tramosActuales = [];
-
-  if (diasSemanaStr.includes(':')) {
-    diasSemanaStr.split(',').forEach(item => {
-      const [dia, tramo] = item.trim().split(':');
-      if (dia && tramo) {
-        tramosActuales.push({ dia: dia.toUpperCase(), tramo: tramo.trim() });
-      }
-    });
-  }
-
-  if (tramosActuales.length === 0) {
-    showToast('warning', 'Esta recurrencia no tiene tramos editables');
-    return;
-  }
-
-  // Nombres de días y tramos
-  const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes' };
-
-  // Generar lista de tramos con checkboxes
-  let tramosHTML = tramosActuales.map((t, idx) => {
-    const nombreDia = diasNombres[t.dia] || t.dia;
-    const tramoInfo = AdminState.tramos?.find(tr => tr.id_tramo === t.tramo);
-    const nombreTramo = tramoInfo?.nombre_tramo || t.tramo;
-    const horaTramo = tramoInfo ? `${tramoInfo.hora_inicio} - ${tramoInfo.hora_fin}` : '';
-
-    return `
-      <label class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors tramo-editable"
-             data-dia="${t.dia}" data-tramo="${t.tramo}">
-        <input type="checkbox" checked class="w-4 h-4 accent-blue-600 checkbox-tramo">
-        <div class="flex-1">
-          <div class="font-medium text-gray-800">${escaparHTML(nombreDia)}</div>
-          <div class="text-sm text-gray-500">${escaparHTML(nombreTramo)} ${horaTramo ? `(${horaTramo})` : ''}</div>
-        </div>
-        <iconify-icon icon="mdi:calendar-clock" class="text-gray-400 text-xl"></iconify-icon>
-      </label>
-    `;
-  }).join('');
-
-  // Crear modal
-  let modal = document.getElementById('modalEditarTramosRecurrencia');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'modalEditarTramosRecurrencia';
-    document.body.appendChild(modal);
-  }
-
-  modal.className = 'fixed inset-0 z-[10000] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4';
-  modal.innerHTML = `
-    <div class="bg-white rounded-xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 fade-in duration-200">
-      <!-- Header -->
-      <div class="bg-blue-50 border-b border-blue-100 px-5 py-4 flex items-center gap-3">
-        <div class="p-2 rounded-lg bg-blue-100 text-blue-600">
-          <iconify-icon icon="mdi:calendar-edit" class="text-2xl"></iconify-icon>
-        </div>
-        <div class="flex-1 min-w-0">
-          <h3 class="text-lg font-bold text-gray-900">Editar Tramos</h3>
-          <p class="text-sm text-gray-600 truncate">${escaparHTML(solicitud.nombre_recurso)} - ${escaparHTML(solicitud.nombre_usuario)}</p>
-        </div>
-        <button onclick="cerrarModalEditarTramosRecurrencia()" class="p-2 hover:bg-blue-100 rounded-lg transition-colors">
-          <iconify-icon icon="mdi:close" class="text-xl text-gray-400"></iconify-icon>
-        </button>
-      </div>
-
-      <!-- Body -->
-      <div class="p-5 overflow-y-auto flex-1">
-        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
-          <div class="flex items-start gap-2">
-            <iconify-icon icon="mdi:information" class="text-amber-600 text-lg mt-0.5 shrink-0"></iconify-icon>
-            <p class="text-sm text-amber-800">
-              Desmarca los tramos que quieras eliminar. Las reservas futuras de esos tramos serán canceladas y el usuario será notificado.
-            </p>
-          </div>
-        </div>
-
-        <div class="space-y-2" id="listaTramosEditar">
-          ${tramosHTML}
-        </div>
-
-        <div id="contadorTramosSeleccionados" class="mt-3 text-center text-sm text-gray-500">
-          ${tramosActuales.length} de ${tramosActuales.length} tramos seleccionados
-        </div>
-      </div>
-
-      <!-- Footer -->
-      <div class="bg-gray-50 border-t border-gray-200 px-5 py-4 flex gap-3">
-        <button onclick="cerrarModalEditarTramosRecurrencia()"
-          class="flex-1 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition-colors">
-          Cancelar
-        </button>
-        <button onclick="guardarEdicionTramosRecurrencia('${idSolicitud}')" id="btnGuardarTramosRecurrencia"
-          class="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors flex items-center justify-center gap-2">
-          <iconify-icon icon="mdi:content-save"></iconify-icon>
-          Guardar cambios
-        </button>
-      </div>
-    </div>
-  `;
-
-  // Añadir listeners para actualizar contador
-  modal.querySelectorAll('.checkbox-tramo').forEach(cb => {
-    cb.addEventListener('change', actualizarContadorTramosEditar);
-  });
-}
-
-function actualizarContadorTramosEditar() {
-  const total = document.querySelectorAll('#listaTramosEditar .checkbox-tramo').length;
-  const seleccionados = document.querySelectorAll('#listaTramosEditar .checkbox-tramo:checked').length;
-  const contador = document.getElementById('contadorTramosSeleccionados');
-  const btnGuardar = document.getElementById('btnGuardarTramosRecurrencia');
-
-  if (contador) {
-    contador.textContent = `${seleccionados} de ${total} tramos seleccionados`;
-
-    if (seleccionados === 0) {
-      contador.classList.add('text-red-500');
-      contador.classList.remove('text-gray-500');
-    } else {
-      contador.classList.remove('text-red-500');
-      contador.classList.add('text-gray-500');
-    }
-  }
-
-  // Deshabilitar botón si no hay tramos seleccionados
-  if (btnGuardar) {
-    btnGuardar.disabled = seleccionados === 0;
-    if (seleccionados === 0) {
-      btnGuardar.classList.add('opacity-50', 'cursor-not-allowed');
-    } else {
-      btnGuardar.classList.remove('opacity-50', 'cursor-not-allowed');
-    }
-  }
-}
-
-function cerrarModalEditarTramosRecurrencia() {
-  const modal = document.getElementById('modalEditarTramosRecurrencia');
-  if (modal) modal.remove();
-}
-
-async function guardarEdicionTramosRecurrencia(idSolicitud) {
-  // Obtener tramos seleccionados (los que quedan)
-  const tramosRestantes = [];
-  document.querySelectorAll('#listaTramosEditar .tramo-editable').forEach(label => {
-    const checkbox = label.querySelector('.checkbox-tramo');
-    if (checkbox && checkbox.checked) {
-      tramosRestantes.push({
-        dia: label.dataset.dia,
-        tramo: label.dataset.tramo
-      });
-    }
-  });
-
-  // Obtener tramos originales
-  const solicitud = AdminState.solicitudesRecurrentes.find(s => s.id_solicitud === idSolicitud);
-  if (!solicitud) {
-    showToast('error', 'Solicitud no encontrada');
-    return;
-  }
-
-  const diasSemanaStr = solicitud.dias_semana || '';
-  const tramosOriginales = [];
-  diasSemanaStr.split(',').forEach(item => {
-    const [dia, tramo] = item.trim().split(':');
-    if (dia && tramo) {
-      tramosOriginales.push({ dia: dia.toUpperCase(), tramo: tramo.trim() });
-    }
-  });
-
-  // Verificar si hay cambios
-  if (tramosRestantes.length === tramosOriginales.length) {
-    showToast('info', 'No hay cambios para guardar');
-    cerrarModalEditarTramosRecurrencia();
-    return;
-  }
-
-  // Calcular tramos eliminados
-  const tramosEliminados = tramosOriginales.filter(orig =>
-    !tramosRestantes.some(rest => rest.dia === orig.dia && rest.tramo === orig.tramo)
-  );
-
-  // Confirmar
-  const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes' };
-  const eliminadosTexto = tramosEliminados.map(t => {
-    const tramoInfo = AdminState.tramos?.find(tr => tr.id_tramo === t.tramo);
-    return `${diasNombres[t.dia] || t.dia} (${tramoInfo?.nombre_tramo || t.tramo})`;
-  }).join(', ');
-
-  cerrarModalEditarTramosRecurrencia();
-
-  mostrarConfirmacion(
-    '¿Confirmar cambios?',
-    `Se eliminarán los siguientes tramos: <strong>${eliminadosTexto}</strong>.<br><br>Las reservas futuras de estos tramos serán canceladas y el usuario recibirá una notificación.`,
-    async () => {
-      showLoading();
-
-      try {
-        const result = await new Promise((resolve, reject) => {
-          google.script.run
-            .withSuccessHandler(resolve)
-            .withFailureHandler(reject)
-            .editarTramosRecurrencia(idSolicitud, tramosRestantes, tramosEliminados);
-        });
-
-        hideLoading();
-
-        if (result && result.success) {
-          showToast('success', result.message || 'Tramos actualizados correctamente');
-          await cargarSolicitudesRecurrentes();
-          adminHaCambiadoDatos = true;
-        } else {
-          showToast('error', result?.error || 'Error al actualizar tramos');
-        }
-      } catch (error) {
-        hideLoading();
-        console.error('Error editando tramos:', error);
-        showToast('error', 'Error: ' + (error.message || error));
-      }
-    }
-  );
-}
-
-/**
- * Renderiza las solicitudes recurrentes según el filtro activo
- */
-function renderizarSolicitudesRecurrentes() {
-  const container = document.getElementById('listaSolicitudesRecurrentes');
-  if (!container) return;
-
-  let solicitudes = [...AdminState.solicitudesRecurrentes];
-
-  // Aplicar filtro de estado
-  if (filtroEstadoRecurrente !== 'todas') {
-    solicitudes = solicitudes.filter(s =>
-      (s.estado || '').toLowerCase() === filtroEstadoRecurrente.toLowerCase()
-    );
-  }
-
-  // Aplicar filtro de búsqueda
-  if (busquedaRecurrente) {
-    solicitudes = solicitudes.filter(s => {
-      const texto = [
-        s.nombre_recurso,
-        s.nombre_usuario,
-        s.email_usuario,
-        s.motivo,
-        s.nombre_tramo
-      ].filter(Boolean).join(' ').toLowerCase();
-      return texto.includes(busquedaRecurrente);
-    });
-  }
-
-  // Actualizar visibilidad del botón "Aprobar todas"
-  const btnAprobarTodas = document.getElementById('btnAprobarTodasPendientes');
-  if (btnAprobarTodas) {
-    const pendientesCount = AdminState.solicitudesRecurrentes.filter(s =>
-      (s.estado || '').toLowerCase() === 'pendiente'
-    ).length;
-    btnAprobarTodas.style.display = pendientesCount > 0 ? 'flex' : 'none';
-  }
-
-  if (solicitudes.length === 0) {
-    const mensajes = {
-      'pendiente': 'No hay solicitudes pendientes de revisión',
-      'aprobada': 'No hay solicitudes aprobadas',
-      'rechazada': 'No hay solicitudes rechazadas',
-      'todas': 'No hay solicitudes registradas'
-    };
-    container.innerHTML = `
-      <div class="text-center py-8 text-gray-500">
-        <iconify-icon icon="mdi:calendar-check" class="text-4xl mb-2"></iconify-icon>
-        <p>${busquedaRecurrente ? 'No se encontraron resultados para la búsqueda' : (mensajes[filtroEstadoRecurrente] || 'No hay solicitudes')}</p>
-      </div>
-    `;
-    return;
-  }
-
-  // Ordenar por fecha (más recientes primero)
-  solicitudes.sort((a, b) => new Date(b.fecha_solicitud) - new Date(a.fecha_solicitud));
-
-  // Función para obtener el icono del recurso
-  const getIconoRecurso = (idRecurso) => {
-    const recurso = AdminState.recursos?.find(r => r.id_recurso === idRecurso);
-    return recurso?.icono || 'mdi:cube-outline';
-  };
-
-  container.innerHTML = solicitudes.map(sol => {
-    const estadoConfig = {
-      'pendiente': { bg: 'bg-amber-100', text: 'text-amber-800', icon: 'mdi:clock-outline' },
-      'aprobada': { bg: 'bg-green-100', text: 'text-green-800', icon: 'mdi:check-circle' },
-      'rechazada': { bg: 'bg-red-100', text: 'text-red-800', icon: 'mdi:close-circle' }
-    };
-    const config = estadoConfig[(sol.estado || '').toLowerCase()] || { bg: 'bg-gray-100', text: 'text-gray-800', icon: 'mdi:help-circle' };
-
-    // Parsear días y tramos (soporta formato nuevo "V:T001,L:T002" y antiguo "L,M,X")
-    const diasSemanaStr = sol.dias_semana || '';
-    let diasUnicos = [];
-    let tramosUnicos = [];
-
-    if (diasSemanaStr.includes(':')) {
-      // Formato nuevo: "V:T001,V:T002,L:T001"
-      const items = diasSemanaStr.split(',');
-      const diasSet = new Set();
-      const tramosSet = new Set();
-      items.forEach(item => {
-        const [dia, tramo] = item.trim().split(':');
-        if (dia) diasSet.add(dia.toUpperCase());
-        if (tramo) tramosSet.add(tramo);
-      });
-      diasUnicos = Array.from(diasSet);
-      tramosUnicos = Array.from(tramosSet);
-    } else {
-      // Formato antiguo: "L,M,X"
-      diasUnicos = diasSemanaStr.split(',').map(d => d.trim().toUpperCase()).filter(Boolean);
-      if (sol.id_tramo) tramosUnicos = [sol.id_tramo];
-    }
-
-    const diasNombres = { 'L': 'L', 'M': 'M', 'X': 'X', 'J': 'J', 'V': 'V', 'S': 'S', 'D': 'D' };
-    const diasFormateados = diasUnicos.map(d => diasNombres[d] || d).join('·');
-
-    // Buscar nombres de tramos
-    const tramosNombres = tramosUnicos.map(idTramo => {
-      const tramo = AdminState.tramos?.find(t => t.id_tramo === idTramo);
-      return tramo?.nombre_tramo || idTramo;
-    });
-    const tramosDisplay = tramosNombres.length > 2
-      ? `${tramosNombres.slice(0, 2).join(', ')} +${tramosNombres.length - 2}`
-      : tramosNombres.join(', ') || sol.nombre_tramo || '-';
-
-    const fechaInicio = sol.fecha_inicio ? new Date(sol.fecha_inicio).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }) : '-';
-    const fechaFin = sol.fecha_fin ? new Date(sol.fecha_fin).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }) : '-';
-
-    const icono = getIconoRecurso(sol.id_recurso);
-    const esPendiente = (sol.estado || '').toLowerCase() === 'pendiente';
-
-    return `
-      <div class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow cursor-pointer group"
-           onclick="verDetalleSolicitud('${sol.id_solicitud}')">
-        <div class="flex items-center gap-3">
-          <!-- Icono del recurso -->
-          <div class="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0 group-hover:bg-blue-100 transition-colors">
-            <iconify-icon icon="${escaparHTML(icono)}" class="text-xl text-blue-600"></iconify-icon>
-          </div>
-
-          <!-- Info principal -->
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="font-semibold text-gray-900 truncate">${escaparHTML(sol.nombre_recurso)}</span>
-              <span class="px-1.5 py-0.5 text-xs font-medium rounded ${config.bg} ${config.text} flex items-center gap-0.5">
-                <iconify-icon icon="${config.icon}" class="text-xs"></iconify-icon>
-                ${escaparHTML(sol.estado)}
-              </span>
-            </div>
-            <div class="text-xs text-gray-500 flex items-center gap-2 mt-0.5 flex-wrap">
-              <span class="flex items-center gap-1">
-                <iconify-icon icon="mdi:account" class="text-sm"></iconify-icon>
-                ${escaparHTML(sol.nombre_usuario)}
-              </span>
-              <span class="text-gray-300">|</span>
-              <span class="font-medium">${escaparHTML(diasFormateados)}</span>
-              <span class="text-gray-300">|</span>
-              <span title="${escaparHTML(tramosNombres.join(', '))}">${escaparHTML(tramosDisplay)}</span>
-              <span class="text-gray-300">|</span>
-              <span>${fechaInicio} → ${fechaFin}</span>
-            </div>
-          </div>
-
-          <!-- Botones -->
-          <div class="flex items-center gap-1 flex-shrink-0" onclick="event.stopPropagation()">
-            ${esPendiente ? `
-              <button onclick="abrirModalGestionarSolicitud('${sol.id_solicitud}')"
-                class="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
-                Gestionar
-              </button>
-            ` : ''}
-            ${(sol.estado || '').toLowerCase() === 'aprobada' ? `
-              <button onclick="abrirModalEditarTramosRecurrencia('${sol.id_solicitud}')"
-                class="px-3 py-1.5 text-xs font-medium text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-200 rounded-lg transition-colors"
-                title="Editar tramos de esta recurrencia">
-                Editar
-              </button>
-              <button onclick="cancelarRecurrenciaAprobada('${sol.id_solicitud}')"
-                class="px-3 py-1.5 text-xs font-medium text-red-600 hover:text-white hover:bg-red-600 border border-red-200 rounded-lg transition-colors">
-                Cancelar
-              </button>
-            ` : ''}
-          </div>
-        </div>
-      </div>
-    `;
-  }).join('');
 }
 
 /**
@@ -5456,96 +4912,6 @@ async function rechazarSolicitudRecurrente() {
     btnRechazar.disabled = false;
     btnRechazar.innerHTML = textoOriginal;
   }
-}
-
-/**
- * Muestra detalle de una solicitud (histórico)
- */
-function verDetalleSolicitud(idSolicitud) {
-  const solicitud = AdminState.solicitudesRecurrentes.find(s => s.id_solicitud === idSolicitud);
-  if (!solicitud) {
-    showToast('error', 'Solicitud no encontrada');
-    return;
-  }
-
-  // Parsear días y tramos (soporta formato nuevo "V:T001,L:T002" y antiguo "L,M,X")
-  const diasSemanaStr = solicitud.dias_semana || '';
-  const diasNombres = { 'L': 'Lunes', 'M': 'Martes', 'X': 'Miércoles', 'J': 'Jueves', 'V': 'Viernes', 'S': 'Sábado', 'D': 'Domingo' };
-  let diasFormateados = '';
-  let tramosFormateados = '';
-
-  if (diasSemanaStr.includes(':')) {
-    // Formato nuevo: "V:T001,V:T002,L:T001"
-    const items = diasSemanaStr.split(',');
-    const diasSet = new Set();
-    const tramosSet = new Set();
-    items.forEach(item => {
-      const [dia, tramo] = item.trim().split(':');
-      if (dia) diasSet.add(dia.toUpperCase());
-      if (tramo) tramosSet.add(tramo);
-    });
-    diasFormateados = Array.from(diasSet).map(d => diasNombres[d] || d).join(', ');
-
-    // Buscar nombres de tramos
-    const tramosConNombre = Array.from(tramosSet).map(idTramo => {
-      const tramo = AdminState.tramos?.find(t => t.id_tramo === idTramo);
-      return tramo?.nombre_tramo || idTramo;
-    });
-    tramosFormateados = tramosConNombre.join(', ');
-  } else {
-    // Formato antiguo: "L,M,X"
-    diasFormateados = diasSemanaStr.split(',').map(d => diasNombres[d.trim().toUpperCase()] || d).join(', ');
-    tramosFormateados = solicitud.nombre_tramo || '-';
-  }
-
-  const estadoClasses = {
-    'pendiente': 'text-amber-600',
-    'aprobada': 'text-green-600',
-    'rechazada': 'text-red-600'
-  };
-  const estadoClass = estadoClasses[(solicitud.estado || '').toLowerCase()] || 'text-gray-600';
-
-  let html = `
-    <div class="space-y-3">
-      <div class="flex items-center gap-2">
-        <span class="font-bold text-lg">${escaparHTML(solicitud.nombre_recurso)}</span>
-        <span class="font-semibold ${estadoClass}">(${escaparHTML(solicitud.estado)})</span>
-      </div>
-      <hr>
-      <p><strong>ID:</strong> ${escaparHTML(solicitud.id_solicitud)}</p>
-      <p><strong>Solicitante:</strong> ${escaparHTML(solicitud.nombre_usuario)} (${escaparHTML(solicitud.email_usuario)})</p>
-      <p><strong>Días:</strong> ${escaparHTML(diasFormateados)}</p>
-      <p><strong>Tramos:</strong> ${escaparHTML(tramosFormateados)}</p>
-      <p><strong>Período:</strong> ${new Date(solicitud.fecha_inicio).toLocaleDateString('es-ES')} → ${new Date(solicitud.fecha_fin).toLocaleDateString('es-ES')}</p>
-      <p><strong>Motivo:</strong> ${escaparHTML(solicitud.motivo || 'No especificado')}</p>
-      <p><strong>Fecha solicitud:</strong> ${new Date(solicitud.fecha_solicitud).toLocaleString('es-ES')}</p>
-      ${solicitud.fecha_resolucion ? `<p><strong>Fecha resolución:</strong> ${new Date(solicitud.fecha_resolucion).toLocaleString('es-ES')}</p>` : ''}
-      ${solicitud.admin_resolutor ? `<p><strong>Gestionado por:</strong> ${escaparHTML(solicitud.admin_resolutor)}</p>` : ''}
-      ${solicitud.notas_admin ? `<p><strong>Notas admin:</strong> ${escaparHTML(solicitud.notas_admin)}</p>` : ''}
-    </div>
-  `;
-
-  // Usar un modal simple o alert
-  const modal = document.createElement('div');
-  modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4';
-  modal.innerHTML = `
-    <div class="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 max-h-[80vh] overflow-y-auto">
-      <div class="flex justify-between items-center mb-4">
-        <h3 class="text-lg font-bold text-gray-900">Detalle de Solicitud</h3>
-        <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-gray-600">
-          <iconify-icon icon="mdi:close" class="text-xl"></iconify-icon>
-        </button>
-      </div>
-      ${html}
-      <div class="mt-6 text-right">
-        <button onclick="this.closest('.fixed').remove()"
-          class="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg">
-          Cerrar
-        </button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
 }
 
 /**

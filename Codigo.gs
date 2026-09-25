@@ -1,11 +1,14 @@
 /**
  * SISTEMA DE RESERVAS - CÓDIGO PRINCIPAL
- * Versión 1.3 - Modular y Optimizado con Panel Admin Integrado
+ * Versión: ver APP_VERSION (historial en CHANGELOG.md)
  * 
  * Este archivo contiene las funciones principales del sistema.
  * Las funciones de administración están en AdminFunctions.gs
- * Las funciones de setup están en SetupFunctions.gs
+ * Las funciones de setup están en Setup.gs
  */
+
+// Versión de la aplicación (se muestra al pie de la página)
+const APP_VERSION = '1.5.0';
 
 function getDB() {
   return SpreadsheetApp.getActiveSpreadsheet();
@@ -27,13 +30,11 @@ const SHEETS = {
 };
 
 const CACHE_KEYS = {
-  STATIC_DATA: 'STATIC_DATA_V5',
   DISPONIBILIDAD: 'DISP_',
   CONFIGURACION: "configuracion_v1"
 };
 
 const CACHE_TIMES = {
-  STATIC: 3600,
   DISPONIBILIDAD: 1800
 };
 
@@ -71,7 +72,7 @@ function onOpen() {
 }
 
 function mostrarInstruccionesSidebar() {
-  const html = HtmlService.createHtmlOutputFromFile('Sidebar')
+  const html = HtmlService.createTemplateFromFile('Sidebar').evaluate()
     .setTitle('🚀 Guía de Instalación')
     .setWidth(420);
 
@@ -280,6 +281,11 @@ function checkUserAuthorization(emailUser) {
       return { isAuthorized: false, isAdmin: false, error: "Falta hoja Usuarios" };
     }
 
+    // Sin email de sesión no se puede identificar a nadie (evita que una fila vacía "coincida")
+    if (!emailUser || !String(emailUser).trim()) {
+      return { isAuthorized: false, isAdmin: false, error: "EMAIL_NO_DISPONIBLE" };
+    }
+
     const data = sheet.getDataRange().getValues();
     if (data.length < 2) return { isAuthorized: false, isAdmin: false }; // Hoja vacía
 
@@ -317,7 +323,8 @@ function checkUserAuthorization(emailUser) {
         // ¡TE ENCONTRÉ!
 
         // Verificar si estás activo (si no existe columna Activo, asumimos que sí)
-        const isActive = colActivo === -1 ? true : (String(row[colActivo]).toLowerCase() === 'true' || String(row[colActivo]).toLowerCase() === 'si' || row[colActivo] === true);
+        const valActivo = String(row[colActivo]).toLowerCase().trim().replace('í', 'i');
+        const isActive = colActivo === -1 ? true : (row[colActivo] === true || valActivo === 'true' || valActivo === 'si');
 
         if (!isActive) {
           return { isAuthorized: false, isAdmin: false, error: "Usuario inactivo" };
@@ -327,7 +334,7 @@ function checkUserAuthorization(emailUser) {
         // Aceptamos: TRUE, true, "Si", "Yes", "Admin"
         let isAdmin = false;
         if (colAdmin !== -1) {
-          const valAdmin = String(row[colAdmin]).toLowerCase();
+          const valAdmin = String(row[colAdmin]).toLowerCase().trim().replace('í', 'i');
           isAdmin = (valAdmin === 'true' || valAdmin === 'si' || valAdmin === 'yes' || valAdmin === 'admin');
         }
 
@@ -360,6 +367,124 @@ const CACHE_KEY_STATIC = "STATIC_DATA_V6_FULL"; // Clave única
 const CACHE_TIME = 21600; // 6 Horas
 
 /**
+ * Datos estáticos (recursos, tramos, usuarios, cursos, config) desde caché o desde las hojas.
+ * Separado de getStaticData para que reservar / purgar caché no relean también las reservas.
+ */
+function getDatosEstaticos_() {
+  // 2. CACHÉ DE DATOS ESTÁTICOS
+  const cache = CacheService.getScriptCache();
+  const cachedJSON = cache.get(CACHE_KEY_STATIC);
+
+  let recursos, tramos, usuariosMap, cursos, modoVisualizacionCursos, configuracion;  // ✅ MODIFICADO
+
+  if (cachedJSON) {
+    Logger.log("✅ Datos estáticos desde CACHÉ V6");
+    const staticData = JSON.parse(cachedJSON);
+    recursos = staticData.recursos;
+    tramos = staticData.tramos;
+    usuariosMap = staticData.usuariosMap;
+    cursos = staticData.cursos;
+    modoVisualizacionCursos = staticData.modoVisualizacionCursos;
+    configuracion = staticData.configuracion || {};  // ✅ AÑADIDO
+  } else {
+    Logger.log("🔄 Generando datos estáticos desde Excel...");
+    const ss = getDB();
+
+    // RECURSOS (solo activos)
+    const sheetRecursos = ss.getSheetByName(SHEETS.RECURSOS);
+    recursos = sheetToObjects(sheetRecursos)
+      .filter(r => r.estado && r.estado.toLowerCase() === 'activo');
+
+    // TRAMOS (con normalización de campos)
+    const sheetTramos = ss.getSheetByName(SHEETS.TRAMOS);
+    const tramosRaw = sheetToObjects(sheetTramos);
+
+    tramos = tramosRaw.map(t => {
+      const nombreCampo = t.nombre_tramo || t.nombretramo || t['nombre tramo'] ||
+        t.nombre || t.tramo || Object.values(t)[1] || 'Tramo sin nombre';
+
+      const horainicioCampo = t.hora_inicio || t.horainicio || t['hora inicio'] ||
+        t.hora_ini || t.inicio || '';
+
+      const horafinCampo = t.hora_fin || t.horafin || t['hora fin'] ||
+        t.hora_final || t.fin || '';
+
+      return {
+        id_tramo: t.id_tramo || t.idtramo || t.id || Object.values(t)[0],
+        nombre_tramo: nombreCampo,
+        hora_inicio: horainicioCampo,
+        hora_fin: horafinCampo,
+        activo: t.activo !== undefined ? t.activo : true
+      };
+    });
+
+    // USUARIOS → MAPA (email → nombre)
+    const sheetUsuarios = ss.getSheetByName(SHEETS.USUARIOS);
+    const allUsuarios = sheetToObjects(sheetUsuarios);
+    usuariosMap = {};
+    allUsuarios.forEach(u => {
+      if (u.email_usuario) {
+        usuariosMap[u.email_usuario.toLowerCase()] = u.nombre_completo || u.email_usuario;
+      }
+    });
+
+    // CURSOS + MODO VISUALIZACIÓN
+    const sheetCursos = ss.getSheetByName(SHEETS.CURSOS);
+    let cursosData = { cursos: [], modoVisualizacion: 'botones' };
+
+    if (sheetCursos) {
+      const modoViz = sheetCursos.getRange('D1').getValue();
+      cursosData.modoVisualizacion = modoViz && modoViz.toString().toLowerCase() === 'listado' ? 'listado' : 'botones';
+
+      const allCursos = sheetToObjects(sheetCursos);
+      cursosData.cursos = allCursos
+        .map(c => ({ etapa: c.etapa || '', curso: c.curso || '' }))
+        .filter(c => c.etapa && c.curso);
+    }
+
+    cursos = cursosData.cursos;
+    modoVisualizacionCursos = cursosData.modoVisualizacion;
+
+    // ✅ CONFIGURACIÓN (NUEVO)
+    Logger.log("📋 Cargando configuración del sistema...");
+    const sheetConfig = ss.getSheetByName(SHEETS.CONFIG);
+    configuracion = {};
+    
+    if (sheetConfig) {
+      const configData = sheetToObjects(sheetConfig);
+      configData.forEach(item => {
+        const clave = item.clave;
+        let valor = item.valor;
+        
+        if (!clave) return;
+        
+        configuracion[clave] = parsearValorConfig_(valor);
+      });
+      Logger.log(`⚙️ Configuración cargada: ${Object.keys(configuracion).length} parámetros`);
+    }
+
+    // GUARDAR EN CACHÉ V6
+    const dataToCache = {
+      recursos,
+      tramos,
+      usuariosMap,
+      cursos,
+      modoVisualizacionCursos,
+      configuracion  // ✅ AÑADIDO
+    };
+
+    try {
+      cache.put(CACHE_KEY_STATIC, JSON.stringify(dataToCache), CACHE_TIME);
+      Logger.log(`💾 Cache V6 guardado: ${recursos.length} recursos, ${tramos.length} tramos`);
+    } catch (e) {
+      Logger.log("⚠️ Error guardando caché: " + e.message);
+    }
+  }
+
+  return { recursos, tramos, usuariosMap, cursos, modoVisualizacionCursos, configuracion };
+}
+
+/**
  * FUNCIÓN ÚNICA - TODO EN UNO
  * Devuelve: Datos estáticos + Reservas + Info del usuario
  */
@@ -370,131 +495,23 @@ function getStaticData() {
     // 1. AUTORIZACIÓN (necesaria para el frontend)
     const email = Session.getActiveUser().getEmail();
     const auth = checkUserAuthorization(email);
+    // Los no registrados (pantalla de registro) no deben poder leer reservas ni emails de otros
+    if (!auth || !auth.isAuthorized) {
+      throw new Error("No tienes acceso al sistema.");
+    }
     const isAdmin = auth ? auth.isAdmin : false;
     const userName = auth ? auth.userName : email;
 
-    // 2. CACHÉ DE DATOS ESTÁTICOS
-    const cache = CacheService.getScriptCache();
-    const cachedJSON = cache.get(CACHE_KEY_STATIC);
-
-    let recursos, tramos, usuariosMap, cursos, modoVisualizacionCursos, configuracion;  // ✅ MODIFICADO
-
-    if (cachedJSON) {
-      Logger.log("✅ Datos estáticos desde CACHÉ V6");
-      const staticData = JSON.parse(cachedJSON);
-      recursos = staticData.recursos;
-      tramos = staticData.tramos;
-      usuariosMap = staticData.usuariosMap;
-      cursos = staticData.cursos;
-      modoVisualizacionCursos = staticData.modoVisualizacionCursos;
-      configuracion = staticData.configuracion || {};  // ✅ AÑADIDO
-    } else {
-      Logger.log("🔄 Generando datos estáticos desde Excel...");
-      const ss = getDB();
-
-      // RECURSOS (solo activos)
-      const sheetRecursos = ss.getSheetByName(SHEETS.RECURSOS);
-      recursos = sheetToObjects(sheetRecursos)
-        .filter(r => r.estado && r.estado.toLowerCase() === 'activo');
-
-      // TRAMOS (con normalización de campos)
-      const sheetTramos = ss.getSheetByName(SHEETS.TRAMOS);
-      const tramosRaw = sheetToObjects(sheetTramos);
-
-      tramos = tramosRaw.map(t => {
-        const nombreCampo = t.nombre_tramo || t.nombretramo || t['nombre tramo'] ||
-          t.nombre || t.tramo || Object.values(t)[1] || 'Tramo sin nombre';
-
-        const horainicioCampo = t.hora_inicio || t.horainicio || t['hora inicio'] ||
-          t.hora_ini || t.inicio || '';
-
-        const horafinCampo = t.hora_fin || t.horafin || t['hora fin'] ||
-          t.hora_final || t.fin || '';
-
-        return {
-          id_tramo: t.id_tramo || t.idtramo || t.id || Object.values(t)[0],
-          nombre_tramo: nombreCampo,
-          hora_inicio: horainicioCampo,
-          hora_fin: horafinCampo,
-          activo: t.activo !== undefined ? t.activo : true
-        };
-      });
-
-      // USUARIOS → MAPA (email → nombre)
-      const sheetUsuarios = ss.getSheetByName(SHEETS.USUARIOS);
-      const allUsuarios = sheetToObjects(sheetUsuarios);
-      usuariosMap = {};
-      allUsuarios.forEach(u => {
-        if (u.email_usuario) {
-          usuariosMap[u.email_usuario.toLowerCase()] = u.nombre_completo || u.email_usuario;
-        }
-      });
-
-      // CURSOS + MODO VISUALIZACIÓN
-      const sheetCursos = ss.getSheetByName(SHEETS.CURSOS);
-      let cursosData = { cursos: [], modoVisualizacion: 'botones' };
-
-      if (sheetCursos) {
-        const modoViz = sheetCursos.getRange('D1').getValue();
-        cursosData.modoVisualizacion = modoViz && modoViz.toString().toLowerCase() === 'listado' ? 'listado' : 'botones';
-
-        const allCursos = sheetToObjects(sheetCursos);
-        cursosData.cursos = allCursos
-          .map(c => ({ etapa: c.etapa || '', curso: c.curso || '' }))
-          .filter(c => c.etapa && c.curso);
-      }
-
-      cursos = cursosData.cursos;
-      modoVisualizacionCursos = cursosData.modoVisualizacion;
-
-      // ✅ CONFIGURACIÓN (NUEVO)
-      Logger.log("📋 Cargando configuración del sistema...");
-      const sheetConfig = ss.getSheetByName(SHEETS.CONFIG);
-      configuracion = {};
-      
-      if (sheetConfig) {
-        const configData = sheetToObjects(sheetConfig);
-        configData.forEach(item => {
-          const clave = item.clave;
-          let valor = item.valor;
-          
-          if (!clave) return;
-          
-          // Convertir tipos de datos
-          if (valor === 'TRUE' || valor === 'FALSE') {
-            valor = (valor === 'TRUE');
-          } else if (!isNaN(valor) && valor !== '') {
-            valor = Number(valor);
-          }
-          
-          configuracion[clave] = valor;
-        });
-        Logger.log(`⚙️ Configuración cargada: ${Object.keys(configuracion).length} parámetros`);
-      }
-
-      // GUARDAR EN CACHÉ V6
-      const dataToCache = {
-        recursos,
-        tramos,
-        usuariosMap,
-        cursos,
-        modoVisualizacionCursos,
-        configuracion  // ✅ AÑADIDO
-      };
-
-      try {
-        cache.put(CACHE_KEY_STATIC, JSON.stringify(dataToCache), CACHE_TIME);
-        Logger.log(`💾 Cache V6 guardado: ${recursos.length} recursos, ${tramos.length} tramos`);
-      } catch (e) {
-        Logger.log("⚠️ Error guardando caché: " + e.message);
-      }
-    }
+    // 2. DATOS ESTÁTICOS (caché)
+    const { recursos, tramos, usuariosMap, cursos, modoVisualizacionCursos, configuracion } = getDatosEstaticos_();
 
     // 3. RESERVAS FRESCAS (SIEMPRE desde Excel)
-    const reservas = getReservasFrescas();
+    // (antes se leía la hoja Reservas dos veces: una para todas y otra para las mías)
+    const objsReservas = leerReservasObjetos_();
+    const reservas = getActiveReservations_(objsReservas);
 
     // 4. MIS RESERVAS ACTIVAS
-    const misReservasActivas = getMyActiveReservationsData(email);
+    const misReservasActivas = getMyActiveReservationsData_(email, objsReservas);
 
     // 4b. MOTIVOS DE RECURRENCIAS (para mostrar en "Mis Reservas")
     const misRecurrencias = {};
@@ -552,16 +569,27 @@ function getStaticData() {
    GESTIÓN DE RESERVAS
    ============================================ */
 
-function getActiveReservations() {
+// Añade filas al final de la hoja en una sola escritura.
+// A diferencia de getRange(getLastRow()+1, ...), amplía la hoja si ya no quedan filas libres
+// (appendRow lo hacía solo; getRange fuera de rango lanza error).
+function anadirFilas_(sheet, filas) {
+  if (!filas || filas.length === 0) return;
+  const inicio = sheet.getLastRow() + 1;
+  const faltan = inicio + filas.length - 1 - sheet.getMaxRows();
+  if (faltan > 0) sheet.insertRowsAfter(sheet.getMaxRows(), faltan);
+  sheet.getRange(inicio, 1, filas.length, filas[0].length).setValues(filas);
+}
+
+// Lee la hoja Reservas como objetos (una sola lectura reutilizable dentro de la misma petición)
+function leerReservasObjetos_() {
   const sheetReservas = getDB().getSheetByName(SHEETS.RESERVAS);
+  if (!sheetReservas || sheetReservas.getLastRow() < 2) return [];
+  return sheetToObjects(sheetReservas);
+}
 
-  // 🛑 FIX: Si la hoja tiene menos de 2 filas (solo cabecera o vacía), devolvemos lista vacía
-  if (sheetReservas.getLastRow() < 2) {
-    return [];
-  }
-
-  // Ahora ya es seguro ejecutar esto:
-  const todasLasReservas = sheetToObjects(sheetReservas);
+// todasLasReservas (opcional): resultado de leerReservasObjetos_() para no volver a leer la hoja
+function getActiveReservations_(todasLasReservas) {
+  if (!todasLasReservas) todasLasReservas = leerReservasObjetos_();
 
   const hoy = new Date();
   hoy.setHours(0, 0, 0, 0);
@@ -597,10 +625,9 @@ function getActiveReservations() {
 /* ============================================
    OBTENER RESERVAS ACTIVAS DEL USUARIO (PARA CARGA INICIAL)
    ============================================ */
-function getMyActiveReservationsData(userEmail) {
+function getMyActiveReservationsData_(userEmail, todasLasReservas) {
   try {
-    const sheetReservas = getDB().getSheetByName(SHEETS.RESERVAS);
-    const allReservas = sheetToObjects(sheetReservas);
+    const allReservas = todasLasReservas || leerReservasObjetos_();
 
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
@@ -635,7 +662,18 @@ function getMyActiveReservationsData(userEmail) {
 /* ===========================================================================
    1. CONTROLADOR DE ACCESO (doGet)
    =========================================================================== */
+// Favicon de la app (calendario, mismo estilo que la cabecera). Se sirve desde el repositorio público vía jsDelivr.
+// Un centro puede cambiarlo por su propia URL de imagen .png.
+const FAVICON_URL = 'https://cdn.jsdelivr.net/gh/maestroseb/reservasrecursosysalas@main/favicon.png';
+
 function doGet(e) {
+  const salida = doGetInterno_(e);
+  // Todas las páginas (app, registro, instalación, cancelaciones...) con el mismo favicon
+  try { if (salida && salida.setFaviconUrl) salida.setFaviconUrl(FAVICON_URL); } catch (err) { }
+  return salida;
+}
+
+function doGetInterno_(e) {
 
   // --- FASE 0: DETECCIÓN DE INSTALACIÓN ---
   // Esta comprobación debe ir PRIMERO. Si no está instalado, no permitimos nada más.
@@ -660,7 +698,7 @@ function doGet(e) {
   if (e.parameter.action === "cancel" && e.parameter.id) {
     try {
       const reservaId = e.parameter.id;
-      return handleEmailCancelation(reservaId);
+      return handleEmailCancelation(reservaId, e.parameter.t);
     } catch (error) {
       Logger.log(error);
       return HtmlService.createHtmlOutput(
@@ -693,6 +731,16 @@ function doGet(e) {
   const authResult = checkUserAuthorization(userEmail);
   Logger.log("¿Está autorizado?: " + authResult.isAuthorized);
 
+  // 🛑 Google no nos da el email del usuario -> registrarse no serviría de nada
+  // (ocurre si la app se implementó con una cuenta de otro dominio, p.ej. @gmail.com,
+  //  o si el usuario entra con una cuenta distinta a la del centro)
+  if (!userEmail) {
+    return HtmlService.createHtmlOutput(buildHtmlEmailNoDisponible_())
+      .setTitle("No se pudo identificar tu cuenta")
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+
   // 🛑 Si NO está autorizado -> Pantalla de Registro
   if (!authResult.isAuthorized) {
     Logger.log(">> Usuario no autorizado. Mostrando Registro.");
@@ -717,6 +765,7 @@ function doGet(e) {
   template.userEmailForHtml = userEmail;
   template.appName = appConfig.appName || "Sistema de Reservas";
   template.logoUrl = appConfig.logoUrl || "";
+  template.appVersion = APP_VERSION;
 
   // Variables para Javascript (JSON stringified)
   template.userNameForJs = JSON.stringify(authResult.userName || userEmail);
@@ -734,39 +783,8 @@ function doGet(e) {
    ============================================ */
 
 // Función separada para Reservas (No cacheable)
-function getReservasFrescas() {
-  const ss = getDB();
-  // Si tienes tu función getActiveReservations, la llamamos aquí:
-  if (typeof getActiveReservations === 'function') {
-    return getActiveReservations();
-  }
-
-  // Si no, usamos tu fallback original:
-  const sheetRes = ss.getSheetByName('Reservas');
-  let reservas = [];
-  if (sheetRes && sheetRes.getLastRow() > 1) {
-    const dataR = sheetRes.getRange(2, 1, sheetRes.getLastRow() - 1, 10).getValues();
-    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-
-    reservas = dataR
-      .filter(r => {
-        // Validación de fecha segura
-        const fechaReserva = r[3] instanceof Date ? r[3] : new Date(r[3]);
-        return fechaReserva >= hoy && String(r[7]) !== 'Cancelada';
-      })
-      .map(r => ({
-        id_reserva: r[0],
-        id_recurso: r[1],
-        email_usuario: r[2],
-        fecha: r[3] instanceof Date ? Utilities.formatDate(r[3], Session.getScriptTimeZone(), 'yyyy-MM-dd') : r[3],
-        id_tramo: r[5],
-        estado: r[7],
-        cantidad: r[6],
-        curso: r[4],
-        notas: r[8]
-      }));
-  }
-  return reservas;
+function getReservasFrescas_() {
+  return getActiveReservations_();
 }
 
 
@@ -780,7 +798,7 @@ function cargarDisponibilidadRecurso(recursoId) {
     Logger.log(`Cargada disponibilidad para ${recursoId}: ${disponibilidad.length} registros`);
 
     // Incluir reservas frescas para que el cliente siempre tenga datos actualizados
-    const reservas = getReservasFrescas();
+    const reservas = getReservasFrescas_();
 
     return {
       success: true,
@@ -860,11 +878,11 @@ function getDisponibilidadRecurso(recursoId) {
 /* ============================================
    VALIDACIÓN DE DISPONIBILIDAD (LÓGICA PERMISIVA ✅)
    ============================================ */
-function checkAvailability(recursoId, fechaISO, tramoId, cantidadPedida, recurso = null, staticData = null) {
+function checkAvailability(recursoId, fechaISO, tramoId, cantidadPedida, recurso = null, staticData = null, reservasActivasPrevias = null) {
 
   // ✅ Solo cargar si no se pasaron como parámetro
   if (!staticData) {
-    staticData = getStaticData();
+    staticData = getDatosEstaticos_();
   }
 
   if (!recurso) {
@@ -897,7 +915,7 @@ function checkAvailability(recursoId, fechaISO, tramoId, cantidadPedida, recurso
   }
 
   // 3. Validar Ocupación
-  const reservasActivas = getActiveReservations();
+  const reservasActivas = reservasActivasPrevias || getActiveReservations_();
 
   let cantidadReservada = 0;
 
@@ -932,6 +950,52 @@ function checkAvailability(recursoId, fechaISO, tramoId, cantidadPedida, recurso
 }
 
 function crearNuevaReserva(reservaData) {
+  return crearReservas_(reservaData, [reservaData && reservaData.tramoId]);
+}
+
+/**
+ * MULTITRAMO: reserva varios tramos SEGUIDOS del mismo recurso y día en una sola operación.
+ * Requiere Config: permitir_multitramo = TRUE y max_tramos_simultaneos >= nº de tramos.
+ * Es "todo o nada": si un tramo falla, no se crea ninguna reserva.
+ */
+function crearReservasMultitramo(reservaData, tramoIds) {
+  try {
+    if (!Array.isArray(tramoIds) || tramoIds.length === 0) {
+      throw new Error("No se han indicado tramos.");
+    }
+    const ids = tramoIds.map(t => String(t).trim());
+    if (new Set(ids).size !== ids.length) throw new Error("Hay tramos repetidos.");
+
+    if (ids.length > 1) {
+      if (getConfigValue('permitir_multitramo', false) !== true) {
+        throw new Error("La reserva de varios tramos seguidos no está activada.");
+      }
+      const maxTramos = parseInt(getConfigValue('max_tramos_simultaneos', 1), 10) || 1;
+      if (ids.length > maxTramos) {
+        throw new Error(`Solo puedes reservar hasta ${maxTramos} tramos seguidos.`);
+      }
+      // Deben ser consecutivos según el orden de la hoja Tramos
+      const orden = getDatosEstaticos_().tramos.map(t => String(t.id_tramo).trim());
+      const posiciones = ids.map(id => orden.indexOf(id));
+      if (posiciones.some(p => p === -1)) throw new Error("Algún tramo no existe.");
+      posiciones.sort((a, b) => a - b);
+      for (let k = 1; k < posiciones.length; k++) {
+        if (posiciones[k] !== posiciones[k - 1] + 1) throw new Error("Los tramos deben ser seguidos.");
+      }
+      // Guardamos en el orden del horario
+      ids.splice(0, ids.length, ...posiciones.map(p => orden[p]));
+    }
+    return crearReservas_(reservaData, ids);
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
+}
+
+/**
+ * Núcleo común de reserva (1 o varios tramos). Todas las validaciones se hacen
+ * antes de escribir nada y con el lock cogido; las filas se escriben de una vez.
+ */
+function crearReservas_(reservaData, tramoIds) {
   const lock = LockService.getScriptLock();
 
   try {
@@ -947,29 +1011,49 @@ function crearNuevaReserva(reservaData) {
       throw new Error("Tu sesión ha caducado o ya no tienes permisos.");
     }
 
-    const { recursoId, recursoNombre, fechaISO, tramoId, tramoNombre, notas, cantidad, curso } = reservaData;
+    const { recursoId, recursoNombre, fechaISO, tramoNombre, notas, curso } = reservaData;
+    tramoIds = (tramoIds || []).map(t => String(t || '').trim()).filter(Boolean);
+    if (tramoIds.length === 0) throw new Error("Debes seleccionar un tramo.");
+
+    // Cantidad: entero >= 1 (una cantidad negativa "liberaba" aforo en recursos agrupados)
+    const cantidad = parseInt(reservaData.cantidad, 10) || 1;
+    if (cantidad < 1) {
+      throw new Error("La cantidad debe ser al menos 1.");
+    }
 
     if (!curso || curso.trim() === '') {
       throw new Error("Debes seleccionar un curso para realizar la reserva.");
     }
 
-    // ✅ VALIDACIONES DE CONFIGURACIÓN (NUEVO - ANTES DE TODO)
-    Logger.log("🔍 Validando restricciones de configuración...");
-    validarRestriccionesConfiguracion(email, fechaISO, tramoId);
+    // exigir_motivo (Config): las notas pasan a ser obligatorias
+    if (getConfigValue('exigir_motivo', false) === true && !String(notas || '').trim()) {
+      throw new Error("Indica en las notas para qué es la reserva.");
+    }
 
-    // ✅ PASO 1: Cargar datos UNA sola vez
-    const staticData = getStaticData();
+    // ✅ VALIDACIONES DE CONFIGURACIÓN (una sola lectura de Reservas para todas)
+    const reservasActivas = getActiveReservations_();
+    validarModoMantenimiento();
+    validarDiasVista(fechaISO);
+    tramoIds.forEach(t => validarAntelacionMinima(fechaISO, t));
+    validarLimiteReservas(email, reservasActivas, tramoIds.length); // cada tramo cuenta como una reserva
+
+    const staticData = getDatosEstaticos_();
     const recurso = staticData.recursos.find(r => String(r.id_recurso) === String(recursoId));
 
     if (!recurso) {
       throw new Error("El recurso seleccionado no existe.");
     }
 
-    Logger.log(`[crearNuevaReserva] Validando disponibilidad para ${recursoId} en ${fechaISO}...`);
-    checkAvailability(recursoId, fechaISO, tramoId, cantidad, recurso, staticData);
-    Logger.log(`[crearNuevaReserva] Validación superada.`);
+    tramoIds.forEach(t => {
+      try {
+        checkAvailability(recursoId, fechaISO, t, cantidad, recurso, staticData, reservasActivas);
+      } catch (errDisp) {
+        if (tramoIds.length === 1) throw errDisp;
+        const tr = staticData.tramos.find(x => String(x.id_tramo).trim() === t);
+        throw new Error(`${tr ? tr.nombre_tramo : t}: ${errDisp.message}`);
+      }
+    });
 
-    const idReserva = Utilities.getUuid();
     const timestamp = new Date();
     const fechaReserva = new Date(fechaISO + "T12:00:00Z");
 
@@ -982,82 +1066,88 @@ function crearNuevaReserva(reservaData) {
       headerMap[h.toString().trim().toLowerCase()] = i;
     });
 
-    const nuevaFilaArray = new Array(numCols).fill("");
+    const filas = [];
+    const nuevasReservas = [];
+    const tramosTexto = [];
 
-    if (headerMap['id_reserva'] !== undefined) nuevaFilaArray[headerMap['id_reserva']] = idReserva;
-    if (headerMap['id_recurso'] !== undefined) nuevaFilaArray[headerMap['id_recurso']] = recursoId;
-    if (headerMap['email_usuario'] !== undefined) nuevaFilaArray[headerMap['email_usuario']] = email;
-    if (headerMap['fecha'] !== undefined) nuevaFilaArray[headerMap['fecha']] = fechaReserva;
-    if (headerMap['id_tramo'] !== undefined) nuevaFilaArray[headerMap['id_tramo']] = tramoId;
-    if (headerMap['cantidad'] !== undefined) nuevaFilaArray[headerMap['cantidad']] = cantidad;
-    if (headerMap['estado'] !== undefined) nuevaFilaArray[headerMap['estado']] = "Confirmada";
-    if (headerMap['notas'] !== undefined) nuevaFilaArray[headerMap['notas']] = notas;
-    if (headerMap['curso'] !== undefined) nuevaFilaArray[headerMap['curso']] = curso;
-    if (headerMap['timestamp'] !== undefined) nuevaFilaArray[headerMap['timestamp']] = timestamp;
+    tramoIds.forEach(tramoId => {
+      const idReserva = Utilities.getUuid();
+      const fila = new Array(numCols).fill("");
+      if (headerMap['id_reserva'] !== undefined) fila[headerMap['id_reserva']] = idReserva;
+      if (headerMap['id_recurso'] !== undefined) fila[headerMap['id_recurso']] = recursoId;
+      if (headerMap['email_usuario'] !== undefined) fila[headerMap['email_usuario']] = email;
+      if (headerMap['fecha'] !== undefined) fila[headerMap['fecha']] = fechaReserva;
+      if (headerMap['id_tramo'] !== undefined) fila[headerMap['id_tramo']] = tramoId;
+      if (headerMap['cantidad'] !== undefined) fila[headerMap['cantidad']] = cantidad;
+      if (headerMap['estado'] !== undefined) fila[headerMap['estado']] = "Confirmada";
+      if (headerMap['notas'] !== undefined) fila[headerMap['notas']] = notas;
+      if (headerMap['curso'] !== undefined) fila[headerMap['curso']] = curso;
+      if (headerMap['timestamp'] !== undefined) fila[headerMap['timestamp']] = timestamp;
+      filas.push(fila);
 
-    sheetReservas.appendRow(nuevaFilaArray);
-    Logger.log(`[crearNuevaReserva] Reserva creada con ID: ${idReserva}`);
-
-    const tramo = staticData.tramos.find(t => String(t.id_tramo).trim() === String(tramoId).trim()) || null;
-
-    let tramoCompletoConHoras = tramoNombre;
-
-    if (tramo) {
-      const nombreTramo = tramo.nombre_tramo || tramoNombre;
-      const horaInicio = tramo.hora_inicio || '';
-      const horaFin = tramo.hora_fin || '';
-
-      if (horaInicio && horaFin) {
-        tramoCompletoConHoras = `${nombreTramo} (${horaInicio} - ${horaFin})`;
-      } else {
-        tramoCompletoConHoras = nombreTramo;
+      const tramo = staticData.tramos.find(t => String(t.id_tramo).trim() === tramoId) || null;
+      let texto = tramoIds.length === 1 ? (tramoNombre || tramoId) : tramoId;
+      if (tramo) {
+        const nombreTramo = tramo.nombre_tramo || texto;
+        texto = (tramo.hora_inicio && tramo.hora_fin)
+          ? `${nombreTramo} (${tramo.hora_inicio} - ${tramo.hora_fin})`
+          : nombreTramo;
       }
-    }
+      tramosTexto.push(texto);
+
+      nuevasReservas.push({
+        id_reserva: idReserva,
+        id_recurso: recursoId,
+        email_usuario: email,
+        fecha: fechaISO,
+        id_tramo: tramoId,
+        cantidad: cantidad,
+        estado: 'Confirmada',
+        notas: notas,
+        curso: curso,
+        timestamp_creacion: timestamp.toISOString()
+      });
+    });
+
+    // Una sola escritura para todas las filas
+    anadirFilas_(sheetReservas, filas);
+    Logger.log(`[crearReservas_] ${filas.length} reserva(s) creada(s): ${nuevasReservas.map(r => r.id_reserva).join(', ')}`);
 
     const fechaFormateada = fechaReserva.toLocaleDateString('es-ES', {
       day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC'
     });
 
-    sendConfirmationEmail(email, authResult.userName, {
-      idReserva: idReserva,
+    // ✅ Limpiar caché de disponibilidad del recurso.
+    // (La caché estática NO contiene reservas: borrarla solo obligaba a releer todas las hojas.)
+    const cache = CacheService.getScriptCache();
+    cache.remove(CACHE_KEYS.DISPONIBILIDAD + recursoId);
+
+    // Las filas ya están escritas: liberamos el lock antes de enviar el email (lento)
+    lock.releaseLock();
+
+    sendConfirmationEmail_(email, authResult.userName, {
+      idReserva: nuevasReservas[0].id_reserva,
+      reservas: nuevasReservas.map((r, k) => ({ idReserva: r.id_reserva, tramo: tramosTexto[k] })),
       recursoNombre: recursoNombre,
       fechaFormateada: fechaFormateada,
-      tramoNombre: tramoCompletoConHoras,
+      tramoNombre: tramosTexto.join(', '),
       curso: curso,
       cantidad: cantidad,
       notas: notas
     });
 
-    // ✅ Limpiar caché (ACTUALIZADO)
-    const cache = CacheService.getScriptCache();
-    cache.remove(CACHE_KEYS.DISPONIBILIDAD + recursoId);
-    cache.remove(CACHE_KEY_STATIC);  // Limpiar caché estática para recargar reservas
-    Logger.log(`💾 Caché limpiada para ${recursoId}`);
-
-    lock.releaseLock();
-
-    const nuevaReservaObjeto = {
-      id_reserva: idReserva,
-      id_recurso: recursoId,
-      email_usuario: email,
-      fecha: fechaISO,
-      id_tramo: tramoId,
-      cantidad: cantidad,
-      estado: 'Confirmada',
-      notas: notas,
-      curso: curso,
-      timestamp_creacion: timestamp.toISOString()
-    };
-
     return {
       success: true,
-      message: "¡Reserva confirmada! Se ha enviado un correo de confirmación.",
-      nuevaReserva: nuevaReservaObjeto
+      message: nuevasReservas.length > 1
+        ? `¡${nuevasReservas.length} tramos reservados! Se ha enviado un correo de confirmación.`
+        : "¡Reserva confirmada! Se ha enviado un correo de confirmación.",
+      nuevaReserva: nuevasReservas[0],
+      nuevasReservas: nuevasReservas
     };
 
   } catch (error) {
     lock.releaseLock();
-    Logger.log(`❌ Error en crearNuevaReserva: ${error.message}`);
+    Logger.log(`❌ Error en crearReservas_: ${error.message}`);
     return { success: false, message: error.message };  // ✅ Sin el prefijo "Error al crear la reserva:"
   }
 }
@@ -1065,36 +1155,55 @@ function crearNuevaReserva(reservaData) {
 /* ============================================
    EMAIL DE CONFIRMACIÓN DE RESERVA
    ============================================ */
-function sendConfirmationEmail(email, userName, details) {
+// Escapa texto de usuario antes de insertarlo en HTML (emails y páginas)
+function escHtml_(v) {
+  if (v === null || v === undefined) return '';
+  return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function sendConfirmationEmail_(email, userName, details) {
   try {
-    // Generar URL de cancelación (dentro del try-catch para que un fallo aquí no impida el email)
-    let urlCancelacion = '';
+    // Generar URL(s) de cancelación (dentro del try-catch para que un fallo aquí no impida el email)
+    // Multitramo: un enlace por tramo, para poder cancelar solo uno de ellos
+    const reservasEmail = (details.reservas && details.reservas.length) ? details.reservas
+      : [{ idReserva: details.idReserva, tramo: details.tramoNombre }];
+    let urlApp = '';
     try {
-      const urlApp = ScriptApp.getService().getUrl();
-      urlCancelacion = `${urlApp}?action=cancel&id=${details.idReserva}`;
+      urlApp = ScriptApp.getService().getUrl();
     } catch (urlError) {
       Logger.log(`⚠️ No se pudo obtener URL de la app: ${urlError.message}`);
     }
+    const urlCancelar = id => {
+      try { return `${urlApp}?action=cancel&id=${id}&t=${firmarIdReserva_(id)}`; }
+      catch (e) { Logger.log('⚠️ No se pudo firmar el enlace: ' + e.message); return ''; }
+    };
+    const estiloBoton = 'padding: 10px 15px; background-color: #d9534f; color: white; text-decoration: none; border-radius: 5px; display: inline-block; margin: 4px 0;';
 
     const asunto = `Reserva Confirmada: ${details.recursoNombre} - ${details.fechaFormateada}`;
 
     // Bloque de cancelación: solo si tenemos URL
-    const bloqueCancelacion = urlCancelacion
-      ? `<p>Si necesitas cancelar la reserva, puedes hacerlo desde este enlace:</p>
-         <p><a href="${urlCancelacion}" style="padding: 10px 15px; background-color: #d9534f; color: white; text-decoration: none; border-radius: 5px;">Cancelar esta Reserva</a></p>`
-      : '';
+    let bloqueCancelacion = '';
+    if (urlApp && reservasEmail.length === 1 && urlCancelar(reservasEmail[0].idReserva)) {
+      bloqueCancelacion = `<p>Si necesitas cancelar la reserva, puedes hacerlo desde este enlace:</p>
+         <p><a href="${urlCancelar(reservasEmail[0].idReserva)}" style="${estiloBoton}">Cancelar esta Reserva</a></p>`;
+    } else if (urlApp) {
+      bloqueCancelacion = `<p>Si necesitas cancelar algún tramo, puedes hacerlo desde estos enlaces:</p>` +
+        reservasEmail.filter(r => urlCancelar(r.idReserva))
+          .map(r => `<p><a href="${urlCancelar(r.idReserva)}" style="${estiloBoton}">Cancelar ${escHtml_(r.tramo)}</a></p>`).join('');
+    }
 
     const cuerpoHtml = `
       <p>¡Hola ${userName || ''}!</p>
       <p>Tu reserva ha sido confirmada con éxito.</p>
       <hr>
       <ul>
-        <li><strong>Recurso:</strong> ${details.recursoNombre}</li>
+        <li><strong>Recurso:</strong> ${escHtml_(details.recursoNombre)}</li>
         <li><strong>Fecha:</strong> ${details.fechaFormateada}</li>
-        <li><strong>Tramo:</strong> ${details.tramoNombre}</li>
-        <li><strong>Curso:</strong> ${details.curso}</li>
+        <li><strong>${reservasEmail.length > 1 ? 'Tramos' : 'Tramo'}:</strong> ${escHtml_(details.tramoNombre)}</li>
+        <li><strong>Curso:</strong> ${escHtml_(details.curso)}</li>
         ${details.cantidad > 1 ? `<li><strong>Cantidad:</strong> ${details.cantidad}</li>` : ''}
-        ${details.notas ? `<li><strong>Notas:</strong> ${details.notas}</li>` : ''}
+        ${details.notas ? `<li><strong>Notas:</strong> ${escHtml_(details.notas)}</li>` : ''}
       </ul>
       <hr>
       ${bloqueCancelacion}
@@ -1174,6 +1283,12 @@ function cancelarReservaCliente(reservaId) {
       return { success: true, message: "Esta reserva ya había sido cancelada.", canceledId: reservaId };
     }
 
+    // Tope de cancelación (horas_cancelacion); los admin quedan exentos
+    if (COL_FECHA_INDEX !== -1 && COL_TRAMO_ID_INDEX !== -1 && !checkUserAuthorization(userEmail).isAdmin) {
+      const bloqueo = motivoBloqueoCancelacion_(rowData[COL_FECHA_INDEX], rowData[COL_TRAMO_ID_INDEX]);
+      if (bloqueo) throw new Error(bloqueo);
+    }
+
     sheetReservas.getRange(filaEncontrada, COL_ESTADO_INDEX + 1).setValue("Cancelada");
 
     const authResult = checkUserAuthorization(userEmail);
@@ -1231,7 +1346,7 @@ function cancelarReservaCliente(reservaId) {
       tramoNombre: tramoNombre
     };
 
-    sendCancelationEmail(userEmail, authResult.userName, details);
+    sendCancelationEmail_(userEmail, authResult.userName, details);
 
     cache.remove(CACHE_KEYS.DISPONIBILIDAD + recursoId);
 
@@ -1249,7 +1364,25 @@ function cancelarReservaCliente(reservaId) {
    CANCELACIÓN VÍA EMAIL
    ============================================ */
 
-function handleEmailCancelation(reservaId) {
+/* Firma HMAC para los enlaces de cancelación de los emails.
+   Así el enlace funciona aunque Google no identifique al usuario (otras cuentas/dominios)
+   y nadie puede cancelar reservas ajenas adivinando o copiando un ID. */
+function getSecretoEnlaces_() {
+  const props = PropertiesService.getScriptProperties();
+  let secreto = props.getProperty('SECRETO_ENLACES');
+  if (!secreto) {
+    secreto = Utilities.getUuid() + Utilities.getUuid();
+    props.setProperty('SECRETO_ENLACES', secreto);
+  }
+  return secreto;
+}
+
+function firmarIdReserva_(idReserva) {
+  const firma = Utilities.computeHmacSha256Signature(String(idReserva), getSecretoEnlaces_());
+  return Utilities.base64EncodeWebSafe(firma).replace(/=+$/, '').substring(0, 24);
+}
+
+function handleEmailCancelation(reservaId, firma) {
   const sheetReservas = getDB().getSheetByName(SHEETS.RESERVAS);
   if (!sheetReservas) {
     return HtmlService.createHtmlOutput(buildHtmlCancelPage("Error", "No se encuentra la hoja de Reservas."));
@@ -1278,6 +1411,17 @@ function handleEmailCancelation(reservaId) {
   const filaEncontrada = celdaEncontrada.getRow();
   const rowData = sheetReservas.getRange(filaEncontrada, 1, 1, headers.length).getValues()[0];
   const estadoActual = rowData[COL_ESTADO_INDEX];
+
+  // 🛡️ Autorización: enlace firmado (emails nuevos) o bien el propio dueño / un admin (emails antiguos)
+  const firmaValida = firma && firma === firmarIdReserva_(reservaId);
+  if (!firmaValida) {
+    const emailActual = String(Session.getActiveUser().getEmail() || '').toLowerCase().trim();
+    const emailDueno = String(rowData[COL_EMAIL_INDEX] || '').toLowerCase().trim();
+    const esDueno = emailActual && emailActual === emailDueno;
+    if (!esDueno && !(emailActual && checkUserAuthorization(emailActual).isAdmin)) {
+      return HtmlService.createHtmlOutput(buildHtmlCancelPage("Acceso denegado", "Solo quien hizo la reserva o un administrador puede cancelarla. Hazlo desde la aplicación."));
+    }
+  }
 
   // ✅ OBTENER DATOS
   const recursoId = rowData[COL_RECURSO_ID_INDEX];
@@ -1341,12 +1485,23 @@ function handleEmailCancelation(reservaId) {
     );
   }
 
+  // Tope de cancelación (horas_cancelacion); exentos solo si quien pulsa es admin identificado
+  if (COL_FECHA_INDEX !== -1 && COL_TRAMO_ID_INDEX !== -1) {
+    const emailClic = String(Session.getActiveUser().getEmail() || '').trim();
+    if (!(emailClic && checkUserAuthorization(emailClic).isAdmin)) {
+      const bloqueo = motivoBloqueoCancelacion_(rowData[COL_FECHA_INDEX], rowData[COL_TRAMO_ID_INDEX]);
+      if (bloqueo) {
+        return HtmlService.createHtmlOutput(buildHtmlCancelPage("No se puede cancelar", bloqueo, details));
+      }
+    }
+  }
+
   // ✅ CANCELAR LA RESERVA
   sheetReservas.getRange(filaEncontrada, COL_ESTADO_INDEX + 1).setValue("Cancelada");
 
   const email = rowData[COL_EMAIL_INDEX];
   const authResult = checkUserAuthorization(email);
-  sendCancelationEmail(email, authResult.userName, details);
+  sendCancelationEmail_(email, authResult.userName, details);
 
   // ✅ Reutilizar la variable cache que ya existe arriba
   cache.remove(CACHE_KEYS.DISPONIBILIDAD + recursoId);
@@ -1360,7 +1515,7 @@ function handleEmailCancelation(reservaId) {
    UTILIDADES DE EMAIL Y HTML
    ============================================ */
 
-function sendCancelationEmail(email, userName, details) {
+function sendCancelationEmail_(email, userName, details) {
   const asunto = `Cancelación Confirmada: ${details.recursoNombre} - ${details.fechaFormateada}`;
   const cuerpoHtml = `
     <p>¡Hola ${userName || ''}!</p>
@@ -1368,9 +1523,9 @@ function sendCancelationEmail(email, userName, details) {
     <hr>
     <p>Detalles de la reserva cancelada:</p>
     <ul>
-      <li><strong>Recurso:</strong> ${details.recursoNombre}</li>
+      <li><strong>Recurso:</strong> ${escHtml_(details.recursoNombre)}</li>
       <li><strong>Fecha:</strong> ${details.fechaFormateada}</li>
-      <li><strong>Tramo:</strong> ${details.tramoNombre}</li>
+      <li><strong>Tramo:</strong> ${escHtml_(details.tramoNombre)}</li>
     </ul>
     <hr>
     <p style="font-size: 0.9em; color: #777;">Si has cancelado por error, deberás volver a realizar la reserva desde la aplicación.</p>
@@ -1394,9 +1549,9 @@ function buildHtmlCancelPage(titulo, mensaje, details) {
     detailsHtml = `
       <hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">
       <ul style="text-align: left; list-style: none; padding-left: 0; margin: 0;">
-        <li style="margin-bottom: 8px;"><strong>Recurso:</strong> ${details.recursoNombre}</li>
+        <li style="margin-bottom: 8px;"><strong>Recurso:</strong> ${escHtml_(details.recursoNombre)}</li>
         <li style="margin-bottom: 8px;"><strong>Fecha:</strong> ${details.fechaFormateada}</li>
-        <li style="margin-bottom: 8px;"><strong>Tramo:</strong> ${details.tramoNombre}</li>
+        <li style="margin-bottom: 8px;"><strong>Tramo:</strong> ${escHtml_(details.tramoNombre)}</li>
       </ul>
       <hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">
     `;
@@ -1526,6 +1681,13 @@ function buildHtmlCancelPage(titulo, mensaje, details) {
    ============================================ */
 function handleAprobarRecurrenteDesdeEmail(idSolicitud) {
   try {
+    if (!isUserAdmin()) {
+      return HtmlService.createHtmlOutput(buildHtmlCancelPage(
+        "Acceso denegado",
+        "Solo un administrador puede aprobar solicitudes."
+      ));
+    }
+
     // Obtener datos de la solicitud
     const sheet = getOrCreateSheetSolicitudesRecurrentes();
     const data = sheet.getDataRange().getValues();
@@ -1570,7 +1732,7 @@ function handleAprobarRecurrenteDesdeEmail(idSolicitud) {
     if (resultado && resultado.success) {
       return HtmlService.createHtmlOutput(buildHtmlCancelPage(
         "Solicitud Aprobada",
-        `La solicitud de reserva recurrente de <strong>${solicitud.usuario}</strong> para <strong>${solicitud.recurso}</strong> ha sido aprobada correctamente.`,
+        `La solicitud de reserva recurrente de <strong>${escHtml_(solicitud.usuario)}</strong> para <strong>${escHtml_(solicitud.recurso)}</strong> ha sido aprobada correctamente.`,
         {
           recursoNombre: solicitud.recurso,
           fechaFormateada: `${solicitud.dias}`,
@@ -1598,18 +1760,42 @@ function handleAprobarRecurrenteDesdeEmail(idSolicitud) {
    NUEVAS FUNCIONES DE ALTA DE USUARIO 🚀
    ============================================ */
 
+// Página mostrada cuando Session.getActiveUser() devuelve vacío
+function buildHtmlEmailNoDisponible_() {
+  let dominioDespliegue = '';
+  try { dominioDespliegue = (Session.getEffectiveUser().getEmail() || '').split('@')[1] || ''; } catch (e) { }
+  return `
+    <!DOCTYPE html>
+    <html>
+      <body style="font-family: sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background-color: #fef2f2; padding: 16px; box-sizing: border-box;">
+        <div style="max-width: 520px; text-align: center; padding: 32px; background: white; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);">
+          <div style="font-size: 50px; margin-bottom: 10px;">🔒</div>
+          <h1 style="color: #991b1b; margin: 0; font-size: 22px;">No se pudo identificar tu cuenta</h1>
+          <p style="color: #4b5563; margin-top: 14px; line-height: 1.5;">
+            Google no ha facilitado tu correo a la aplicación, por lo que no es posible comprobar tu acceso.
+          </p>
+          <ul style="text-align: left; color: #4b5563; line-height: 1.6; font-size: 14px;">
+            <li>Entra con tu cuenta del centro${dominioDespliegue ? ' (<b>@' + dominioDespliegue + '</b>)' : ''}. Si tienes varias cuentas abiertas, prueba en una ventana de incógnito.</li>
+            <li><b>Administrador/a:</b> la aplicación debe implementarse desde una cuenta del <b>mismo dominio</b> que el profesorado (p.ej. @g.educaand.es). Si se implementó desde una cuenta @gmail.com u otro dominio, Google oculta el correo de los usuarios y la aplicación les pedirá registrarse siempre.</li>
+          </ul>
+        </div>
+      </body>
+    </html>`;
+}
+
 // 1. EL USUARIO ENVÍA LA SOLICITUD (CORREGIDO)
 function procesarSolicitudRegistro(nombreSolicitante, emailManual) {
   // Intentamos obtenerlo de la sesión, si falla, usamos el que escribió el usuario
-  const emailSession = Session.getActiveUser().getEmail();
-  const emailFinal = emailSession && emailSession !== "" ? emailSession : emailManual;
+  // Solo se admite el email de la sesión: un email tecleado no se puede verificar
+  // y, tras aprobarlo, el usuario seguiría sin poder entrar (bucle de registro).
+  const emailFinal = Session.getActiveUser().getEmail();
 
   if (!emailFinal) {
-    throw new Error("No se ha podido identificar tu correo electrónico.");
+    throw new Error("Google no ha facilitado tu correo a la aplicación. Entra con tu cuenta del centro o avisa al administrador (la app debe implementarse desde una cuenta del mismo dominio).");
   }
 
   const scriptUrl = ScriptApp.getService().getUrl();
-  const admins = getAdminsEmails();
+  const admins = getAdminsEmails_();
   if (admins.length === 0) {
     throw new Error("No hay administradores configurados. Contacta con el responsable del sistema.");
   }
@@ -1628,7 +1814,7 @@ function procesarSolicitudRegistro(nombreSolicitante, emailManual) {
         <p>Hola Admin,</p>
         <p>Un nuevo compañero quiere acceder al sistema:</p>
         <ul style="background: #f9f9f9; padding: 15px; border-radius: 5px; list-style: none;">
-          <li>👤 <strong>Nombre:</strong> ${nombreSolicitante}</li>
+          <li>👤 <strong>Nombre:</strong> ${escHtml_(nombreSolicitante)}</li>
           <li>📧 <strong>Email:</strong> ${emailFinal}</li>
         </ul>
         <p>Haz clic abajo para darle acceso inmediato:</p>
@@ -1675,7 +1861,7 @@ function handleAdminApproval(emailNuevo, nombreNuevo) {
     // B. PURGAR CACHÉ (¡ESTO SOLUCIONA TU ESPERA!) 🧹
     // Obligamos al sistema a volver a leer el Excel en la próxima carga
     const cache = CacheService.getScriptCache();
-    cache.remove(CACHE_KEYS.STATIC_DATA);
+    cache.remove(CACHE_KEY_STATIC);
 
     // C. ENVIAR CORREO DE BIENVENIDA 📧
     try {
@@ -1686,7 +1872,7 @@ function handleAdminApproval(emailNuevo, nombreNuevo) {
             <h2 style="margin: 0;">¡Bienvenido/a a bordo!</h2>
           </div>
           <div style="padding: 20px;">
-            <p>Hola <strong>${nombreNuevo}</strong>,</p>
+            <p>Hola <strong>${escHtml_(nombreNuevo)}</strong>,</p>
             <p>Tu solicitud de acceso ha sido aprobada por el administrador.</p>
             <p>Ya puedes entrar y realizar reservas.</p>
             <div style="text-align: center; margin-top: 25px;">
@@ -1718,8 +1904,8 @@ function handleAdminApproval(emailNuevo, nombreNuevo) {
           <div style="font-size: 60px; margin-bottom: 20px;">✅</div>
           <h1 style="color: #166534; margin: 0;">Usuario Registrado</h1>
           <p style="color: #4b5563; margin-top: 10px;">
-            Se ha dado de alta a <b>${nombreNuevo}</b><br>
-            <span style="font-size: 0.9em; color: #6b7280;">(${emailNuevo})</span>
+            Se ha dado de alta a <b>${escHtml_(nombreNuevo)}</b><br>
+            <span style="font-size: 0.9em; color: #6b7280;">(${escHtml_(emailNuevo)})</span>
           </p>
           <p style="margin-top: 20px; color: #059669; font-weight: bold;">
             📧 Se le ha enviado un correo de aviso.
@@ -1734,14 +1920,16 @@ function handleAdminApproval(emailNuevo, nombreNuevo) {
 }
 
 // Helper para buscar emails de admins
-function getAdminsEmails() {
+function getAdminsEmails_() {
   try {
     const ss = getDB();
     const sheet = ss.getSheetByName(SHEETS.USUARIOS);
     const data = sheet.getDataRange().getValues();
     // Asumimos Col B=Email, Col D=Admin
     // Filtramos filas donde Col D es true/si/yes
-    const admins = data.filter((row, i) => i > 0 && (String(row[3]).toLowerCase() === 'true' || row[3] === true))
+    // Mismos valores que acepta checkUserAuthorization (TRUE, Sí, yes, admin)
+    const admins = data.filter((row, i) => i > 0 && row[1] &&
+        (esValorVerdadero_(row[3]) || String(row[3]).toLowerCase().trim() === 'admin'))
       .map(row => row[1]);
     return admins;
   } catch (e) { return []; }
@@ -1782,14 +1970,7 @@ function getConfiguracion() {
     
     if (!clave) continue;
     
-    // Convertir tipos
-    if (valor === 'TRUE' || valor === 'FALSE') {
-      valor = (valor === 'TRUE');
-    } else if (!isNaN(valor) && valor !== '') {
-      valor = Number(valor);
-    }
-    
-    config[clave] = valor;
+    config[clave] = parsearValorConfig_(valor);
   }
   
   // Cachear por 5 minutos
@@ -1801,6 +1982,20 @@ function getConfiguracion() {
   }
   
   return config;
+}
+
+/**
+ * Convierte un valor de la hoja Config a su tipo JS.
+ * Antes los booleanos reales (casillas) acababan como Number(true) = 1 y
+ * las comprobaciones "=== true" nunca se cumplían.
+ */
+function parsearValorConfig_(valor) {
+  if (typeof valor === 'boolean' || typeof valor === 'number') return valor;
+  if (valor instanceof Date) return valor;
+  const txt = String(valor).trim();
+  if (/^(true|false)$/i.test(txt)) return txt.toLowerCase() === 'true';
+  if (txt !== '' && !isNaN(txt)) return Number(txt);
+  return valor;
 }
 
 /**
@@ -1868,7 +2063,7 @@ function validarAntelacionMinima(fechaISO, tramoId) {
   const minutosMinimos = getConfigValue('minutos_antelacion', 30);
   
   // Obtener el tramo para conocer su hora de inicio
-  const staticData = getStaticData();
+  const staticData = getDatosEstaticos_();
   const tramo = staticData.tramos.find(t => String(t.id_tramo) === String(tramoId));
   
   if (!tramo || !tramo.hora_inicio) {
@@ -1887,9 +2082,10 @@ function validarAntelacionMinima(fechaISO, tramoId) {
   }
   
   // Construir la fecha/hora exacta del inicio del tramo
-  const [horas, minutos] = tramo.hora_inicio.split(':').map(Number);
-  const fechaHoraTramo = new Date(fechaISO + "T00:00:00Z");
-  fechaHoraTramo.setUTCHours(horas, minutos, 0, 0);
+  // Hora local del centro (zona del script). Antes se usaba UTC: desfase de 1-2 h.
+  const [horas, minutos] = String(tramo.hora_inicio).split(':').map(Number);
+  const hhmm = ('0' + horas).slice(-2) + ':' + ('0' + (minutos || 0)).slice(-2);
+  const fechaHoraTramo = Utilities.parseDate(fechaISO + ' ' + hhmm, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
   
   // Obtener la hora actual
   const ahora = new Date();
@@ -1907,20 +2103,51 @@ function validarAntelacionMinima(fechaISO, tramoId) {
 }
 
 /**
+ * horas_cancelacion (Config): antelación mínima para que un usuario cancele.
+ * Devuelve el mensaje de error si NO se puede cancelar, o null si sí.
+ * Los administradores quedan exentos (se comprueba fuera).
+ */
+function motivoBloqueoCancelacion_(fechaValor, tramoId) {
+  const horas = parseFloat(getConfigValue('horas_cancelacion', 0)) || 0;
+  if (horas <= 0) return null;
+
+  const tramo = getDatosEstaticos_().tramos.find(t => String(t.id_tramo).trim() === String(tramoId).trim());
+  if (!tramo || !tramo.hora_inicio) return null;
+
+  const tz = Session.getScriptTimeZone();
+  const fechaISO = fechaValor instanceof Date
+    ? Utilities.formatDate(fechaValor, tz, 'yyyy-MM-dd')
+    : String(fechaValor).substring(0, 10);
+  const [h, m] = String(tramo.hora_inicio).split(':').map(Number);
+  if (isNaN(h)) return null;
+  const hhmm = ('0' + h).slice(-2) + ':' + ('0' + (m || 0)).slice(-2);
+  const inicio = Utilities.parseDate(fechaISO + ' ' + hhmm, tz, 'yyyy-MM-dd HH:mm');
+
+  if (inicio.getTime() - Date.now() < horas * 3600 * 1000) {
+    return `Solo se puede cancelar con al menos ${horas} ${horas === 1 ? 'hora' : 'horas'} de antelación. Si necesitas anularla, contacta con un administrador.`;
+  }
+  return null;
+}
+
+/**
  * Valida que el usuario no exceda el límite de reservas activas
  * @param {string} email - Email del usuario
  * @throws {Error} Si el usuario excede el límite de reservas
  */
-function validarLimiteReservas(email) {
+function validarLimiteReservas(email, reservasActivasPrevias, nuevas) {
   const limiteReservas = getConfigValue('limite_reservas', 3);
 
-  const reservasActivas = getActiveReservations();
+  const reservasActivas = reservasActivasPrevias || getActiveReservations_();
+  const emailNorm = String(email).toLowerCase().trim();
   // Solo contar reservas manuales (excluir las generadas por recurrencias)
   const reservasUsuario = reservasActivas.filter(r =>
-    r.email_usuario === email && !r.id_solicitud_recurrente
+    String(r.email_usuario).toLowerCase().trim() === emailNorm && !r.id_solicitud_recurrente
   );
 
-  if (reservasUsuario.length >= limiteReservas) {
+  if (reservasUsuario.length + (nuevas || 1) > limiteReservas) {
+    if (nuevas > 1 && reservasUsuario.length < limiteReservas) {
+      throw new Error(`Con ${nuevas} tramos superarías tu límite de ${limiteReservas} reservas activas (tienes ${reservasUsuario.length}).`);
+    }
     throw new Error(`Has alcanzado el límite de ${limiteReservas} reservas activas. Cancela alguna para continuar.`);
   }
 
@@ -1928,49 +2155,16 @@ function validarLimiteReservas(email) {
   return true;
 }
 
-/**
- * Valida todas las restricciones de configuración
- * Función wrapper que ejecuta todas las validaciones
- * @param {string} email - Email del usuario
- * @param {string} fechaISO - Fecha en formato YYYY-MM-DD
- * @param {string} tramoId - ID del tramo horario
- */
-function validarRestriccionesConfiguracion(email, fechaISO, tramoId) {
-  Logger.log("🔍 Iniciando validaciones de configuración...");
-  
-  validarModoMantenimiento();
-  validarDiasVista(fechaISO);
-  validarAntelacionMinima(fechaISO, tramoId);
-  validarLimiteReservas(email);
-  
-  Logger.log("✅ Todas las validaciones de configuración superadas");
-  return true;
-}
-
 /* ============================================
    FUNCIÓN AUXILIAR PARA LEER LA CONFIG RÁPIDO Y ACTUALIZAR
    ============================================ */
 function getAppConfig() {
-  // Leemos la configuración para la vista pública
-  const ss = getDB();
-  const sheet = ss.getSheetByName('Config'); // O usa SHEETS.CONFIG si tienes constante
-  const config = {};
-
-  // Valores por defecto
-  config.appName = "Sistema de Reservas";
-  config.logoUrl = "";
-
-  if (sheet && sheet.getLastRow() > 1) {
-    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
-    data.forEach(r => {
-      if (r[0] === 'nombre_centro') config.appName = r[1];
-      if (r[0] === 'url_logo') {
-        // Convertir URL de Drive al formato de imagen pública si es necesario
-        config.logoUrl = convertirUrlLogoParaMostrar(r[1]);
-      }
-    });
-  }
-  return config;
+  // Usa la configuración cacheada (antes se leía la hoja Config en cada carga de página)
+  const cfg = getConfiguracion();
+  return {
+    appName: cfg.nombre_centro ? String(cfg.nombre_centro) : "Sistema de Reservas",
+    logoUrl: cfg.url_logo ? convertirUrlLogoParaMostrar(String(cfg.url_logo)) : ""
+  };
 }
 
 /* ============================================
@@ -1995,15 +2189,35 @@ function purgarCache() {
   cache.removeAll([
     'STATIC_DATA_V5',
     'STATIC_DATA_V4',
-    'STATIC_DATA_V3'
+    'STATIC_DATA_V3',
+    CACHE_KEYS.CONFIGURACION
   ]);
 
   console.log("✅ Caché purgada correctamente. La próxima carga será desde Excel.");
 
-  const staticData = getStaticData();
-  staticData.recursos.forEach(r => {
-    cache.remove(CACHE_KEYS.DISPONIBILIDAD + r.id_recurso);
-  });
+  // Disponibilidad por recurso: basta con los IDs (columna A de Recursos, incluidos los inactivos).
+  // Antes se regeneraban todos los datos estáticos solo para obtener esta lista.
+  try {
+    const sheetRec = getDB().getSheetByName(SHEETS.RECURSOS);
+    if (sheetRec && sheetRec.getLastRow() > 1) {
+      const claves = [];
+      sheetRec.getRange(2, 1, sheetRec.getLastRow() - 1, 1).getValues().forEach(r => {
+        const raw = String(r[0]);
+        if (!raw.trim()) return;
+        claves.push(CACHE_KEYS.DISPONIBILIDAD + raw, CACHE_KEYS.DISPONIBILIDAD + raw.trim());
+      });
+      if (claves.length) cache.removeAll(claves);
+    }
+  } catch (e) {
+    Logger.log('⚠️ No se pudo purgar la caché de disponibilidad: ' + e.message);
+  }
+
+  // Reconstruir ya la caché estática: así la paga quien guarda, no el siguiente usuario que abre la app
+  try {
+    getDatosEstaticos_();
+  } catch (e) {
+    Logger.log('⚠️ No se pudo regenerar la caché estática: ' + e.message);
+  }
 
   Logger.log('Cachés de disponibilidad purgadas.');
 }
@@ -2067,6 +2281,9 @@ function convertirUrlLogoParaMostrar(url) {
  */
 function procesarUrlLogoDrive(url) {
   try {
+    if (!isUserAdmin()) {
+      return { success: false, message: 'No tienes permisos de administrador', convertedUrl: '' };
+    }
     if (!url || typeof url !== 'string') {
       return { success: false, message: 'URL vacía', convertedUrl: '' };
     }

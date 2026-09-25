@@ -7,6 +7,26 @@
    VERIFICACIÓN DE PERMISOS
    ============================================ */
 
+// Interpreta casillas / textos de la hoja: TRUE, "true", "Si", "Sí", "yes"
+function esValorVerdadero_(v) {
+  if (v === true) return true;
+  const t = String(v).toLowerCase().trim().replace('í', 'i');
+  return t === 'true' || t === 'si' || t === 'yes';
+}
+
+// Ejecuta fn con el bloqueo global del script (mismo que usa crearNuevaReserva)
+function conLockScript_(fn) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) {
+    return { success: false, error: "El sistema está ocupado. Inténtalo de nuevo en unos segundos." };
+  }
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function isUserAdmin() {
   const email = Session.getActiveUser().getEmail();
   const authResult = checkUserAuthorization(email);
@@ -28,9 +48,14 @@ function getAdminData() {
       return { success: false, error: "No tienes permisos de administrador." };
     }
 
-    // Ejecutar migración de ID_Solicitud_Recurrente si es necesario
+    // Migración de ID_Solicitud_Recurrente: solo hasta que se complete una vez
+    // (antes se leía toda la hoja Reservas en cada apertura del panel)
     try {
-      migrarIdSolicitudRecurrente();
+      const props = PropertiesService.getScriptProperties();
+      if (props.getProperty('MIGRACION_ID_SOL_REC_OK') !== 'true') {
+        const resMig = conLockScript_(() => migrarIdSolicitudRecurrente_());
+        if (resMig && resMig.success) props.setProperty('MIGRACION_ID_SOL_REC_OK', 'true');
+      }
     } catch (migErr) {
       Logger.log('⚠️ Error en migración (no crítico): ' + migErr.message);
     }
@@ -103,8 +128,8 @@ function getAdminData() {
       usuarios = dataUsers.map(row => ({
         Nombre: String(row[0]).trim(), 
         Email: String(row[1]).trim(), 
-        Activo: Boolean(row[2]), 
-        Admin: Boolean(row[3])
+        Activo: esValorVerdadero_(row[2]), // Boolean('FALSE') era true y reactivaba usuarios
+        Admin: esValorVerdadero_(row[3])
       }));
     }
 
@@ -191,338 +216,6 @@ function getAdminData() {
   } catch (e) { return { success: false, error: "Error getAdminData: " + e.toString() }; }
 }
 
-/* ============================================
-   GESTIÓN DE RECURSOS
-   ============================================ */
-
-function createRecurso(recursoData) {
-  try {
-    if (!isUserAdmin()) {
-      throw new Error("No tienes permisos de administrador.");
-    }
-    
-    const { id_recurso, nombre, tipo, capacidad, ubicacion, icono, estado } = recursoData;
-    
-    if (!id_recurso || !nombre || !tipo) {
-      throw new Error("Faltan campos obligatorios (ID, Nombre, Tipo).");
-    }
-    
-    const ss = getDB();
-    const sheetRecursos = ss.getSheetByName(SHEETS.RECURSOS);
-    
-    const recursos = sheetToObjects(sheetRecursos);
-    if (recursos.find(r => r.id_recurso === id_recurso)) {
-      throw new Error(`Ya existe un recurso con el ID: ${id_recurso}`);
-    }
-    
-    const headers = sheetRecursos.getRange(1, 1, 1, sheetRecursos.getLastColumn()).getValues()[0];
-    const headerMap = {};
-    headers.forEach((h, i) => headerMap[h.toString().trim().toLowerCase()] = i);
-    
-    const nuevaFila = new Array(headers.length).fill("");
-    if (headerMap['id_recurso'] !== undefined) nuevaFila[headerMap['id_recurso']] = id_recurso;
-    if (headerMap['nombre'] !== undefined) nuevaFila[headerMap['nombre']] = nombre;
-    if (headerMap['tipo'] !== undefined) nuevaFila[headerMap['tipo']] = tipo;
-    if (headerMap['capacidad'] !== undefined) nuevaFila[headerMap['capacidad']] = capacidad || 1;
-    if (headerMap['ubicacion'] !== undefined) nuevaFila[headerMap['ubicacion']] = ubicacion || '';
-    if (headerMap['icono'] !== undefined) nuevaFila[headerMap['icono']] = icono || '';
-    if (headerMap['estado'] !== undefined) nuevaFila[headerMap['estado']] = estado || 'Activo';
-    
-    sheetRecursos.appendRow(nuevaFila);
-    purgarCache();
-    
-    return { success: true, message: "Recurso creado con éxito." };
-    
-  } catch (error) {
-    Logger.log(`Error en createRecurso: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-}
-
-function updateRecurso(recursoData) {
-  try {
-    if (!isUserAdmin()) {
-      throw new Error("No tienes permisos de administrador.");
-    }
-    
-    const { id_recurso, nombre, tipo, capacidad, ubicacion, icono, estado } = recursoData;
-    
-    const ss = getDB();
-    const sheetRecursos = ss.getSheetByName(SHEETS.RECURSOS);
-    const headers = sheetRecursos.getRange(1, 1, 1, sheetRecursos.getLastColumn()).getValues()[0];
-    const COL_ID = headers.indexOf("ID_Recurso");
-    
-    const idColumnRange = sheetRecursos.getRange(2, COL_ID + 1, sheetRecursos.getLastRow() - 1);
-    const textFinder = idColumnRange.createTextFinder(id_recurso).matchEntireCell(true);
-    const celda = textFinder.findNext();
-    
-    if (!celda) {
-      throw new Error("No se encontró el recurso.");
-    }
-    
-    const fila = celda.getRow();
-    const headerMap = {};
-    headers.forEach((h, i) => headerMap[h.toString().trim().toLowerCase()] = i + 1);
-    
-    if (nombre && headerMap['nombre']) sheetRecursos.getRange(fila, headerMap['nombre']).setValue(nombre);
-    if (tipo && headerMap['tipo']) sheetRecursos.getRange(fila, headerMap['tipo']).setValue(tipo);
-    if (capacidad && headerMap['capacidad']) sheetRecursos.getRange(fila, headerMap['capacidad']).setValue(capacidad);
-    if (ubicacion !== undefined && headerMap['ubicacion']) sheetRecursos.getRange(fila, headerMap['ubicacion']).setValue(ubicacion);
-    if (icono !== undefined && headerMap['icono']) sheetRecursos.getRange(fila, headerMap['icono']).setValue(icono);
-    if (estado && headerMap['estado']) sheetRecursos.getRange(fila, headerMap['estado']).setValue(estado);
-    
-    purgarCache();
-    
-    return { success: true, message: "Recurso actualizado con éxito." };
-    
-  } catch (error) {
-    Logger.log(`Error en updateRecurso: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-}
-
-function deleteRecurso(idRecurso) {
-  try {
-    if (!isUserAdmin()) {
-      throw new Error("No tienes permisos de administrador.");
-    }
-    
-    const ss = getDB();
-    const sheetRecursos = ss.getSheetByName(SHEETS.RECURSOS);
-    const headers = sheetRecursos.getRange(1, 1, 1, sheetRecursos.getLastColumn()).getValues()[0];
-    const COL_ID = headers.indexOf("ID_Recurso");
-    
-    const idColumnRange = sheetRecursos.getRange(2, COL_ID + 1, sheetRecursos.getLastRow() - 1);
-    const textFinder = idColumnRange.createTextFinder(idRecurso).matchEntireCell(true);
-    const celda = textFinder.findNext();
-    
-    if (!celda) {
-      throw new Error("No se encontró el recurso.");
-    }
-    
-    sheetRecursos.deleteRow(celda.getRow());
-    purgarCache();
-    
-    return { success: true, message: "Recurso eliminado con éxito." };
-    
-  } catch (error) {
-    Logger.log(`Error en deleteRecurso: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-}
-
-function generarDisponibilidadRecurso(idRecurso, configuracion) {
-  try {
-    if (!isUserAdmin()) {
-      throw new Error("No tienes permisos de administrador.");
-    }
-    
-    const ss = getDB();
-    const sheetDisponibilidad = ss.getSheetByName(SHEETS.DISPONIBILIDAD);
-    const sheetTramos = ss.getSheetByName(SHEETS.TRAMOS);
-    
-    const tramos = sheetToObjects(sheetTramos);
-    const { dias, permitido, razonBloqueo } = configuracion;
-    
-    const headers = sheetDisponibilidad.getRange(1, 1, 1, sheetDisponibilidad.getLastColumn()).getValues()[0];
-    const headerMap = {};
-    headers.forEach((h, i) => headerMap[h.toString().trim().toLowerCase()] = i);
-    
-    const filasNuevas = [];
-    
-    dias.forEach(dia => {
-      tramos.forEach(tramo => {
-        const nuevaFila = new Array(headers.length).fill("");
-        if (headerMap['id_recurso'] !== undefined) nuevaFila[headerMap['id_recurso']] = idRecurso;
-        if (headerMap['dia_semana'] !== undefined) nuevaFila[headerMap['dia_semana']] = dia;
-        if (headerMap['id_tramo'] !== undefined) nuevaFila[headerMap['id_tramo']] = tramo.id_tramo;
-        if (headerMap['permitido'] !== undefined) nuevaFila[headerMap['permitido']] = permitido || 'Si';
-        if (headerMap['razon_bloqueo'] !== undefined) nuevaFila[headerMap['razon_bloqueo']] = razonBloqueo || '';
-        
-        filasNuevas.push(nuevaFila);
-      });
-    });
-    
-    if (filasNuevas.length > 0) {
-      const rangoDestino = sheetDisponibilidad.getRange(
-        sheetDisponibilidad.getLastRow() + 1, 
-        1, 
-        filasNuevas.length, 
-        headers.length
-      );
-      rangoDestino.setValues(filasNuevas);
-    }
-    
-    purgarCache();
-    
-    return { success: true, message: `Se generaron ${filasNuevas.length} registros de disponibilidad.` };
-    
-  } catch (error) {
-    Logger.log(`Error en generarDisponibilidadRecurso: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-}
-
-/* ============================================
-   GESTIÓN DE TRAMOS
-   ============================================ */
-
-function createTramo(tramoData) {
-  try {
-    if (!isUserAdmin()) {
-      throw new Error("No tienes permisos de administrador.");
-    }
-    
-    const { id_tramo, nombre_tramo, hora_inicio, hora_fin } = tramoData;
-    
-    if (!id_tramo || !nombre_tramo || !hora_inicio || !hora_fin) {
-      throw new Error("Faltan campos obligatorios.");
-    }
-    
-    const ss = getDB();
-    const sheetTramos = ss.getSheetByName(SHEETS.TRAMOS);
-    
-    const tramos = sheetToObjects(sheetTramos);
-    if (tramos.find(t => t.id_tramo === id_tramo)) {
-      throw new Error(`Ya existe un tramo con el ID: ${id_tramo}`);
-    }
-    
-    const headers = sheetTramos.getRange(1, 1, 1, sheetTramos.getLastColumn()).getValues()[0];
-    const headerMap = {};
-    headers.forEach((h, i) => headerMap[h.toString().trim().toLowerCase()] = i);
-    
-    const nuevaFila = new Array(headers.length).fill("");
-    if (headerMap['id_tramo'] !== undefined) nuevaFila[headerMap['id_tramo']] = id_tramo;
-    if (headerMap['nombre_tramo'] !== undefined) nuevaFila[headerMap['nombre_tramo']] = nombre_tramo;
-    if (headerMap['hora_inicio'] !== undefined) nuevaFila[headerMap['hora_inicio']] = hora_inicio;
-    if (headerMap['hora_fin'] !== undefined) nuevaFila[headerMap['hora_fin']] = hora_fin;
-    
-    sheetTramos.appendRow(nuevaFila);
-    purgarCache();
-    
-    return { success: true, message: "Tramo creado con éxito." };
-    
-  } catch (error) {
-    Logger.log(`Error en createTramo: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-}
-
-function updateTramo(tramoData) {
-  try {
-    if (!isUserAdmin()) {
-      throw new Error("No tienes permisos de administrador.");
-    }
-    
-    const { id_tramo, nombre_tramo, hora_inicio, hora_fin } = tramoData;
-    
-    const ss = getDB();
-    const sheetTramos = ss.getSheetByName(SHEETS.TRAMOS);
-    const headers = sheetTramos.getRange(1, 1, 1, sheetTramos.getLastColumn()).getValues()[0];
-    const COL_ID = headers.indexOf("ID_Tramo");
-    
-    const idColumnRange = sheetTramos.getRange(2, COL_ID + 1, sheetTramos.getLastRow() - 1);
-    const textFinder = idColumnRange.createTextFinder(id_tramo).matchEntireCell(true);
-    const celda = textFinder.findNext();
-    
-    if (!celda) {
-      throw new Error("No se encontró el tramo.");
-    }
-    
-    const fila = celda.getRow();
-    const headerMap = {};
-    headers.forEach((h, i) => headerMap[h.toString().trim().toLowerCase()] = i + 1);
-    
-    if (nombre_tramo && headerMap['nombre_tramo']) sheetTramos.getRange(fila, headerMap['nombre_tramo']).setValue(nombre_tramo);
-    if (hora_inicio && headerMap['hora_inicio']) sheetTramos.getRange(fila, headerMap['hora_inicio']).setValue(hora_inicio);
-    if (hora_fin && headerMap['hora_fin']) sheetTramos.getRange(fila, headerMap['hora_fin']).setValue(hora_fin);
-    
-    purgarCache();
-    
-    return { success: true, message: "Tramo actualizado con éxito." };
-    
-  } catch (error) {
-    Logger.log(`Error en updateTramo: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-}
-
-function deleteTramo(idTramo) {
-  try {
-    if (!isUserAdmin()) {
-      throw new Error("No tienes permisos de administrador.");
-    }
-    
-    const ss = getDB();
-    const sheetTramos = ss.getSheetByName(SHEETS.TRAMOS);
-    const headers = sheetTramos.getRange(1, 1, 1, sheetTramos.getLastColumn()).getValues()[0];
-    const COL_ID = headers.indexOf("ID_Tramo");
-    
-    const idColumnRange = sheetTramos.getRange(2, COL_ID + 1, sheetTramos.getLastRow() - 1);
-    const textFinder = idColumnRange.createTextFinder(idTramo).matchEntireCell(true);
-    const celda = textFinder.findNext();
-    
-    if (!celda) {
-      throw new Error("No se encontró el tramo.");
-    }
-    
-    sheetTramos.deleteRow(celda.getRow());
-    purgarCache();
-    
-    return { success: true, message: "Tramo eliminado con éxito." };
-    
-  } catch (error) {
-    Logger.log(`Error en deleteTramo: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-}
-
-/* ============================================
-   GESTIÓN DE DISPONIBILIDAD
-   ============================================ */
-
-function updateDisponibilidad(dispData) {
-  try {
-    if (!isUserAdmin()) {
-      throw new Error("No tienes permisos de administrador.");
-    }
-    
-    const { id_recurso, dia_semana, id_tramo, permitido, razon_bloqueo } = dispData;
-    
-    const ss = getDB();
-    const sheetDisponibilidad = ss.getSheetByName(SHEETS.DISPONIBILIDAD);
-    
-    const disponibilidad = sheetToObjects(sheetDisponibilidad);
-    const index = disponibilidad.findIndex(d => 
-      d.id_recurso === id_recurso && 
-      d.dia_semana.toString() === dia_semana.toString() && 
-      d.id_tramo === id_tramo
-    );
-    
-    if (index === -1) {
-      throw new Error("No se encontró el registro de disponibilidad.");
-    }
-    
-    const fila = index + 2;
-    const headers = sheetDisponibilidad.getRange(1, 1, 1, sheetDisponibilidad.getLastColumn()).getValues()[0];
-    const headerMap = {};
-    headers.forEach((h, i) => headerMap[h.toString().trim().toLowerCase()] = i + 1);
-    
-    if (permitido && headerMap['permitido']) sheetDisponibilidad.getRange(fila, headerMap['permitido']).setValue(permitido);
-    if (razon_bloqueo !== undefined && headerMap['razon_bloqueo']) sheetDisponibilidad.getRange(fila, headerMap['razon_bloqueo']).setValue(razon_bloqueo);
-    
-    const cache = CacheService.getScriptCache();
-    cache.remove(CACHE_KEYS.DISPONIBILIDAD + id_recurso);
-    
-    return { success: true, message: "Disponibilidad actualizada con éxito." };
-    
-  } catch (error) {
-    Logger.log(`Error en updateDisponibilidad: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-}
-
-
 /* ===========================================
    GUARDADO TOTAL CURSOS (V3 - REEMPLAZO)
    =========================================== */
@@ -559,344 +252,6 @@ function saveAllCursos(data) {
     return { success: true };
     
   } catch (e) { return { success: false, error: e.toString() }; }
-}
-
-
-/* ============================================
-   GESTIÓN DE USUARIOS
-   ============================================ */
-
-function createUsuario(usuarioData) {
-  try {
-    if (!isUserAdmin()) {
-      throw new Error("No tienes permisos de administrador.");
-    }
-    
-    const { email_usuario, nombre_completo, activo, admin } = usuarioData;
-    
-    if (!email_usuario || !nombre_completo) {
-      throw new Error("Faltan campos obligatorios (Email, Nombre).");
-    }
-    
-    const ss = getDB();
-    const sheetUsuarios = ss.getSheetByName(SHEETS.USUARIOS);
-    
-    const usuarios = sheetToObjects(sheetUsuarios);
-    if (usuarios.find(u => u.email_usuario.toLowerCase() === email_usuario.toLowerCase())) {
-      throw new Error(`Ya existe un usuario con el email: ${email_usuario}`);
-    }
-    
-    sheetUsuarios.appendRow([email_usuario, nombre_completo, activo || 'Activo', admin || false]);
-    purgarCache();
-    
-    return { success: true, message: "Usuario creado con éxito." };
-    
-  } catch (error) {
-    Logger.log(`Error en createUsuario: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-}
-
-function updateUsuario(usuarioData) {
-  try {
-    if (!isUserAdmin()) {
-      throw new Error("No tienes permisos de administrador.");
-    }
-    
-    const { email_usuario, nombre_completo, activo, admin } = usuarioData;
-    
-    const ss = getDB();
-    const sheetUsuarios = ss.getSheetByName(SHEETS.USUARIOS);
-    const headers = sheetUsuarios.getRange(1, 1, 1, sheetUsuarios.getLastColumn()).getValues()[0];
-    const COL_EMAIL = headers.indexOf("Email_Usuario");
-    
-    const emailColumnRange = sheetUsuarios.getRange(2, COL_EMAIL + 1, sheetUsuarios.getLastRow() - 1);
-    const textFinder = emailColumnRange.createTextFinder(email_usuario).matchEntireCell(true);
-    const celda = textFinder.findNext();
-    
-    if (!celda) {
-      throw new Error("No se encontró el usuario.");
-    }
-    
-    const fila = celda.getRow();
-    const headerMap = {};
-    headers.forEach((h, i) => headerMap[h.toString().trim().toLowerCase()] = i + 1);
-    
-    if (nombre_completo && headerMap['nombre_completo']) sheetUsuarios.getRange(fila, headerMap['nombre_completo']).setValue(nombre_completo);
-    if (activo !== undefined && headerMap['activo']) sheetUsuarios.getRange(fila, headerMap['activo']).setValue(activo);
-    if (admin !== undefined && headerMap['admin']) sheetUsuarios.getRange(fila, headerMap['admin']).setValue(admin);
-    
-    purgarCache();
-    
-    return { success: true, message: "Usuario actualizado con éxito." };
-    
-  } catch (error) {
-    Logger.log(`Error en updateUsuario: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-}
-
-function deleteUsuario(emailUsuario) {
-  try {
-    if (!isUserAdmin()) {
-      throw new Error("No tienes permisos de administrador.");
-    }
-    
-    const ss = getDB();
-    const sheetUsuarios = ss.getSheetByName(SHEETS.USUARIOS);
-    const headers = sheetUsuarios.getRange(1, 1, 1, sheetUsuarios.getLastColumn()).getValues()[0];
-    const COL_EMAIL = headers.indexOf("Email_Usuario");
-    
-    const emailColumnRange = sheetUsuarios.getRange(2, COL_EMAIL + 1, sheetUsuarios.getLastRow() - 1);
-    const textFinder = emailColumnRange.createTextFinder(emailUsuario).matchEntireCell(true);
-    const celda = textFinder.findNext();
-    
-    if (!celda) {
-      throw new Error("No se encontró el usuario.");
-    }
-    
-    sheetUsuarios.deleteRow(celda.getRow());
-    purgarCache();
-    
-    return { success: true, message: "Usuario eliminado con éxito." };
-    
-  } catch (error) {
-    Logger.log(`Error en deleteUsuario: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-}
-
-/* ============================================
-   GESTIÓN DE RESERVAS (ADMIN)
-   ============================================ */
-
-function updateReservaAdmin(reservaData) {
-  try {
-    if (!isUserAdmin()) {
-      throw new Error("No tienes permisos de administrador.");
-    }
-    
-    const { id_reserva, id_recurso, fecha, id_tramo, cantidad, notas, curso, estado } = reservaData;
-    
-    const ss = getDB();
-    const sheetReservas = ss.getSheetByName(SHEETS.RESERVAS);
-    const headers = sheetReservas.getRange(1, 1, 1, sheetReservas.getLastColumn()).getValues()[0];
-    const COL_ID = headers.indexOf("ID_Reserva");
-    
-    const idColumnRange = sheetReservas.getRange(2, COL_ID + 1, sheetReservas.getLastRow() - 1);
-    const textFinder = idColumnRange.createTextFinder(id_reserva).matchEntireCell(true);
-    const celda = textFinder.findNext();
-    
-    if (!celda) {
-      throw new Error("No se encontró la reserva.");
-    }
-    
-    const fila = celda.getRow();
-    const headerMap = {};
-    headers.forEach((h, i) => headerMap[h.toString().trim().toLowerCase()] = i + 1);
-    
-    const rowData = sheetReservas.getRange(fila, 1, 1, headers.length).getValues()[0];
-    const emailUsuario = rowData[headers.indexOf("Email_Usuario")];
-    
-    const oldValues = {
-      id_recurso: rowData[headers.indexOf("ID_Recurso")],
-      fecha: rowData[headers.indexOf("Fecha")],
-      id_tramo: rowData[headers.indexOf("ID_Tramo")]
-    };
-    
-    if (id_recurso && headerMap['id_recurso']) sheetReservas.getRange(fila, headerMap['id_recurso']).setValue(id_recurso);
-    if (fecha && headerMap['fecha']) sheetReservas.getRange(fila, headerMap['fecha']).setValue(new Date(fecha + "T12:00:00Z"));
-    if (id_tramo && headerMap['id_tramo']) sheetReservas.getRange(fila, headerMap['id_tramo']).setValue(id_tramo);
-    if (cantidad && headerMap['cantidad']) sheetReservas.getRange(fila, headerMap['cantidad']).setValue(cantidad);
-    if (notas !== undefined && headerMap['notas']) sheetReservas.getRange(fila, headerMap['notas']).setValue(notas);
-    if (curso && headerMap['curso']) sheetReservas.getRange(fila, headerMap['curso']).setValue(curso);
-    if (estado && headerMap['estado']) sheetReservas.getRange(fila, headerMap['estado']).setValue(estado);
-    
-    if (emailUsuario && (id_recurso !== oldValues.id_recurso || fecha !== oldValues.fecha || id_tramo !== oldValues.id_tramo)) {
-      enviarNotificacionCambioReserva(emailUsuario, reservaData);
-    }
-    
-    purgarCache();
-    
-    return { success: true, message: "Reserva actualizada con éxito." };
-    
-  } catch (error) {
-    Logger.log(`Error en updateReservaAdmin: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-}
-
-function deleteReservaAdmin(idReserva) {
-  try {
-    if (!isUserAdmin()) {
-      throw new Error("No tienes permisos de administrador.");
-    }
-    
-    const ss = getDB();
-    const sheetReservas = ss.getSheetByName(SHEETS.RESERVAS);
-    const headers = sheetReservas.getRange(1, 1, 1, sheetReservas.getLastColumn()).getValues()[0];
-    const COL_ID = headers.indexOf("ID_Reserva");
-    
-    const idColumnRange = sheetReservas.getRange(2, COL_ID + 1, sheetReservas.getLastRow() - 1);
-    const textFinder = idColumnRange.createTextFinder(idReserva).matchEntireCell(true);
-    const celda = textFinder.findNext();
-    
-    if (!celda) {
-      throw new Error("No se encontró la reserva.");
-    }
-    
-    const fila = celda.getRow();
-    const rowData = sheetReservas.getRange(fila, 1, 1, headers.length).getValues()[0];
-    const emailUsuario = rowData[headers.indexOf("Email_Usuario")];
-    
-    sheetReservas.deleteRow(fila);
-    
-    if (emailUsuario) {
-      enviarNotificacionEliminacionReserva(emailUsuario, rowData, headers);
-    }
-    
-    purgarCache();
-    
-    return { success: true, message: "Reserva eliminada con éxito." };
-    
-  } catch (error) {
-    Logger.log(`Error en deleteReservaAdmin: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-}
-
-/* ============================================
-   NOTIFICACIONES POR EMAIL
-   ============================================ */
-
-function enviarNotificacionCambioReserva(emailUsuario, nuevosValores) {
-  try {
-    const staticData = getStaticData();
-    const authResult = checkUserAuthorization(emailUsuario);
-    
-    const recurso = staticData.recursos.find(r => r.id_recurso === nuevosValores.id_recurso) || { nombre: nuevosValores.id_recurso };
-    const tramo = staticData.tramos.find(t => t.id_tramo === nuevosValores.id_tramo) || { nombre_tramo: nuevosValores.id_tramo, hora_inicio: '', hora_fin: '' };
-    const fecha = new Date(nuevosValores.fecha + "T12:00:00Z");
-    const fechaFormateada = fecha.toLocaleDateString('es-ES', { 
-      day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' 
-    });
-    
-    const asunto = `⚠️ Cambio en tu Reserva: ${recurso.nombre}`;
-    const cuerpoHtml = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 10px 10px 0 0;">
-          <h1 style="color: white; margin: 0;">⚠️ Cambio en tu Reserva</h1>
-        </div>
-        <div style="background: white; padding: 30px; border: 1px solid #e0e0e0; border-top: none; border-radius: 0 0 10px 10px;">
-          <p>Hola <strong>${authResult.userName || ''}</strong>,</p>
-          <p>Un administrador ha <strong>modificado</strong> una de tus reservas.</p>
-          <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
-          <h3 style="color: #333;">Nuevos datos de la reserva:</h3>
-          <table style="width: 100%; border-collapse: collapse;">
-            <tr>
-              <td style="padding: 10px; background: #f9f9f9;"><strong>Recurso:</strong></td>
-              <td style="padding: 10px;">${recurso.nombre}</td>
-            </tr>
-            <tr>
-              <td style="padding: 10px; background: #f9f9f9;"><strong>Fecha:</strong></td>
-              <td style="padding: 10px;">${fechaFormateada}</td>
-            </tr>
-            <tr>
-              <td style="padding: 10px; background: #f9f9f9;"><strong>Tramo:</strong></td>
-              <td style="padding: 10px;">${tramo.nombre_tramo} (${tramo.hora_inicio} - ${tramo.hora_fin})</td>
-            </tr>
-            ${nuevosValores.curso ? `
-            <tr>
-              <td style="padding: 10px; background: #f9f9f9;"><strong>Curso:</strong></td>
-              <td style="padding: 10px;">${nuevosValores.curso}</td>
-            </tr>` : ''}
-            ${nuevosValores.cantidad > 1 ? `
-            <tr>
-              <td style="padding: 10px; background: #f9f9f9;"><strong>Cantidad:</strong></td>
-              <td style="padding: 10px;">${nuevosValores.cantidad}</td>
-            </tr>` : ''}
-            ${nuevosValores.notas ? `
-            <tr>
-              <td style="padding: 10px; background: #f9f9f9;"><strong>Notas:</strong></td>
-              <td style="padding: 10px;">${nuevosValores.notas}</td>
-            </tr>` : ''}
-          </table>
-          <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
-          <p style="font-size: 0.9em; color: #777;">Si tienes dudas sobre este cambio, contacta con el administrador del sistema.</p>
-        </div>
-      </div>
-    `;
-    
-    MailApp.sendEmail({
-      to: emailUsuario,
-      subject: asunto,
-      htmlBody: cuerpoHtml
-    });
-    
-    Logger.log(`Notificación de cambio enviada a ${emailUsuario}`);
-    
-  } catch (e) {
-    Logger.log(`Error al enviar notificación de cambio: ${e.message}`);
-  }
-}
-
-function enviarNotificacionEliminacionReserva(emailUsuario, rowData, headers) {
-  try {
-    const staticData = getStaticData();
-    const authResult = checkUserAuthorization(emailUsuario);
-    
-    const idRecurso = rowData[headers.indexOf("ID_Recurso")];
-    const idTramo = rowData[headers.indexOf("ID_Tramo")];
-    const fecha = new Date(rowData[headers.indexOf("Fecha")]);
-    
-    const recurso = staticData.recursos.find(r => r.id_recurso === idRecurso) || { nombre: idRecurso };
-    const tramo = staticData.tramos.find(t => t.id_tramo === idTramo) || { nombre_tramo: idTramo, hora_inicio: '', hora_fin: '' };
-    const fechaFormateada = fecha.toLocaleDateString('es-ES', { 
-      day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' 
-    });
-    
-    const asunto = `❌ Reserva Eliminada: ${recurso.nombre}`;
-    const cuerpoHtml = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 20px; border-radius: 10px 10px 0 0;">
-          <h1 style="color: white; margin: 0;">❌ Reserva Eliminada</h1>
-        </div>
-        <div style="background: white; padding: 30px; border: 1px solid #e0e0e0; border-top: none; border-radius: 0 0 10px 10px;">
-          <p>Hola <strong>${authResult.userName || ''}</strong>,</p>
-          <p>Un administrador ha <strong>eliminado</strong> una de tus reservas.</p>
-          <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
-          <h3 style="color: #333;">Datos de la reserva eliminada:</h3>
-          <table style="width: 100%; border-collapse: collapse;">
-            <tr>
-              <td style="padding: 10px; background: #f9f9f9;"><strong>Recurso:</strong></td>
-              <td style="padding: 10px;">${recurso.nombre}</td>
-            </tr>
-            <tr>
-              <td style="padding: 10px; background: #f9f9f9;"><strong>Fecha:</strong></td>
-              <td style="padding: 10px;">${fechaFormateada}</td>
-            </tr>
-            <tr>
-              <td style="padding: 10px; background: #f9f9f9;"><strong>Tramo:</strong></td>
-              <td style="padding: 10px;">${tramo.nombre_tramo} (${tramo.hora_inicio} - ${tramo.hora_fin})</td>
-            </tr>
-          </table>
-          <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
-          <p style="font-size: 0.9em; color: #777;">Si tienes dudas sobre esta eliminación, contacta con el administrador del sistema.</p>
-        </div>
-      </div>
-    `;
-    
-    MailApp.sendEmail({
-      to: emailUsuario,
-      subject: asunto,
-      htmlBody: cuerpoHtml
-    });
-    
-    Logger.log(`Notificación de eliminación enviada a ${emailUsuario}`);
-    
-  } catch (e) {
-    Logger.log(`Error al enviar notificación de eliminación: ${e.message}`);
-  }
 }
 
 
@@ -1058,7 +413,7 @@ function saveBatchDisponibilidad(cambios) {
     }
     
     if (nuevasFilas.length > 0) {
-      sheet.getRange(sheet.getLastRow() + 1, 1, nuevasFilas.length, 6).setValues(nuevasFilas);
+      anadirFilas_(sheet, nuevasFilas);
     }
     
     purgarCache();
@@ -1198,7 +553,7 @@ function saveBatchDisponibilidadConValidacion(cambios, forzar = false) {
 
     // Si hay conflictos y se fuerza, procesar las cancelaciones
     if (conflictos.tieneConflictos && forzar) {
-      const resultadoCancelaciones = procesarCancelacionesPorDisponibilidad(conflictos.afectados);
+      const resultadoCancelaciones = procesarCancelacionesPorDisponibilidad_(conflictos.afectados);
       if (!resultadoCancelaciones.success) {
         return resultadoCancelaciones;
       }
@@ -1218,7 +573,7 @@ function saveBatchDisponibilidadConValidacion(cambios, forzar = false) {
  * @param {Array} afectados - Lista de tramos afectados
  * @returns {Object}
  */
-function procesarCancelacionesPorDisponibilidad(afectados) {
+function procesarCancelacionesPorDisponibilidad_(afectados) {
   try {
     const sheetRecurrentes = getOrCreateSheetSolicitudesRecurrentes();
     const data = sheetRecurrentes.getDataRange().getValues();
@@ -1278,16 +633,16 @@ function procesarCancelacionesPorDisponibilidad(afectados) {
       }
 
       // Enviar notificación al usuario
-      enviarNotificacionCancelacionDisponibilidad(porSolicitud[idSolicitud]);
+      enviarNotificacionCancelacionDisponibilidad_(porSolicitud[idSolicitud]);
     }
 
     // También cancelar las reservas individuales futuras de esos tramos
-    cancelarReservasFuturasPorDisponibilidad(afectados);
+    cancelarReservasFuturasPorDisponibilidad_(afectados);
 
     return { success: true };
 
   } catch (e) {
-    Logger.log('Error en procesarCancelacionesPorDisponibilidad: ' + e.message);
+    Logger.log('Error en procesarCancelacionesPorDisponibilidad_: ' + e.message);
     return { success: false, error: e.message };
   }
 }
@@ -1295,7 +650,7 @@ function procesarCancelacionesPorDisponibilidad(afectados) {
 /**
  * Cancela reservas futuras individuales afectadas por cambio de disponibilidad
  */
-function cancelarReservasFuturasPorDisponibilidad(afectados) {
+function cancelarReservasFuturasPorDisponibilidad_(afectados) {
   try {
     const ss = getDB();
     const sheetReservas = ss.getSheetByName(SHEETS.RESERVAS);
@@ -1308,9 +663,10 @@ function cancelarReservasFuturasPorDisponibilidad(afectados) {
     const colFecha = headers.indexOf('fecha');
     const colIdTramo = headers.indexOf('id_tramo');
     const colEstado = headers.indexOf('estado');
-    const colTipoReserva = headers.indexOf('tipo_reserva');
+    // La columna 'tipo_reserva' no existe en Reservas: se identifica la recurrencia por su ID
+    const colIdSolRec = headers.indexOf('id_solicitud_recurrente');
 
-    if (colIdRecurso < 0 || colFecha < 0 || colIdTramo < 0 || colEstado < 0) return;
+    if (colIdRecurso < 0 || colFecha < 0 || colIdTramo < 0 || colEstado < 0 || colIdSolRec < 0) return;
 
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
@@ -1325,8 +681,8 @@ function cancelarReservasFuturasPorDisponibilidad(afectados) {
       // Aceptar tanto 'activa' como 'confirmada'
       if (estado !== 'activa' && estado !== 'confirmada') continue;
 
-      const tipoReserva = String(row[colTipoReserva] || '').toLowerCase();
-      if (tipoReserva !== 'recurrente') continue;
+      const idSolRec = String(row[colIdSolRec] || '').trim();
+      if (!idSolRec) continue; // Solo reservas generadas por una recurrencia
 
       const fechaReserva = new Date(row[colFecha]);
       if (isNaN(fechaReserva.getTime())) continue;
@@ -1338,6 +694,7 @@ function cancelarReservasFuturasPorDisponibilidad(afectados) {
 
       // Verificar si está afectada (debe coincidir recurso, día Y tramo)
       const esAfectada = afectados.some(a =>
+        String(a.id_solicitud || '').trim() === idSolRec &&
         String(a.id_recurso || '').trim() === idRecurso &&
         a.dia_letra === diaSemana &&
         String(a.id_tramo).trim() === idTramo
@@ -1350,14 +707,14 @@ function cancelarReservasFuturasPorDisponibilidad(afectados) {
     }
 
   } catch (e) {
-    Logger.log('Error en cancelarReservasFuturasPorDisponibilidad: ' + e.message);
+    Logger.log('Error en cancelarReservasFuturasPorDisponibilidad_: ' + e.message);
   }
 }
 
 /**
  * Envía notificación al usuario sobre cancelación por disponibilidad
  */
-function enviarNotificacionCancelacionDisponibilidad(info) {
+function enviarNotificacionCancelacionDisponibilidad_(info) {
   try {
     const email = info.email;
     const nombre = info.nombre || email;
@@ -1404,35 +761,47 @@ function saveBatchUsuarios(usuariosList) {
   try {
     if (!isUserAdmin()) throw new Error("Permiso denegado");
     
+    var lock = LockService.getScriptLock();
+    lock.waitLock(15000);
+    try {
     var ss = getDB();
     var sheet = ss.getSheetByName(SHEETS.USUARIOS);
+    var lastRow = sheet.getLastRow();
+
+    // Conservar la Especialidad (columna E) de cada usuario por su email:
+    // antes solo se reescribían A-D y la columna E quedaba desplazada al borrar usuarios.
+    var especialidadPorEmail = {};
+    if (lastRow > 1) {
+      sheet.getRange(2, 1, lastRow - 1, 5).getValues().forEach(function (r) {
+        var em = String(r[1]).toLowerCase().trim();
+        if (em) especialidadPorEmail[em] = r[4];
+      });
+    }
     
     var dataToSave = [];
     
     for (var i = 0; i < usuariosList.length; i++) {
       var u = usuariosList[i];
+      var email = String(u.Email || u.Email_Usuario || '').trim();
       
-      // Normalizamos booleanos
-      var esActivo = (u.Activo === true || u.Activo === "TRUE" || u.Activo === "Si");
-      var esAdmin = (u.Admin === true || u.Admin === "TRUE" || u.Admin === "Si");
-      
-      // AQUÍ ESTÁ EL CAMBIO: Primero Nombre, luego Email
       dataToSave.push([
-        u.Nombre || u.Nombre_Completo,  // Columna A: Nombre
-        u.Email || u.Email_Usuario,     // Columna B: Email
-        esActivo,                       // Columna C: Activo
-        esAdmin                         // Columna D: Admin
+        u.Nombre || u.Nombre_Completo,          // Columna A: Nombre
+        email,                                  // Columna B: Email
+        esValorVerdadero_(u.Activo),            // Columna C: Activo
+        esValorVerdadero_(u.Admin),             // Columna D: Admin
+        especialidadPorEmail[email.toLowerCase()] || '' // Columna E: Especialidad
       ]);
     }
     
-    // Guardar...
-    var lastRow = sheet.getLastRow();
     if (lastRow > 1) {
-      sheet.getRange(2, 1, lastRow - 1, 4).clearContent();
+      sheet.getRange(2, 1, lastRow - 1, 5).clearContent();
     }
     
     if (dataToSave.length > 0) {
-      sheet.getRange(2, 1, dataToSave.length, 4).setValues(dataToSave);
+      sheet.getRange(2, 1, dataToSave.length, 5).setValues(dataToSave);
+    }
+    } finally {
+      lock.releaseLock();
     }
     
     purgarCache();
@@ -1446,7 +815,12 @@ function saveBatchUsuarios(usuariosList) {
 /* ==========================================================
    CANCELAR RESERVA (CON CRUCE DE DATOS Y NOMBRES REALES 🕵️‍♂️)
    ========================================================== */
+// Envoltorio con LockService: evita dobles reservas / filas desplazadas si coincide con otra escritura
 function adminCancelarReserva(idReserva) {
+  return conLockScript_(() => adminCancelarReservaSinLock_(idReserva));
+}
+
+function adminCancelarReservaSinLock_(idReserva) {
   try {
     if (!isUserAdmin()) throw new Error("Permiso denegado");
     
@@ -1532,7 +906,7 @@ function adminCancelarReserva(idReserva) {
           <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; padding: 20px; border-radius: 8px;">
             <h2 style="color: #d32f2f; margin-top: 0;">Reserva Cancelada</h2>
             
-            <p>Hola <strong>${reservaInfo.usuario}</strong>,</p>
+            <p>Hola <strong>${escHtml_(reservaInfo.usuario)}</strong>,</p>
             
             <p>Te informamos que <b>un administrador ha cancelado tu reserva</b>.</p>
             
@@ -1540,7 +914,7 @@ function adminCancelarReserva(idReserva) {
             
             <p style="font-weight: bold; margin-bottom: 10px;">Detalles de la reserva eliminada:</p>
             <ul style="background-color: #fff1f0; padding: 15px 30px; border-radius: 5px; list-style-type: none; border: 1px solid #ffccc7;">
-              <li style="margin-bottom: 8px;">📦 <strong>Recurso:</strong> ${reservaInfo.recurso}</li>
+              <li style="margin-bottom: 8px;">📦 <strong>Recurso:</strong> ${escHtml_(reservaInfo.recurso)}</li>
               <li style="margin-bottom: 8px;">📅 <strong>Fecha:</strong> ${reservaInfo.fecha}</li>
               <li>⏰ <strong>Tramo:</strong> ${reservaInfo.tramo}</li>
             </ul>
@@ -1633,7 +1007,7 @@ function saveBatchConfig(configList) {
  * Migra las reservas recurrentes existentes para añadir el ID_Solicitud_Recurrente
  * basándose en el campo Notas que contiene "Reserva recurrente: [ID]"
  */
-function migrarIdSolicitudRecurrente() {
+function migrarIdSolicitudRecurrente_() {
   try {
     const ss = getDB();
     const sheet = ss.getSheetByName(SHEETS.RESERVAS);
@@ -1691,9 +1065,12 @@ function migrarIdSolicitudRecurrente() {
     });
 
     // Aplicar actualizaciones
-    updates.forEach(u => {
-      sheet.getRange(u.fila, colIdSolicitud + 1).setValue(u.valor);
-    });
+    if (updates.length > 0) {
+      // Una sola escritura de la columna completa en vez de un setValue por fila
+      const columna = data.map(r => [r[colIdSolicitud]]);
+      updates.forEach(u => { columna[u.fila - 2][0] = u.valor; });
+      sheet.getRange(2, colIdSolicitud + 1, columna.length, 1).setValues(columna);
+    }
 
     Logger.log(`✅ Migración completada: ${migradas} reservas actualizadas`);
     return { success: true, message: `Migración completada`, migradas: migradas };
@@ -1775,8 +1152,9 @@ function getDatosMatrizUnificada(idRecurso) {
       if (sheetUsers && sheetUsers.getLastRow() > 1) {
         const usersData = sheetUsers.getRange(2, 1, sheetUsers.getLastRow() - 1, 5).getValues();
         usersData.forEach(u => {
-          usuariosMap.set(String(u[0]).trim().toLowerCase(), {
-            nombre: String(u[1]).trim(),
+          // Usuarios: A=Nombre, B=Email, E=Especialidad
+          usuariosMap.set(String(u[1]).trim().toLowerCase(), {
+            nombre: String(u[0]).trim(),
             area: String(u[4]).trim() || ''
           });
         });
@@ -1834,87 +1212,6 @@ function getDatosMatrizUnificada(idRecurso) {
 
   } catch (error) {
     Logger.log('Error en getDatosMatrizUnificada: ' + error.message);
-    return { success: false, error: error.message };
-  }
-}
-
-/**
- * Obtiene TODAS las solicitudes pendientes de todos los recursos.
- * Para el badge global y el panel de pendientes.
- */
-function getSolicitudesPendientesGlobal() {
-  try {
-    const email = Session.getActiveUser().getEmail();
-    const authResult = checkUserAuthorization(email);
-
-    if (!authResult || !authResult.isAdmin) {
-      return { success: false, error: "No tienes permisos de administrador." };
-    }
-
-    const sheetSol = getOrCreateSheetSolicitudesRecurrentes();
-    let pendientes = [];
-
-    if (sheetSol && sheetSol.getLastRow() > 1) {
-      const data = sheetSol.getRange(2, 1, sheetSol.getLastRow() - 1, 16).getValues();
-      const ss = getDB();
-
-      // Mapa de recursos para obtener iconos y nombres
-      const sheetRec = ss.getSheetByName(SHEETS.RECURSOS);
-      const recursosMap = new Map();
-      if (sheetRec && sheetRec.getLastRow() > 1) {
-        const recData = sheetRec.getRange(2, 1, sheetRec.getLastRow() - 1, 4).getValues();
-        recData.forEach(r => {
-          recursosMap.set(String(r[0]).trim(), {
-            nombre: String(r[1]).trim(),
-            icono: String(r[3]).trim() || 'mdi:cube-outline'
-          });
-        });
-      }
-
-      // Mapa de usuarios para obtener área
-      const sheetUsers = ss.getSheetByName(SHEETS.USUARIOS);
-      const usuariosMap = new Map();
-      if (sheetUsers && sheetUsers.getLastRow() > 1) {
-        const usersData = sheetUsers.getRange(2, 1, sheetUsers.getLastRow() - 1, 5).getValues();
-        usersData.forEach(u => {
-          usuariosMap.set(String(u[0]).trim().toLowerCase(), {
-            area: String(u[4]).trim() || ''
-          });
-        });
-      }
-
-      data.forEach(row => {
-        const estado = String(row[COLS_SOLICITUDES.ESTADO] || '').toLowerCase();
-        if (estado !== 'pendiente') return;
-
-        const idRecurso = String(row[COLS_SOLICITUDES.ID_RECURSO] || '');
-        const recursoData = recursosMap.get(idRecurso) || { nombre: idRecurso, icono: 'mdi:cube-outline' };
-        const emailUsuario = String(row[COLS_SOLICITUDES.EMAIL_USUARIO] || '').toLowerCase();
-        const userData = usuariosMap.get(emailUsuario) || { area: '' };
-
-        pendientes.push({
-          id_solicitud: String(row[COLS_SOLICITUDES.ID_SOLICITUD] || ''),
-          id_recurso: idRecurso,
-          nombre_recurso: String(row[COLS_SOLICITUDES.NOMBRE_RECURSO] || '') || recursoData.nombre,
-          icono_recurso: recursoData.icono,
-          nombre_usuario: String(row[COLS_SOLICITUDES.NOMBRE_USUARIO] || ''),
-          email_usuario: String(row[COLS_SOLICITUDES.EMAIL_USUARIO] || ''),
-          area_usuario: userData.area,
-          dias_semana: String(row[COLS_SOLICITUDES.DIAS_SEMANA] || ''),
-          id_tramo: String(row[COLS_SOLICITUDES.ID_TRAMO] || ''),
-          nombre_tramo: String(row[COLS_SOLICITUDES.NOMBRE_TRAMO] || ''),
-          fecha_inicio: row[COLS_SOLICITUDES.FECHA_INICIO] instanceof Date ? row[COLS_SOLICITUDES.FECHA_INICIO].toISOString() : '',
-          fecha_fin: row[COLS_SOLICITUDES.FECHA_FIN] instanceof Date ? row[COLS_SOLICITUDES.FECHA_FIN].toISOString() : '',
-          motivo: String(row[COLS_SOLICITUDES.MOTIVO] || ''),
-          fecha_solicitud: row[COLS_SOLICITUDES.FECHA_SOLICITUD] instanceof Date ? row[COLS_SOLICITUDES.FECHA_SOLICITUD].toISOString() : ''
-        });
-      });
-    }
-
-    return { success: true, pendientes: pendientes };
-
-  } catch (error) {
-    Logger.log('Error en getSolicitudesPendientesGlobal: ' + error.message);
     return { success: false, error: error.message };
   }
 }
