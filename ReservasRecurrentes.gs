@@ -26,7 +26,8 @@ const COLS_SOLICITUDES = {
   FECHA_SOLICITUD: 12,
   FECHA_RESOLUCION: 13,
   ADMIN_RESOLUTOR: 14,
-  NOTAS_ADMIN: 15
+  NOTAS_ADMIN: 15,
+  CANTIDAD: 16   // v1.6.1: unidades por sesión (recursos agrupados, p. ej. carros de portátiles)
 };
 
 /**
@@ -48,7 +49,8 @@ const HEADERS_SOLICITUDES = [
   'Fecha_Solicitud',
   'Fecha_Resolucion',
   'Admin_Resolutor',
-  'Notas_Admin'
+  'Notas_Admin',
+  'Cantidad'
 ];
 
 /* ============================================
@@ -84,9 +86,31 @@ function getOrCreateSheetSolicitudesRecurrentes() {
     sheet.setColumnWidth(11, 200); // Motivo
 
     Logger.log('✅ Hoja SolicitudesRecurrentes creada correctamente');
+  } else if (PropertiesService.getScriptProperties().getProperty('COL_CANTIDAD_REC_OK') !== 'true') {
+    // Instalaciones anteriores: añadir la cabecera "Cantidad" (una sola vez)
+    const celda = sheet.getRange(1, COLS_SOLICITUDES.CANTIDAD + 1);
+    if (!String(celda.getValue()).trim()) celda.setValue('Cantidad').setFontWeight('bold').setBackground('#f3f4f6');
+    PropertiesService.getScriptProperties().setProperty('COL_CANTIDAD_REC_OK', 'true');
   }
 
   return sheet;
+}
+
+/**
+ * Cantidad válida para un recurso: en los agrupados (carros...) entre 1 y su capacidad;
+ * en el resto siempre 1.
+ */
+function esRecursoAgrupado_(recurso) {
+  return !!recurso && String(recurso.tipo || '').toLowerCase() === 'agrupado';
+}
+
+function normalizarCantidadRecurrente_(recurso, cantidad) {
+  if (!esRecursoAgrupado_(recurso)) return 1;
+  const capacidad = parseInt(recurso.capacidad, 10) || 1;
+  const n = parseInt(cantidad, 10) || 1;
+  if (n < 1) return 1;
+  if (n > capacidad) throw new Error(`La cantidad no puede superar la capacidad del recurso (${capacidad}).`);
+  return n;
 }
 
 /* ============================================
@@ -193,7 +217,8 @@ function crearSolicitudRecurrente(datos) {
       new Date(),
       '',
       '',
-      ''
+      '',
+      normalizarCantidadRecurrente_(recurso, datos.cantidad)
     ];
 
     sheet.appendRow(nuevaFila);
@@ -216,7 +241,8 @@ function crearSolicitudRecurrente(datos) {
       infoTramos: infoTramos,
       fechaInicio: fechaInicio,
       fechaFin: fechaFin,
-      motivo: datos.motivo
+      motivo: datos.motivo,
+      cantidad: nuevaFila[COLS_SOLICITUDES.CANTIDAD]
     });
 
     Logger.log('✅ Solicitud recurrente creada: ' + idSolicitud);
@@ -338,7 +364,8 @@ function aprobarSolicitudRecurrente(idSolicitud, notasAdmin) {
           fecha_inicio: data[i][COLS_SOLICITUDES.FECHA_INICIO],
           fecha_fin: data[i][COLS_SOLICITUDES.FECHA_FIN],
           motivo: data[i][COLS_SOLICITUDES.MOTIVO],
-          estado: data[i][COLS_SOLICITUDES.ESTADO]
+          estado: data[i][COLS_SOLICITUDES.ESTADO],
+          cantidad: parseInt(data[i][COLS_SOLICITUDES.CANTIDAD], 10) || 1
         };
         break;
       }
@@ -763,6 +790,12 @@ function generarReservasDesdeRecurrenteSinLock_(solicitud) {
     // Obtener reservas existentes para verificar disponibilidad
     const reservasExistentes = getActiveReservations_();
 
+    // Recursos agrupados (carros...): se comprueban las UNIDADES libres, no solo si hay alguna reserva
+    const recursoRec = getDatosEstaticos_().recursos.find(r => String(r.id_recurso) === String(solicitud.id_recurso));
+    const agrupado = esRecursoAgrupado_(recursoRec);
+    const capacidadRec = agrupado ? (parseInt(recursoRec.capacidad, 10) || 1) : 1;
+    const cantidadRec = agrupado ? Math.max(1, parseInt(solicitud.cantidad, 10) || 1) : 1;
+
     // Obtener headers de la hoja de reservas para mapear columnas
     const headersReservas = sheetReservas.getRange(1, 1, 1, sheetReservas.getLastColumn()).getValues()[0];
     const headerMap = {};
@@ -792,12 +825,16 @@ function generarReservasDesdeRecurrenteSinLock_(solicitud) {
         const tramosParaEsteDia = seleccionesMap[diaLetra]; // Array de tramos
 
         for (const tramoActual of tramosParaEsteDia) {
-          // Verificar si ya hay una reserva para ese recurso/fecha/tramo
-          const yaReservado = reservasExistentes.some(r =>
+          // Verificar si ya hay reservas para ese recurso/fecha/tramo
+          const reservasHueco = reservasExistentes.filter(r =>
             String(r.id_recurso) === String(solicitud.id_recurso) &&
             r.fecha === fechaISO &&
             String(r.id_tramo) === String(tramoActual)
           );
+          const unidadesOcupadas = reservasHueco.reduce((t, r) => t + (parseInt(r.cantidad, 10) || 1), 0);
+          const yaReservado = agrupado
+            ? (unidadesOcupadas + cantidadRec > capacidadRec)
+            : reservasHueco.length > 0;
 
           if (yaReservado) {
             Logger.log(`[generarReservas] SALTADA: ${fechaISO} ${diaLetra}:${tramoActual} (ya reservado)`);
@@ -820,7 +857,7 @@ function generarReservasDesdeRecurrenteSinLock_(solicitud) {
             if (headerMap['fecha'] !== undefined) nuevaFila[headerMap['fecha']] = fechaReserva;
             if (headerMap['curso'] !== undefined) nuevaFila[headerMap['curso']] = '';
             if (headerMap['id_tramo'] !== undefined) nuevaFila[headerMap['id_tramo']] = tramoActual;
-            if (headerMap['cantidad'] !== undefined) nuevaFila[headerMap['cantidad']] = 1;
+            if (headerMap['cantidad'] !== undefined) nuevaFila[headerMap['cantidad']] = cantidadRec;
             if (headerMap['estado'] !== undefined) nuevaFila[headerMap['estado']] = 'Confirmada';
             if (headerMap['notas'] !== undefined) nuevaFila[headerMap['notas']] = 'Reserva recurrente: ' + solicitud.id_solicitud;
             if (headerMap['timestamp'] !== undefined) nuevaFila[headerMap['timestamp']] = new Date();
@@ -835,7 +872,7 @@ function generarReservasDesdeRecurrenteSinLock_(solicitud) {
               Fecha: fechaISO,
               Curso: '',
               ID_Tramo: String(tramoActual),
-              Cantidad: 1,
+              Cantidad: cantidadRec,
               Estado: 'Confirmada',
               Notas: 'Reserva recurrente: ' + solicitud.id_solicitud,
               ID_Solicitud_Recurrente: String(solicitud.id_solicitud)
@@ -1173,7 +1210,8 @@ function crearRecurrenteDirecta(datos) {
       new Date(),
       new Date(),
       adminEmail,
-      datos.notas_admin || 'Creación directa'
+      datos.notas_admin || 'Creación directa',
+      normalizarCantidadRecurrente_(recurso, datos.cantidad)
     ];
 
     sheet.appendRow(nuevaFila);
@@ -1186,7 +1224,8 @@ function crearRecurrenteDirecta(datos) {
       dias_semana: diasStr,
       id_tramo: primerTramoId, // Se usa para formato antiguo, el nuevo usa dias_semana
       fecha_inicio: fechaInicio,
-      fecha_fin: fechaFin
+      fecha_fin: fechaFin,
+      cantidad: nuevaFila[COLS_SOLICITUDES.CANTIDAD]
     };
 
     const resultado = generarReservasDesdeRecurrente_(solicitud);
@@ -1264,7 +1303,8 @@ function getConflictosRecurrencia(idRecurso) {
                 dia: dia.toUpperCase(),
                 tramo: tramo,
                 usuario: sol.nombre_usuario || sol.email_usuario,
-                idSolicitud: sol.id_solicitud
+                idSolicitud: sol.id_solicitud,
+                cantidad: parseInt(sol.cantidad, 10) || 1
               });
             }
           });
@@ -1278,7 +1318,8 @@ function getConflictosRecurrencia(idRecurso) {
                 dia: dia,
                 tramo: tramo,
                 usuario: sol.nombre_usuario || sol.email_usuario,
-                idSolicitud: sol.id_solicitud
+                idSolicitud: sol.id_solicitud,
+                cantidad: parseInt(sol.cantidad, 10) || 1
               });
             }
           });
@@ -1398,6 +1439,10 @@ function enviarEmailNuevaSolicitudRecurrente_(datos) {
             <td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Motivo</strong></td>
             <td style="padding: 10px; border: 1px solid #e5e7eb;">${escHtml_(datos.motivo)}</td>
           </tr>
+          ${datos.cantidad > 1 ? `<tr>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;"><strong>Cantidad</strong></td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb;">${datos.cantidad} unidades por sesión</td>
+          </tr>` : ''}
         </table>
 
         <div style="text-align: center; margin: 25px 0;">

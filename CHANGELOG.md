@@ -1,5 +1,15 @@
 # Historial de versiones
 
+## v1.6.1 — Cantidad en reservas recurrentes
+
+### Nuevo
+- En los recursos **agrupados** (carros de portátiles, tablets…) las reservas recurrentes permiten elegir la **cantidad por sesión**, tanto al crearlas como administrador como al solicitarlas un profesor. El correo de solicitud al admin muestra la cantidad pedida.
+
+### Corregido
+- En recursos agrupados, una sola reserva existente (p. ej. 1 portátil) hacía saltarse la sesión recurrente entera aunque quedasen unidades libres. Ahora se comprueban las unidades disponibles.
+
+**Archivos a actualizar desde la v1.6.0:** `ReservasRecurrentes.gs`, `admin-scripts.html`, `scripts.html` (y `Codigo.gs` solo si quieres que el pie muestre "v1.6.1").
+
 ## v1.6.0 — Acceso con código de verificación
 
 ### Nuevo
