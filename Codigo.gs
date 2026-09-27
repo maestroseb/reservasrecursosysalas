@@ -8,7 +8,7 @@
  */
 
 // Versión de la aplicación (se muestra al pie de la página)
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.6.1';
 
 function getDB() {
   return SpreadsheetApp.getActiveSpreadsheet();

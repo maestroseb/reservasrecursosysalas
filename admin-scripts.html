@@ -4967,6 +4967,62 @@ async function cargarConflictosRecurso(idRecurso) {
   actualizarContadorRecurrenteAdmin();
 }
 
+/* ---------- Cantidad en recurrentes (recursos agrupados, p. ej. carros) ---------- */
+function recursoRecDirectaActual() {
+  const id = (document.getElementById('recDirectaRecurso') || {}).value;
+  return (AdminState.recursos || []).find(r => String(r.id_recurso) === String(id)) || null;
+}
+function esAgrupadoRec(recurso) {
+  return !!recurso && String(recurso.tipo || '').toLowerCase() === 'agrupado';
+}
+// Unidades ya comprometidas por otras recurrencias aprobadas en ese día/tramo
+function unidadesRecurrentesUsadas(conflictos, dia, tramo) {
+  return (conflictos.recurrenciasOcupadas || [])
+    .filter(c => c.dia === dia && c.tramo === tramo)
+    .reduce((t, c) => t + (parseInt(c.cantidad, 10) || 1), 0);
+}
+// Devuelve la recurrencia que bloquea la casilla, o null si se puede elegir
+// (en recursos agrupados solo se bloquea cuando no quedan unidades)
+function ocupacionRecurrenteAdmin(dia, tramo) {
+  const primera = conflictosRecurrenteAdmin.recurrenciasOcupadas.find(c => c.dia === dia && c.tramo === tramo);
+  if (!primera) return null;
+  const recurso = recursoRecDirectaActual();
+  if (!esAgrupadoRec(recurso)) return primera;
+  const capacidad = parseInt(recurso.capacidad, 10) || 1;
+  return unidadesRecurrentesUsadas(conflictosRecurrenteAdmin, dia, tramo) >= capacidad
+    ? Object.assign({}, primera, { usuario: 'sin unidades libres' }) : null;
+}
+// Crea (una vez) y muestra/oculta el campo Cantidad según el recurso elegido
+function actualizarCampoCantidadRecAdmin() {
+  let wrap = document.getElementById('recDirectaCantidadWrap');
+  if (!wrap) {
+    const ref = document.getElementById('recDirectaUsuario');
+    if (!ref || !ref.parentElement || !ref.parentElement.parentElement) return;
+    wrap = document.createElement('div');
+    wrap.id = 'recDirectaCantidadWrap';
+    wrap.className = 'hidden';
+    wrap.innerHTML = `
+      <label class="flex items-center gap-1.5 text-sm font-medium text-gray-700 mb-1.5">
+        <iconify-icon icon="mdi:counter"></iconify-icon> Cantidad por sesión <span id="recDirectaCantidadMax" class="text-xs text-gray-400"></span>
+      </label>
+      <input type="number" id="recDirectaCantidad" min="1" value="1"
+        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm">`;
+    ref.parentElement.parentElement.insertAdjacentElement('afterend', wrap);
+  }
+  const recurso = recursoRecDirectaActual();
+  const input = document.getElementById('recDirectaCantidad');
+  if (esAgrupadoRec(recurso)) {
+    const capacidad = parseInt(recurso.capacidad, 10) || 1;
+    input.max = capacidad;
+    if ((parseInt(input.value, 10) || 1) > capacidad) input.value = capacidad;
+    document.getElementById('recDirectaCantidadMax').textContent = `(máx. ${capacidad})`;
+    wrap.classList.remove('hidden');
+  } else {
+    input.value = 1;
+    wrap.classList.add('hidden');
+  }
+}
+
 function abrirModalRecurrenteDirecta() {
   // Resetear selecciones
   seleccionesRecurrenteAdmin.clear();
@@ -4982,8 +5038,10 @@ function abrirModalRecurrenteDirecta() {
 
   // Listener para cargar conflictos al cambiar recurso
   selectRecurso.onchange = function() {
+    actualizarCampoCantidadRecAdmin();
     cargarConflictosRecurso(this.value);
   };
+  actualizarCampoCantidadRecAdmin();
 
   // Resetear conflictos
   conflictosRecurrenteAdmin = { recurrenciasOcupadas: [], nodisponibles: [] };
@@ -5076,10 +5134,8 @@ function generarMatrizRecurrenteAdmin() {
       const celdaId = `${tramo.id_tramo}-${dia}`;
       td.id = `celda-rec-admin-${celdaId}`;
 
-      // Verificar si está ocupada por recurrencia
-      const ocupadaPor = conflictosRecurrenteAdmin.recurrenciasOcupadas.find(
-        c => c.dia === dia && c.tramo === tramo.id_tramo
-      );
+      // Verificar si está ocupada por recurrencia (en agrupados, solo si no quedan unidades)
+      const ocupadaPor = ocupacionRecurrenteAdmin(dia, tramo.id_tramo);
 
       // Verificar si no está disponible
       const noDisponible = conflictosRecurrenteAdmin.nodisponibles.find(
@@ -5123,9 +5179,7 @@ function toggleCeldaRecurrenteAdmin(idTramo, dia) {
   if (!celda) return;
 
   // Verificar que no esté bloqueada
-  const ocupada = conflictosRecurrenteAdmin.recurrenciasOcupadas.find(
-    c => c.dia === dia && c.tramo === idTramo
-  );
+  const ocupada = ocupacionRecurrenteAdmin(dia, idTramo);
   const noDisponible = conflictosRecurrenteAdmin.nodisponibles.find(
     c => c.dia === dia && c.tramo === idTramo
   );
@@ -5201,13 +5255,34 @@ async function guardarRecurrenteDirecta() {
   btn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>Generando...';
 
   try {
+    // Cantidad por sesión (solo recursos agrupados): comprobar unidades libres frente a otras recurrencias
+    const recursoSel = recursoRecDirectaActual();
+    let cantidad = 1;
+    if (esAgrupadoRec(recursoSel)) {
+      const capacidad = parseInt(recursoSel.capacidad, 10) || 1;
+      cantidad = parseInt((document.getElementById('recDirectaCantidad') || {}).value, 10) || 1;
+      if (cantidad < 1 || cantidad > capacidad) {
+        btn.disabled = false; btn.innerHTML = textoOriginal;
+        return showToast('error', `La cantidad debe estar entre 1 y ${capacidad}`);
+      }
+      const sinHueco = seleccionesArray.filter(sel => {
+        const [dia, tramo] = sel.split(':');
+        return unidadesRecurrentesUsadas(conflictosRecurrenteAdmin, dia, tramo) + cantidad > capacidad;
+      });
+      if (sinHueco.length) {
+        btn.disabled = false; btn.innerHTML = textoOriginal;
+        return showToast('error', `No quedan ${cantidad} unidades libres en: ${sinHueco.join(', ')}`);
+      }
+    }
+
     const datos = {
       id_recurso: recurso,
       email_usuario: usuario,
       dias_semana: seleccionesArray.join(','), // Formato: "L:T001,M:T002"
       fecha_inicio: new Date().toISOString().split('T')[0], // Siempre desde hoy
       fecha_fin: fechaFin,
-      notas_admin: notas
+      notas_admin: notas,
+      cantidad: cantidad
     };
 
     const result = await new Promise((resolve, reject) => {
